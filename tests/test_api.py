@@ -57,3 +57,21 @@ def test_config_rejects_duplicate_symbols():
 def test_bad_request():
     r = client.post("/api/compare", json={"data": {**DATA, "timeframe": "7Min"}, "strategies": {"ema_cross": {}}})
     assert r.status_code == 422
+
+
+def _wait(job):
+    for _ in range(300):
+        job = client.get(f"/api/jobs/{job['id']}").json()
+        if job["status"] in ("done", "error"):
+            return job
+        time.sleep(0.1)
+    return job
+
+
+def test_walkforward_job():
+    r = client.post("/api/walkforward", json={"data": DATA, "strategy": "ema_cross", "train_bars": 400, "test_bars": 100})
+    job = _wait(r.json())
+    assert job["status"] == "done", job
+    res = job["result"]
+    assert set(res["equity"]["series"]) == {"walk_forward", "fixed", "buy_and_hold"}
+    assert res["windows"][0]["params"]["fast"] in (5, 9, 12)

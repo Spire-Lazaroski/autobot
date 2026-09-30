@@ -8,3 +8,4 @@ STOP
 node_modules/
 web/dist/
 *.yaml.tmp
+PROMPT_dashboard.md

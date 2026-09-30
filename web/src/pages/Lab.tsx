@@ -164,7 +164,7 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
           onClick={(e) => e.points?.[0] && onOpen(e.points[0].y, e.points[0].x)}
           data={[{
             z: heat, x: syms, y: strats, type: "heatmap", colorscale: [[0, "#ef4444"], [0.5, "#161c25"], [1, "#22c55e"]],
-            zmid: 0, text: heatText, texttemplate: "%{text}", textfont: { size: 10, family: "Consolas, monospace" },
+            zmid: 0, text: heatText, texttemplate: "%{text}", textfont: { size: 10, family: "Consolas, monospace", color: "#e5e7eb" },
             hovertemplate: "%{y} · %{x}: %{z:.2f}%<extra></extra>", xgap: 2, ygap: 2, colorbar: { thickness: 8, ticksuffix: "%" },
           }]}
           layout={{ hovermode: "closest", yaxis: { autorange: "reversed", tickfont: { family: "Consolas, monospace", size: 10 } }, margin: { l: 150, r: 12, t: 8, b: 32 } }} />

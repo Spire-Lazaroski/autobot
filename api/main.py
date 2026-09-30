@@ -16,13 +16,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from autobot.backtest import (CostModel, best_per_strategy, compare_strategies, fills, metrics,
-                              parameter_search, round_trips, run_backtest)
+                              parameter_search, round_trips, run_backtest, walk_forward)
 from autobot.data import TIMEFRAMES, fetch_bars, synthetic_bars
 from autobot.indicators import plot_indicators
 from autobot.strategies import STRATEGIES, get_signal
 
 from . import jobs
-from .models import CompareReq, DataReq, DetailReq, SearchReq
+from .models import CompareReq, DataReq, DetailReq, SearchReq, WalkForwardReq
 from .serialize import frame, plain, records, times, values
 from .settings import CONFIG_PATH, WEB_PORT
 
@@ -172,6 +172,7 @@ def search(req: SearchReq):
                                progress=progress, grids=req.grids)
         if res.empty:
             return {"results": [], "best": []}
+        res["test_trades_total"] = res["test_trades"] * len(data)  # test_trades is a per-symbol mean
         best = best_per_strategy(res)
         return {"results": records(res.rename(columns={"_params": "param_values"})),
                 "best": records(best.rename(columns={"_params": "param_values"})),
@@ -179,6 +180,27 @@ def search(req: SearchReq):
                 "low_trades_threshold": LOW_TRADES}
 
     return jobs.submit("search", work).public()
+
+
+@app.post("/api/walkforward")
+def walkforward(req: WalkForwardReq):
+    spec = _strategy(req.strategy)
+    if not (req.grid or spec.grid):
+        raise HTTPException(422, f"{req.strategy} has no parameter grid to re-optimize")
+    data = load(req.data)
+    costs = CostModel(req.fee_bps, req.slippage_bps)
+
+    def work(progress):
+        r = walk_forward(data, req.strategy, req.train_bars, req.test_bars, req.step_bars, costs,
+                         req.allow_short, req.rank_by, req.grid, req.fixed_params, progress)
+        w = r["windows"]
+        return {"windows": records(w), "equity": frame(r["equity"], 6), "metrics": plain(r["metrics"]),
+                "fixed_params": plain(r["fixed_params"]), "combos": r["combos"],
+                "oos_start": int(r["oos_start"].timestamp()), "grid": plain(req.grid or spec.grid),
+                "param_changes": int((w.params.astype(str) != w.params.astype(str).shift()).sum() - 1),
+                "low_trades_threshold": LOW_TRADES}
+
+    return jobs.submit("walkforward", work).public()
 
 
 @app.get("/api/jobs/{job_id}")

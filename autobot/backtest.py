@@ -222,3 +222,117 @@ def parameter_search(data: Dict[str, pd.DataFrame], names: List[str] | None = No
 def best_per_strategy(search: pd.DataFrame) -> pd.DataFrame:
     """Top train-ranked parameter set of each strategy, with its test score."""
     return search.groupby("strategy", as_index=False).first().sort_values("test_sharpe", ascending=False)
+
+
+# ----------------------------------------------------------------- walk-forward
+def _replay(df: pd.DataFrame, pos: pd.Series, costs: CostModel) -> pd.DataFrame:
+    """Backtest frame for an already-effective position series (no extra shift).
+    The first bar pays to enter whatever position it starts with."""
+    ret = df.close.pct_change().reindex(pos.index).fillna(0)
+    turnover = pos.diff().abs().fillna(pos.abs())
+    r = pos * ret - turnover * costs.per_turn
+    return pd.DataFrame({"position": pos, "ret": r, "equity": (1 + r).cumprod(),
+                         "turnover": turnover, "asset_ret": ret})
+
+
+def _slice_metric(bt: pd.DataFrame, a: int, b: int, key: str) -> float:
+    part = bt.iloc[a:b]
+    m = metrics(part.assign(equity=(1 + part.ret).cumprod()))
+    v = m.get(key, m["sharpe"])
+    return float(v) if np.isfinite(v) else -1e9
+
+
+def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test_bars: int,
+                 step_bars: int | None = None, costs: CostModel = CostModel(), allow_short=False,
+                 rank_by: str = "sharpe", grid: Dict[str, List] | None = None,
+                 fixed_params: Dict | None = None,
+                 progress: Optional[Callable[[float, str], None]] = None) -> Dict:
+    """Rolling re-optimization.
+
+    Windows are cut on the first symbol's bar clock: train on [s, s+train_bars), trade the
+    best parameter set (ranked on train, averaged over symbols) on the next test_bars, move
+    forward by step_bars (default test_bars). The traded test slices are stitched into one
+    out-of-sample curve, which pays costs whenever the position changes, including when a
+    new parameter set takes over at a window boundary.
+
+    Returns DataFrames/dicts: windows, equity (walk_forward, fixed, buy_and_hold from the
+    first test bar on), metrics for each of those, and the chosen parameters per window.
+    """
+    step_bars = step_bars or test_bars
+    combos = param_combos(name, grid)
+    if not combos:
+        raise ValueError(f"{name}: no valid parameter sets to search")
+    syms = list(data)
+    clock = data[syms[0]].index
+    n = len(clock)
+    if n < train_bars + 10:
+        raise ValueError(f"Need more than {train_bars + 10} bars for this window size; have {n}.")
+
+    # each combo's full-history backtest per symbol (valid because every strategy is causal)
+    bts: List[Dict[str, pd.DataFrame]] = []
+    for i, p in enumerate(combos):
+        bts.append({s: run_backtest(df, get_signal(name, df, p, allow_short), costs) for s, df in data.items()})
+        if progress:
+            progress(0.6 * (i + 1) / len(combos), f"backtesting {i + 1}/{len(combos)} parameter sets")
+
+    def cut(sym, t):  # bar position in this symbol at or after clock time t
+        return int(data[sym].index.searchsorted(t))
+
+    starts = list(range(0, n - train_bars, step_bars))
+    windows, chosen = [], []
+    for w, s in enumerate(starts):
+        te_a, te_b = s + train_bars, min(s + train_bars + test_bars, n)
+        if te_a >= n:
+            break
+        t0, t1, t2 = clock[s], clock[te_a], clock[te_b - 1]
+        scores = []
+        for bt_by_sym in bts:
+            vals = [_slice_metric(bt_by_sym[sym], cut(sym, t0), cut(sym, t1), rank_by) for sym in syms]
+            scores.append(float(np.mean(vals)))
+        best = int(np.argmax(scores))
+        test_sh = float(np.mean([_slice_metric(bts[best][sym], cut(sym, t1), cut(sym, t2) + 1, "sharpe") for sym in syms]))
+        test_ret = float(np.mean([_slice_metric(bts[best][sym], cut(sym, t1), cut(sym, t2) + 1, "total_return_%") for sym in syms]))
+        chosen.append((t1, t2, best))
+        windows.append({"window": w + 1, "train_start": clock[s], "train_end": clock[te_a - 1],
+                        "test_start": t1, "test_end": t2, "test_bars": te_b - te_a,
+                        "partial": te_b - te_a < test_bars, "params": combos[best],
+                        "train_score": round(scores[best], 3), "test_sharpe": round(test_sh, 2),
+                        "test_return_%": round(test_ret, 2)})
+        if progress:
+            progress(0.6 + 0.4 * (w + 1) / len(starts), f"window {w + 1}/{len(starts)}")
+        if te_b >= n:
+            break
+
+    oos_start = chosen[0][0]
+    spec = STRATEGIES[name]
+    fixed = {**spec.defaults, **(fixed_params or {})}
+    curves = {"walk_forward": [], "fixed": [], "buy_and_hold": []}
+    trades = {"walk_forward": 0, "fixed": 0, "buy_and_hold": 0}
+    per_sym_bt = {}
+    for sym, df in data.items():
+        oos = df.loc[df.index >= oos_start]
+        pos = pd.Series(0.0, index=oos.index)
+        for i, (t1, t2, best) in enumerate(chosen):
+            end = chosen[i + 1][0] if i + 1 < len(chosen) else oos.index[-1] + pd.Timedelta(seconds=1)
+            m = (oos.index >= t1) & (oos.index < end)
+            pos[m] = bts[best][sym].position.reindex(oos.index)[m]
+        full_fixed = run_backtest(df, get_signal(name, df, fixed, allow_short), costs).position.reindex(oos.index)
+        for key, p in (("walk_forward", pos), ("fixed", full_fixed.fillna(0)),
+                       ("buy_and_hold", pd.Series(1.0, index=oos.index))):
+            bt = _replay(df, p, costs)
+            curves[key].append(bt.ret.rename(sym))
+            trades[key] += metrics(bt)["trades"]
+            if key == "walk_forward":
+                per_sym_bt[sym] = bt
+
+    equity, summary = {}, {}
+    for key, rets in curves.items():
+        port = pd.concat(rets, axis=1).fillna(0).mean(axis=1)
+        eq = (1 + port).cumprod()
+        equity[key] = eq
+        m = metrics(pd.DataFrame({"ret": port, "equity": eq, "position": 1}, index=eq.index))
+        m["trades"] = int(trades[key])
+        m.pop("win_rate_%"), m.pop("avg_trade_%"), m.pop("profit_factor"), m.pop("exposure_%")
+        summary[key] = m
+    return {"windows": pd.DataFrame(windows), "equity": pd.DataFrame(equity), "metrics": summary,
+            "fixed_params": fixed, "combos": len(combos), "oos_start": oos_start}
