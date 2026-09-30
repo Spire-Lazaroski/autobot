@@ -194,6 +194,10 @@ def live_start():
     st = bot_state()
     if st["running"]:
         raise HTTPException(409, f"A bot is already running (pid {st['pid']}).")
+    if st["unresponsive"]:
+        raise HTTPException(409, f"Bot process {st['pid']} is still alive but its heartbeat is "
+                                 f"{st['heartbeat_age_s']:.0f}s old. Stop it first (Stop + flatten, or end "
+                                 "the process) so two bots can't trade at once.")
     STOP_FILE.unlink(missing_ok=True)
     flags = 0
     if sys.platform == "win32":  # keep running if the API restarts
@@ -209,7 +213,7 @@ def live_stop(req: StopReq):
     if not req.confirm:
         raise HTTPException(400, "Stop closes every position. Send {\"confirm\": true}.")
     st = bot_state()
-    if not st["running"]:
+    if not (st["running"] or st["unresponsive"]):
         raise HTTPException(409, "The bot isn't running, so there's nothing to stop.")
     STOP_FILE.touch()
     return {"ok": True, "message": "Stop requested: the bot will close all positions and exit within a few seconds."}

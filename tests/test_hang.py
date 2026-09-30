@@ -116,3 +116,39 @@ def test_heartbeat_stops_when_loop_stalls(stuck_bot):
     time.sleep(4)
     age = time.time() - liveconfig.read_lock()["heartbeat"] if liveconfig.read_lock() else 99
     assert age >= 1.5  # no fresh heartbeat once the loop is stuck
+
+
+def test_heartbeat_survives_reader_holding_pid_file(tmp_path, monkeypatch):
+    """The real failure: on Windows, replacing bot.pid fails while the lab API has it open."""
+    monkeypatch.setattr(liveconfig, "PID_FILE", tmp_path / "bot.pid")
+    liveconfig.write_lock(time.time())
+    fh = open(liveconfig.PID_FILE)  # a reader holding the file open
+    try:
+        assert liveconfig.write_lock(time.time()) in (True, False)  # must not raise
+    finally:
+        fh.close()
+    assert liveconfig.write_lock(time.time()) is True
+
+
+def test_watchdog_keeps_running_after_an_error(stuck_bot, monkeypatch):
+    bot, tc, exits, th, tmp = stuck_bot
+    calls = []
+
+    def flaky(started):
+        calls.append(1)
+        if len(calls) == 2:  # call 1 is run()'s startup write; call 2 is the watchdog's first
+            raise PermissionError("pid file busy")
+        return True
+    monkeypatch.setattr(live, "write_lock", flaky)
+    th.start()
+    assert _wait(lambda: len(calls) >= 4)  # still beating after the error
+
+
+def test_unresponsive_blocks_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(liveconfig, "PID_FILE", tmp_path / "bot.pid")
+    liveconfig.write_lock(time.time())
+    lock = liveconfig.read_lock()
+    lock["heartbeat"] = time.time() - 600
+    liveconfig.PID_FILE.write_text(__import__("json").dumps(lock))
+    st = liveconfig.bot_state()
+    assert st["running"] is False and st["unresponsive"] is True  # this process is alive, beat is stale

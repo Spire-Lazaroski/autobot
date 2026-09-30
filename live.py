@@ -292,39 +292,45 @@ class Bot:
     # ------------------------------------------------------------ watchdog
     def _watchdog(self, started: float, tick: float = 1.0):
         """Runs beside the main loop. Heartbeat only while the loop progresses; takes over
-        STOP and the loss limit when the loop is stuck; exits the process on a long stall."""
-        wtc = None
-        last_risk = 0.0
+        STOP and the loss limit when the loop is stuck; exits the process on a long stall.
+        It must never die: every check is guarded and the loop keeps going."""
+        state = {"wtc": None, "last_risk": 0.0}
         while not self._stop_watch.wait(tick):
-            idle = time.time() - self._progress
-            if idle < self.stall_s:
-                write_lock(started)
             try:
-                if STOP_FILE.exists() and time.time() - STOP_FILE.stat().st_mtime > 10:
-                    log.warning("WATCHDOG: STOP file not handled by the main loop; flattening and exiting")
-                    wtc = wtc or self._watch_tc_factory()
-                    wtc.close_all_positions(cancel_orders=True)
-                    STOP_FILE.unlink(missing_ok=True)
-                    release_lock()
-                    self._exit(0)
+                if self._watch_once(started, state):
                     return
-                if idle > self.watch_risk_after and time.time() - last_risk > 30 and not self.halted:
-                    last_risk = time.time()
-                    wtc = wtc or self._watch_tc_factory()
-                    eq = float(wtc.get_account().equity)
-                    dd = (eq / self.day_start_equity - 1) * 100
-                    if dd <= -abs(self.risk["max_daily_loss_pct"]):
-                        log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
-                        wtc.close_all_positions(cancel_orders=True)
-                        self.halted = True
             except Exception as e:  # noqa: BLE001
-                log.error("WATCHDOG check failed: %s", e)
-            if idle >= self.stall_s:
-                log.critical("WATCHDOG: main loop made no progress for %.0fs; exiting without trading. "
-                             "Positions are left as they are.", idle)
-                release_lock()
-                self._exit(3)
-                return
+                log.error("WATCHDOG error (continuing): %s", e)
+
+    def _watch_once(self, started: float, state: dict) -> bool:
+        """One watchdog check. Returns True when the process is exiting."""
+        idle = time.time() - self._progress
+        if idle < self.stall_s:
+            write_lock(started)
+        if STOP_FILE.exists() and time.time() - STOP_FILE.stat().st_mtime > 10:
+            log.warning("WATCHDOG: STOP file not handled by the main loop; flattening and exiting")
+            state["wtc"] = state["wtc"] or self._watch_tc_factory()
+            state["wtc"].close_all_positions(cancel_orders=True)
+            STOP_FILE.unlink(missing_ok=True)
+            release_lock()
+            self._exit(0)
+            return True
+        if idle > self.watch_risk_after and time.time() - state["last_risk"] > 30 and not self.halted:
+            state["last_risk"] = time.time()
+            state["wtc"] = state["wtc"] or self._watch_tc_factory()
+            eq = float(state["wtc"].get_account().equity)
+            dd = (eq / self.day_start_equity - 1) * 100
+            if dd <= -abs(self.risk["max_daily_loss_pct"]):
+                log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
+                state["wtc"].close_all_positions(cancel_orders=True)
+                self.halted = True
+        if idle >= self.stall_s:
+            log.critical("WATCHDOG: main loop made no progress for %.0fs; exiting without trading. "
+                         "Positions are left as they are.", idle)
+            release_lock()
+            self._exit(3)
+            return True
+        return False
 
     def run(self, once=False):
         started = time.time()
@@ -368,8 +374,8 @@ def main():
     a = ap.parse_args()
     setup_logging()
     state = bot_state()
-    if state["running"] and not a.flatten:
-        log.error("Another bot is already running (pid %s, heartbeat %ss ago). Not starting a second one.",
+    if (state["running"] or state["unresponsive"]) and not a.flatten:
+        log.error("Another bot process is alive (pid %s, heartbeat %ss ago). Not starting a second one.",
                   state["pid"], state["heartbeat_age_s"])
         sys.exit(1)
     cfg_path = Path(a.config)

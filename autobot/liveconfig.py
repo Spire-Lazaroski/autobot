@@ -130,23 +130,39 @@ def read_lock() -> Optional[Dict]:
 
 
 def bot_state() -> Dict:
-    """running = pid alive AND heartbeat fresh (a reused pid with a stale heartbeat is not our bot)."""
+    """running = pid alive AND heartbeat fresh.
+    unresponsive = pid alive but heartbeat stale: maybe a stuck bot, maybe a reused pid.
+    Never start a second bot in either case (two bots would double-trade)."""
     lock = read_lock()
     if not lock:
-        return {"running": False}
+        return {"running": False, "unresponsive": False}
     age = time.time() - float(lock.get("heartbeat", 0))
     alive = pid_alive(int(lock.get("pid", 0)))
-    return {"running": alive and age < HEARTBEAT_STALE_S, "pid": lock.get("pid"), "started": lock.get("started"),
-            "heartbeat_age_s": round(age, 1), "process_alive": alive, "stop_requested": STOP_FILE.exists()}
+    fresh = age < HEARTBEAT_STALE_S
+    return {"running": alive and fresh, "unresponsive": alive and not fresh, "pid": lock.get("pid"),
+            "started": lock.get("started"), "heartbeat_age_s": round(age, 1), "process_alive": alive,
+            "stop_requested": STOP_FILE.exists()}
 
 
-def write_lock(started: float):
-    """Atomic write so readers never see a half-written file."""
+def write_lock(started: float) -> bool:
+    """Atomic write so readers never see a half-written file. On Windows the replace fails
+    while another process (the lab API) has bot.pid open, so retry briefly; never raise.
+    Returns False if this heartbeat couldn't be written (the next one tries again)."""
     PID_FILE.parent.mkdir(exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=PID_FILE.parent, suffix=".pid.tmp")
     with os.fdopen(fd, "w") as f:
         json.dump({"pid": os.getpid(), "started": started, "heartbeat": time.time(), "paper": True}, f)
-    os.replace(tmp, PID_FILE)
+    for attempt in range(10):
+        try:
+            os.replace(tmp, PID_FILE)
+            return True
+        except PermissionError:
+            time.sleep(0.02 * (attempt + 1))
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    return False
 
 
 def release_lock():

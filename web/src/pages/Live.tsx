@@ -11,6 +11,7 @@ import { useLiveSocket } from "../lib/useLiveSocket";
 
 interface BotState {
   running: boolean;
+  unresponsive?: boolean;
   pid?: number;
   heartbeat_age_s?: number;
   process_alive?: boolean;
@@ -56,7 +57,9 @@ export function Live() {
 
   const bot = d?.bot;
   const st = d?.status;
-  const state = !bot ? "…" : bot.stop_requested && bot.running ? "stopping" : bot.running ? (st?.halted ? "halted" : "running") : "stopped";
+  const alive = !!bot && (bot.running || !!bot.unresponsive);
+  const state = !bot ? "…" : bot.stop_requested && alive ? "stopping" : bot.unresponsive ? "unresponsive"
+    : bot.running ? (st?.halted ? "halted" : "running") : "stopped";
   const stateTone = state === "running" ? "text-up" : state === "stopped" ? "text-muted" : "text-warn";
   const acct = d?.account;
 
@@ -74,7 +77,8 @@ export function Live() {
         <span className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${state === "running" ? "bg-up animate-pulse" : state === "stopped" ? "bg-dim" : "bg-warn"}`} />
           <span className={`font-semibold uppercase tracking-wide text-[12px] ${stateTone}`}>bot {state}</span>
-          {bot?.running && <span className="num text-[11px] text-muted">pid {bot.pid} · beat {fmt(bot.heartbeat_age_s, 0)}s ago</span>}
+          {alive && <span className={`num text-[11px] ${bot?.unresponsive ? "text-warn" : "text-muted"}`}>pid {bot?.pid} · beat {fmt(bot?.heartbeat_age_s, 0)}s ago</span>}
+          {bot?.unresponsive && <span className="text-[11px] text-warn">process alive but no heartbeat: Start is blocked</span>}
           {bot && !bot.running && bot.process_alive === false && bot.pid && <span className="text-[11px] text-dim">(last pid {bot.pid} exited)</span>}
         </span>
         <span className="text-[12px] text-muted">market <b className={d?.market?.is_open ? "text-up" : "text-fg"}>{d?.market ? (d.market.is_open ? "open" : "closed") : "–"}</b>
@@ -85,8 +89,8 @@ export function Live() {
           {connected ? `live · ${lastAt ? new Date(lastAt).toLocaleTimeString() : ""}` : "reconnecting…"}
         </span>
         <div className="ml-auto flex gap-2">
-          <button className="btn btn-primary" disabled={!bot || bot.running || busy} onClick={() => call("/live/start", {})}>▶ Start bot</button>
-          <button className="btn btn-danger" disabled={!bot?.running || busy || bot.stop_requested} onClick={() => setConfirmStop(true)}>⏹ Stop + flatten</button>
+          <button className="btn btn-primary" disabled={!bot || alive || busy} onClick={() => call("/live/start", {})}>▶ Start bot</button>
+          <button className="btn btn-danger" disabled={!alive || busy || bot?.stop_requested} onClick={() => setConfirmStop(true)}>⏹ Stop + flatten</button>
         </div>
         {msg && <div className={`basis-full text-[12px] ${msg.ok ? "text-up" : "text-down"}`}>{msg.text}</div>}
       </div>
