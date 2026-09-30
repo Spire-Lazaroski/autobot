@@ -23,8 +23,8 @@ from typing import Dict, List, Optional
 from . import news
 
 CLAUDE_MODEL = "claude-haiku-4-5"   # the small, fast model asked for
-PROMPT_VERSION = "v3"  # v2: sentiment = price direction, sign matches rationale; v3: + story_type
-RULES_VERSION = "rules-v3"
+PROMPT_VERSION = "v4"  # v2: sentiment = price direction, sign matches rationale; v3: + story_type; v4: recap rule
+RULES_VERSION = "rules-v4"
 CATEGORIES = ["earnings", "guidance", "m&a", "analyst_rating", "legal_regulatory", "macro", "other"]
 RELEVANCE = ["main", "secondary", "mention"]
 SURPRISE = ["expected", "unexpected", "unclear"]
@@ -82,7 +82,9 @@ RECAP = re.compile(r"\b(stocks? (moving|to watch)|what's (going on|moving)|why (
                    r"market summary|shares (are )?(trading )?(higher|lower)|(climb|jump|soar|surge|rise|fall|drop|slump|sink|plunge|rall)(s|ed|ing)? (after|as|on)|"
                    r"options? (alert|activity)|whale|unusual options|pre-market|premarket|after-hours|movers?)\b", re.I)
 OPINION = re.compile(r"(\?$|\b(could|should|might|will .* (reach|hit)|preview|prediction|expert says|analyst says|opinion|"
-                     r"top \d+|\d+ (stocks|reasons)|here's|how to|is it time|what to expect|interview)\b)", re.I)
+                     r"top \d+|\d+ (stocks|reasons)|here's|how to|is it time|what to expect|interview|"
+                     r"(before|ahead of) (its |the )?(earnings|results|report|fed|fomc|cpi|jobs)|what to watch|"
+                     r"knife's edge|big test|earnings preview)\b)", re.I)
 
 
 def story_type_rule(headline: str) -> str:
@@ -133,9 +135,9 @@ Fields:
 - category: one of {", ".join(CATEGORIES)}. analyst_rating = a broker's rating or price-target action. macro = economy, central bank, rates, inflation data, trade policy.
 - materiality: 1 (noise) to 5 (likely to move the ticker's price by several percent). Most stories are 1-2; reserve 4-5 for earnings surprises, guidance changes, major deals, major legal/regulatory actions, and big macro surprises.
 - story_type: what kind of story this is, judged from the text:
-  "new_information" = the first report of a new fact, decision or event (results, guidance, a deal, a filing, a ruling or regulatory action, a product, a rating change, a policy announcement);
+  "new_information" = the first report of a new fact, decision or event (results, guidance, a deal, a ruling or regulatory action, a product, a rating change, a policy announcement). Regulatory filings (13F, 13D, 8-K, Form 4) are new_information;
   "data_release" = a scheduled economic statistic with its figures (CPI, payrolls, PMI, GDP, jobless claims...);
-  "price_move_recap" = reports or explains a price move that has already happened (a stock or index rose/fell, market summaries, "what's moving", options or whale-activity alerts);
+  "price_move_recap" = reports or explains a price move that has already happened (a stock or index rose/fell, market summaries, "what's moving", options or whale-activity alerts). If the headline says a stock, index or futures moved (rose, fell, climbed, dropped, surged, gained, slumped...) because of or alongside some news, it is price_move_recap even when it also names that news; the same for gains or losses over a period ("up 55% in a month");
   "opinion_analysis" = commentary, previews, predictions, interviews, lists or analysis that add no new fact.
 - rationale: one short sentence that states the direction (up / down / neutral) and why.
 - If relevance is "mention", materiality is 1 and sentiment is 0 unless the text says something specific about the ticker.
@@ -396,3 +398,62 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ----------------------------------------------------------------- timing check: is this the first story?
+TOPIC = {"earnings": "results", "guidance": "results"}  # released together: one topic
+RESULTS_HOURS = 18.0  # results are often out after the close; follow-ups arrive the next morning
+GENERIC = set("""stock stocks shares share market markets says said report reports reported price prices target
+    ai inc corp co company companies ceo cfo new us u.s usa today week year deal deals could would will may why how what
+    investors investor analyst analysts wall street trading trade traders today's stock's big top
+    china chinese beijing trump tariff tariffs chip chips semiconductor semiconductors tech technology""".split())
+# the last line: broad themes that show up across unrelated stories, so they don't prove "same topic"
+_names = {w for ns_ in NAMES.values() for n in ns_ for w in n.split()} | {s.lower() for s in NAMES}
+
+
+def topic_words(headline: str) -> frozenset:
+    """Distinctive headline words: no stop words, company names, tickers or generic market words."""
+    return frozenset(w for w in news.tokens(headline) if w not in GENERIC and w not in _names)
+
+
+def _topic_sql(col: str) -> str:
+    return f"CASE WHEN {col} IN ('earnings','guidance') THEN 'results' ELSE {col} END"
+
+
+def first_story_flags(pairs: List[tuple], hours: float = 4.0, version: Optional[str] = None, min_shared: int = 2) -> Dict[tuple, Dict]:
+    """For (event_id, symbol) pairs: is there an EARLIER story that is itself new information (not a
+    preview or recap), mainly about the same symbol, on the same topic, published within `hours` before (RESULTS_HOURS for results)? Then this one is a
+    follow-up, not first news. Same topic = same category, and for anything but company results
+    also at least `min_shared` distinctive headline words in common. Categories come from Claude (this prompt version)
+    where scored, else the keyword rules. Only stories published before this one are looked at."""
+    from datetime import timedelta
+    version = version or PROMPT_VERSION
+    out: Dict[tuple, Dict] = {}
+    ensure_schema()
+    with news.connect() as con:
+        for eid, sym in pairs:
+            me = con.execute(
+                "SELECT e.created_at, e.headline, COALESCE(c.category, r.category) cat FROM events e "
+                "LEFT JOIN scores c ON c.event_id=e.id AND c.symbol=? AND c.scorer='claude' AND c.version=? "
+                "LEFT JOIN scores r ON r.event_id=e.id AND r.symbol=? AND r.scorer='rules' AND r.version=? WHERE e.id=?",
+                (sym, version, sym, RULES_VERSION, eid)).fetchone()
+            if me is None or me["cat"] is None:
+                continue
+            topic = TOPIC.get(me["cat"], me["cat"])
+            lo = (datetime.fromisoformat(me["created_at"]) - timedelta(hours=RESULTS_HOURS if topic == "results" else hours)).isoformat()
+            mine = topic_words(me["headline"])
+            earlier = None
+            for prev in con.execute(
+                    "SELECT e.id, e.created_at, e.headline FROM events e JOIN item_symbols s ON s.item_id = e.first_item_id AND s.symbol = ? "
+                    "LEFT JOIN scores c ON c.event_id=e.id AND c.symbol=? AND c.scorer='claude' AND c.version=? "
+                    "LEFT JOIN scores r ON r.event_id=e.id AND r.symbol=? AND r.scorer='rules' AND r.version=? "
+                    f"WHERE e.created_at >= ? AND e.created_at < ? AND e.id != ? AND {_topic_sql('COALESCE(c.category, r.category)')} = ? "
+                    "AND COALESCE(c.relevance, r.relevance) = 'main' "
+                    "AND COALESCE(c.story_type, r.story_type) IN ('new_information', 'data_release') ORDER BY e.created_at",
+                    (sym, sym, version, sym, RULES_VERSION, lo, me["created_at"], eid, topic)):
+                shared = mine & topic_words(prev["headline"])
+                if topic == "results" or len(shared) >= min_shared:
+                    earlier = {**dict(prev), "shared": sorted(shared)}
+                    break
+            out[(eid, sym)] = {"first": earlier is None, "category": me["cat"], "earlier": earlier}
+    return out

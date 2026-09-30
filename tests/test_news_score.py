@@ -111,3 +111,32 @@ def test_rule_story_type(headline, kind):
 def test_story_type_is_in_the_claude_schema():
     item = ns.OUTPUT_SCHEMA["properties"]["scores"]["items"]
     assert item["properties"]["story_type"]["enum"] == ns.STORY_TYPES and "story_type" in item["required"]
+
+
+def _db(tmp_path, monkeypatch, stories):
+    db = tmp_path / "n.db"
+    monkeypatch.setattr(news, "DB_PATH", db)
+    news.store([{"id": i, "headline": h, "symbols": ["NVDA"], "created_at": t} for i, (h, t) in enumerate(stories, 1)], "backfill", path=db)
+    news.collapse_events(db)
+    ns.run_rules()
+    with news.connect() as con:
+        return {r["headline"]: r["id"] for r in con.execute("SELECT id, headline FROM events")}
+
+
+def test_results_follow_up_overnight(tmp_path, monkeypatch):
+    ids = _db(tmp_path, monkeypatch, [("Nvidia Q3 EPS $1.30 Beats $1.25 Estimate, Revenue Beats", "2026-11-19T21:23:00Z"),
+                                      ("Nvidia Shares Rise After Record Quarterly Earnings", "2026-11-20T09:00:00Z")])
+    f = ns.first_story_flags([(ids["Nvidia Shares Rise After Record Quarterly Earnings"], "NVDA")])
+    assert not next(iter(f.values()))["first"]  # 11.6 h later is inside the results window
+    f = ns.first_story_flags([(ids["Nvidia Q3 EPS $1.30 Beats $1.25 Estimate, Revenue Beats"], "NVDA")])
+    assert next(iter(f.values()))["first"]  # a later story never makes an earlier one a follow-up
+
+
+def test_previews_and_unrelated_stories_do_not_count(tmp_path, monkeypatch):
+    ids = _db(tmp_path, monkeypatch, [("Nvidia Stock Sits On Knife's Edge Before Earnings", "2026-11-19T15:00:00Z"),
+                                      ("China's SMIC Pilots New Lithography Machine For Nvidia Rival Chips In Beijing", "2026-09-17T08:00:00Z"),
+                                      ("Beijing Blocks Nvidia Chips Amid Antitrust Probe In China", "2026-09-17T10:00:00Z"),
+                                      ("Nvidia Q3 EPS $1.30 Beats $1.25 Estimate", "2026-11-19T21:23:00Z")])
+    f = ns.first_story_flags([(ids["Nvidia Q3 EPS $1.30 Beats $1.25 Estimate"], "NVDA"),
+                              (ids["Beijing Blocks Nvidia Chips Amid Antitrust Probe In China"], "NVDA")])
+    assert all(v["first"] for v in f.values())  # a preview isn't news; shared broad themes aren't the same story
