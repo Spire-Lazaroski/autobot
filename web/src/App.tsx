@@ -5,6 +5,7 @@ import { usePageState } from "./lib/usePageState";
 import { Help } from "./pages/Help";
 import { Lab } from "./pages/Lab";
 import { Live } from "./pages/Live";
+import { News } from "./pages/News";
 import { Reports } from "./pages/Reports";
 import { Search } from "./pages/Search";
 import { Shifting } from "./pages/Shifting";
@@ -30,6 +31,7 @@ const PAGES: Record<string, { title: string; Component: ComponentType }> = {
   lab: { title: "Backtest lab", Component: Lab },
   search: { title: "Parameter search & walk-forward", Component: SearchHub },
   shifting: { title: "Strategy shifting", Component: Shifting },
+  news: { title: "News & market impact", Component: News },
   reports: { title: "Trading reports", Component: Reports },
   help: { title: "Help & operating procedure", Component: Help },
 };

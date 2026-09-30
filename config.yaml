@@ -51,3 +51,10 @@ live:
     - BTC/USD
     allocation_pct: 10
     enabled: false
+news:
+  symbols:
+  - SPY
+  - QQQ
+  - AAPL
+  - NVDA
+  - TSLA

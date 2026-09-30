@@ -14,6 +14,7 @@ export const NAV: NavItem[] = [
   { id: "lab", label: "Lab", icon: "bi-bar-chart-line" },
   { id: "search", label: "Search", icon: "bi-search" },
   { id: "shifting", label: "Shifting", icon: "bi-shuffle" },
+  { id: "news", label: "News", icon: "bi-newspaper" },
   { id: "reports", label: "Reports", icon: "bi-file-earmark-text" },
   { id: "help", label: "Help", icon: "bi-question-circle" },
 ];

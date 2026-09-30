@@ -21,5 +21,7 @@ if not exist web\node_modules (
 )
 start "autobot API :%API_PORT%" cmd /k .venv\Scripts\python -m api
 start "autobot web :%WEB_PORT%" cmd /k "cd web && npm run dev"
+REM News collector: backfills what is missing, then collects live news (never trades)
+start "autobot news" cmd /k .venv\Scripts\python news_collector.py
 timeout /t 4 /nobreak >nul
 start "" http://127.0.0.1:%WEB_PORT%/
