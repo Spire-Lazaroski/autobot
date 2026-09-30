@@ -23,11 +23,12 @@ from typing import Dict, List, Optional
 from . import news
 
 CLAUDE_MODEL = "claude-haiku-4-5"   # the small, fast model asked for
-PROMPT_VERSION = "v2"  # v2: sentiment = expected price direction, sign must match the rationale
-RULES_VERSION = "rules-v2"
+PROMPT_VERSION = "v3"  # v2: sentiment = price direction, sign matches rationale; v3: + story_type
+RULES_VERSION = "rules-v3"
 CATEGORIES = ["earnings", "guidance", "m&a", "analyst_rating", "legal_regulatory", "macro", "other"]
 RELEVANCE = ["main", "secondary", "mention"]
 SURPRISE = ["expected", "unexpected", "unclear"]
+STORY_TYPES = ["new_information", "data_release", "price_move_recap", "opinion_analysis"]
 PRICE_IN, PRICE_OUT = 1.00, 5.00    # $ per million tokens, Claude Haiku 4.5 (skill price table, 2026-09)
 
 SCHEMA_SQL = """
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS scores (
   materiality    INTEGER NOT NULL,       -- 1 .. 5
   rationale      TEXT,
   scored_at      TEXT NOT NULL,
+  story_type     TEXT,                   -- new_information | data_release | price_move_recap | opinion_analysis
   PRIMARY KEY (event_id, symbol, scorer, version)
 );
 CREATE INDEX IF NOT EXISTS scores_symbol ON scores(symbol);
@@ -76,6 +78,24 @@ BASE_MATERIALITY = {"earnings": 4, "guidance": 4, "m&a": 4, "legal_regulatory": 
 EST = re.compile(r"(-?\d+(?:\.\d+)?)%?\s+vs\.?\s+(-?\d+(?:\.\d+)?)%?\s+est", re.I)
 
 
+RECAP = re.compile(r"\b(stocks? (moving|to watch)|what's (going on|moving)|why (is|are) .* (up|down|trading|moving|falling|rising|surging)|"
+                   r"market summary|shares (are )?(trading )?(higher|lower)|(climb|jump|soar|surge|rise|fall|drop|slump|sink|plunge|rall)(s|ed|ing)? (after|as|on)|"
+                   r"options? (alert|activity)|whale|unusual options|pre-market|premarket|after-hours|movers?)\b", re.I)
+OPINION = re.compile(r"(\?$|\b(could|should|might|will .* (reach|hit)|preview|prediction|expert says|analyst says|opinion|"
+                     r"top \d+|\d+ (stocks|reasons)|here's|how to|is it time|what to expect|interview)\b)", re.I)
+
+
+def story_type_rule(headline: str) -> str:
+    h = headline.strip()
+    if EST.search(h) or re.search(r"\b(for (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?|(yoy|mom)\))", h, re.I):
+        return "data_release"
+    if RECAP.search(h):
+        return "price_move_recap"
+    if OPINION.search(h):
+        return "opinion_analysis"
+    return "new_information"
+
+
 def rules_score(headline: str, summary: Optional[str], symbol: str, symbols: List[str]) -> Dict:
     text = f"{headline} {summary or ''}".lower()
     head = headline.lower()
@@ -100,7 +120,7 @@ def rules_score(headline: str, summary: Optional[str], symbol: str, symbols: Lis
     mat += 1 if relevance == "main" and surprise == "unexpected" else 0
     mat -= 1 if relevance == "mention" else 0
     return {"relevance": relevance, "sentiment": sentiment, "surprise": surprise, "category": category,
-            "materiality": max(1, min(5, mat)), "rationale": "keyword rules"}
+            "materiality": max(1, min(5, mat)), "rationale": "keyword rules", "story_type": story_type_rule(headline)}
 
 
 # ----------------------------------------------------------------- Claude
@@ -112,6 +132,11 @@ Fields:
 - surprise: "expected" (scheduled or widely anticipated, e.g. results in line with estimates), "unexpected" (new information the market likely did not anticipate), "unclear".
 - category: one of {", ".join(CATEGORIES)}. analyst_rating = a broker's rating or price-target action. macro = economy, central bank, rates, inflation data, trade policy.
 - materiality: 1 (noise) to 5 (likely to move the ticker's price by several percent). Most stories are 1-2; reserve 4-5 for earnings surprises, guidance changes, major deals, major legal/regulatory actions, and big macro surprises.
+- story_type: what kind of story this is, judged from the text:
+  "new_information" = the first report of a new fact, decision or event (results, guidance, a deal, a filing, a ruling or regulatory action, a product, a rating change, a policy announcement);
+  "data_release" = a scheduled economic statistic with its figures (CPI, payrolls, PMI, GDP, jobless claims...);
+  "price_move_recap" = reports or explains a price move that has already happened (a stock or index rose/fell, market summaries, "what's moving", options or whale-activity alerts);
+  "opinion_analysis" = commentary, previews, predictions, interviews, lists or analysis that add no new fact.
 - rationale: one short sentence that states the direction (up / down / neutral) and why.
 - If relevance is "mention", materiality is 1 and sentiment is 0 unless the text says something specific about the ticker.
 
@@ -131,9 +156,10 @@ OUTPUT_SCHEMA = {
                     "surprise": {"type": "string", "enum": SURPRISE},
                     "category": {"type": "string", "enum": CATEGORIES},
                     "materiality": {"type": "integer"},
+                    "story_type": {"type": "string", "enum": STORY_TYPES},
                     "rationale": {"type": "string"},
                 },
-                "required": ["symbol", "relevance", "sentiment", "surprise", "category", "materiality", "rationale"],
+                "required": ["symbol", "relevance", "sentiment", "surprise", "category", "materiality", "story_type", "rationale"],
                 "additionalProperties": False,
             },
         }
@@ -184,6 +210,13 @@ def claude_score(client, ev: Dict, targets: List[str], usage: Optional[Dict] = N
 def ensure_schema():
     with news.connect() as con:
         con.executescript(SCHEMA_SQL)
+        _add_story_type(con)
+
+
+def _add_story_type(con):
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(scores)")}
+    if "story_type" not in cols:
+        con.execute("ALTER TABLE scores ADD COLUMN story_type TEXT")
 
 
 def _targets(ev_symbols: str) -> List[str]:
@@ -199,9 +232,13 @@ def unscored(scorer: str, version: str, limit: Optional[int] = None, newest_firs
         return [dict(r) for r in con.execute(q, (scorer, version))]
 
 
+COLS = ("event_id, symbol, scorer, version, model, relevance, sentiment, surprise, category, materiality, "
+        "rationale, scored_at, story_type")
+
+
 def _row(event_id, r, scorer, version, model, now):
     return (event_id, r["symbol"], scorer, version, model, r["relevance"], r["sentiment"], r["surprise"], r["category"],
-            r["materiality"], r.get("rationale"), now)
+            r["materiality"], r.get("rationale"), now, r.get("story_type"))
 
 
 def save(event_id: int, rows: List[Dict], scorer: str, version: str, model: Optional[str]):
@@ -213,7 +250,8 @@ def save_many(batch, scorer: str, version: str, model: Optional[str]):
     now = datetime.now(timezone.utc).isoformat()
     with news._lock, news.connect() as con:
         con.executescript(SCHEMA_SQL)
-        con.executemany("INSERT OR REPLACE INTO scores VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        _add_story_type(con)
+        con.executemany(f"INSERT OR REPLACE INTO scores ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         [_row(eid, r, scorer, version, model, now) for eid, rows in batch for r in rows])
 
 

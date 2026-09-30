@@ -95,3 +95,19 @@ def test_run_stops_at_the_first_credit_error(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="credit balance"):
         ns.run_claude(10)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("headline,kind", [
+    ("IREN, Riot, Cipher, Other HPC Stocks Climb After Nvidia's Blockbuster Q3 Report", "price_move_recap"),
+    ("Benzinga Market Summary: S&P And Nasdaq Drop As NVIDIA Falls", "price_move_recap"),
+    ("USA Core CPI (MoM) For Dec. 0.2% Vs 0.3% Est.", "data_release"),
+    ("Will DeepSeek Hurt Magnificent 7 Stocks Valuation?", "opinion_analysis"),
+    ("Beijing Blocks Nvidia Chips Amid Antitrust Probe", "new_information"),
+])
+def test_rule_story_type(headline, kind):
+    assert ns.story_type_rule(headline) == kind
+
+
+def test_story_type_is_in_the_claude_schema():
+    item = ns.OUTPUT_SCHEMA["properties"]["scores"]["items"]
+    assert item["properties"]["story_type"]["enum"] == ns.STORY_TYPES and "story_type" in item["required"]
