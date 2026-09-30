@@ -80,7 +80,7 @@ interface ScoresRes {
   summary: Record<string, Record<string, number>>;
   versions: Record<string, string>;
   model: string;
-  estimate: { events: number; cost_usd: number; cost_usd_batch: number };
+  estimate: { events: number; cost_usd: number; cost_usd_batch: number; basis: string };
 }
 
 function ScoresPanel({ symbols }: { symbols: string[] }) {
@@ -122,7 +122,7 @@ function ScoresPanel({ symbols }: { symbols: string[] }) {
       {q.data && (
         <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px]">
           <span className="text-muted">Claude scoring for the {fmt(q.data.estimate.events, 0)} stories not yet scored by Claude:
-            about <b>${fmt(q.data.estimate.cost_usd, 2)}</b> (≈ ${fmt(q.data.estimate.cost_usd_batch, 2)} via the Batch API). Rough estimate from text length.</span>
+            about <b>${fmt(q.data.estimate.cost_usd, 2)}</b> (≈ ${fmt(q.data.estimate.cost_usd_batch, 2)} via the Batch API), {q.data.estimate.basis}.</span>
           <button className="btn" disabled={!!busy} onClick={() => runClaude(50)}>{busy ? <Spinner /> : <i className="bi bi-stars" />} Score the newest 50 with Claude</button>
           {busy && <span className="text-muted">{job.data?.message}</span>}
           {job.data?.status === "done" && <span className="text-up">Scored {job.data.result?.scored}, failed {job.data.result?.failed}.</span>}

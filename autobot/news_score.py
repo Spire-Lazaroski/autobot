@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 from . import news
 
 CLAUDE_MODEL = "claude-haiku-4-5"   # the small, fast model asked for
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # v2: sentiment = expected price direction, sign must match the rationale
 RULES_VERSION = "rules-v2"
 CATEGORIES = ["earnings", "guidance", "m&a", "analyst_rating", "legal_regulatory", "macro", "other"]
 RELEVANCE = ["main", "secondary", "mention"]
@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS scores (
   PRIMARY KEY (event_id, symbol, scorer, version)
 );
 CREATE INDEX IF NOT EXISTS scores_symbol ON scores(symbol);
+CREATE TABLE IF NOT EXISTS score_calls (    -- real token use per Claude call (one call per story)
+  event_id INTEGER NOT NULL, version TEXT NOT NULL, model TEXT NOT NULL,
+  input_tokens INTEGER, output_tokens INTEGER, at TEXT NOT NULL
+);
 """
 
 # ----------------------------------------------------------------- rules (fallback)
@@ -104,11 +108,12 @@ SYSTEM = f"""You score financial news for a trading-research tool. For each requ
 
 Fields:
 - relevance: "main" (the ticker's company, or for SPY/QQQ the broad US market / Nasdaq, is the main subject), "secondary" (materially discussed but not the focus), "mention" (only named in passing or tagged).
-- sentiment: -1.0 (clearly bad for the ticker's price) to +1.0 (clearly good); 0 when neutral or mixed.
+- sentiment: the expected direction of the ticker's price because of this story, -1.0 (clearly down) to +1.0 (clearly up); 0 when neutral, mixed or unclear. For SPY/QQQ, risk-off news (military or geopolitical escalation, energy supply shocks, hawkish central-bank surprises, weak economic data, new trade barriers) is negative; the reverse is positive. The sign must agree with your rationale: if the rationale describes a risk or a headwind for the ticker, the sentiment must not be positive.
 - surprise: "expected" (scheduled or widely anticipated, e.g. results in line with estimates), "unexpected" (new information the market likely did not anticipate), "unclear".
 - category: one of {", ".join(CATEGORIES)}. analyst_rating = a broker's rating or price-target action. macro = economy, central bank, rates, inflation data, trade policy.
 - materiality: 1 (noise) to 5 (likely to move the ticker's price by several percent). Most stories are 1-2; reserve 4-5 for earnings surprises, guidance changes, major deals, major legal/regulatory actions, and big macro surprises.
-- rationale: one short sentence.
+- rationale: one short sentence that states the direction (up / down / neutral) and why.
+- If relevance is "mention", materiality is 1 and sentiment is 0 unless the text says something specific about the ticker.
 
 Judge from the text given only; do not assume facts that are not in it. Return one entry per requested ticker."""
 
@@ -151,7 +156,7 @@ def claude_client():
     return anthropic.Anthropic(max_retries=4, timeout=60.0)
 
 
-def claude_score(client, ev: Dict, targets: List[str]) -> List[Dict]:
+def claude_score(client, ev: Dict, targets: List[str], usage: Optional[Dict] = None) -> List[Dict]:
     resp = client.messages.create(
         model=CLAUDE_MODEL, max_tokens=1024, system=SYSTEM,
         messages=[{"role": "user", "content": _user_prompt(ev, targets)}],
@@ -161,6 +166,8 @@ def claude_score(client, ev: Dict, targets: List[str]) -> List[Dict]:
         raise RuntimeError("model declined to score this item")
     if resp.stop_reason == "max_tokens":
         raise RuntimeError("response cut off")
+    if usage is not None and getattr(resp, "usage", None) is not None:
+        usage.update(input_tokens=resp.usage.input_tokens, output_tokens=resp.usage.output_tokens)
     data = json.loads(next(b.text for b in resp.content if b.type == "text"))
     out = []
     for s in data["scores"]:
@@ -221,9 +228,19 @@ def run_rules(limit: Optional[int] = None, chunk: int = 2000) -> int:
     return len(evs)
 
 
-def run_claude(limit: int, progress=None) -> Dict[str, int]:
+def run_claude(limit: int, progress=None, event_ids: Optional[List[int]] = None) -> Dict:
+    """Score the newest `limit` unscored stories, or exactly `event_ids` (skipping ones already scored)."""
     client = claude_client()
-    evs = unscored("claude", PROMPT_VERSION, limit)
+    if event_ids is not None:
+        ensure_schema()
+        with news.connect() as con:
+            marks = ",".join("?" * len(event_ids))
+            evs = [dict(r) for r in con.execute(
+                f"SELECT e.* FROM events e WHERE e.id IN ({marks}) AND NOT EXISTS (SELECT 1 FROM scores s WHERE s.event_id=e.id "
+                "AND s.scorer='claude' AND s.version=?)", (*event_ids, PROMPT_VERSION))]
+    else:
+        evs = unscored("claude", PROMPT_VERSION, limit)
+    tin = tout = 0
     done = failed = 0
     import anthropic
     for i, ev in enumerate(evs):
@@ -231,7 +248,13 @@ def run_claude(limit: int, progress=None) -> Dict[str, int]:
         if not targets:
             continue
         try:
-            save(ev["id"], claude_score(client, ev, targets), "claude", PROMPT_VERSION, CLAUDE_MODEL)
+            use: Dict = {}
+            save(ev["id"], claude_score(client, ev, targets, use), "claude", PROMPT_VERSION, CLAUDE_MODEL)
+            if use:
+                tin += use["input_tokens"]; tout += use["output_tokens"]
+                with news._lock, news.connect() as con:
+                    con.execute("INSERT INTO score_calls VALUES (?,?,?,?,?,?)", (ev["id"], PROMPT_VERSION, CLAUDE_MODEL,
+                                use["input_tokens"], use["output_tokens"], datetime.now(timezone.utc).isoformat()))
             done += 1
         except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
             raise RuntimeError(f"Anthropic account problem, stopping: {e.message}") from e
@@ -246,20 +269,53 @@ def run_claude(limit: int, progress=None) -> Dict[str, int]:
             print(f"event {ev['id']}: {type(e).__name__}: {e}")
         if progress:
             progress((i + 1) / len(evs), f"{i + 1}/{len(evs)}")
-    return {"scored": done, "failed": failed}
+    cost = tin / 1e6 * PRICE_IN + tout / 1e6 * PRICE_OUT
+    return {"scored": done, "failed": failed, "input_tokens": tin, "output_tokens": tout, "cost_usd": round(cost, 4)}
+
+
+def stratified_sample(n: int = 100, seed: int = 7) -> List[int]:
+    """Stories spread over symbols, categories (by the keyword scorer) and time, for checking a
+    prompt before a full run. Mostly stories where a symbol is more than a passing mention."""
+    import random
+    rnd = random.Random(seed)
+    ensure_schema()
+    with news.connect() as con:
+        rows = [dict(r) for r in con.execute(
+            "SELECT event_id, symbol, category, relevance FROM scores WHERE scorer='rules' AND version=?", (RULES_VERSION,))]
+    cells: Dict = {}
+    for r in rows:
+        if r["relevance"] != "mention":
+            cells.setdefault((r["symbol"], r["category"]), []).append(r["event_id"])
+    picked: List[int] = []
+    per = max(1, int(n * 0.85) // max(1, len(cells)))
+    for key in sorted(cells):
+        ids = cells[key]
+        rnd.shuffle(ids)
+        picked += [i for i in ids[:per] if i not in picked]
+    rest = [r["event_id"] for r in rows if r["event_id"] not in set(picked)]
+    rnd.shuffle(rest)
+    picked += rest[: max(0, n - len(picked))]
+    return picked[:n]
 
 
 def estimate(n_events: Optional[int] = None) -> Dict:
-    """Rough cost of scoring every unscored event with Claude (characters / 4 ~ tokens)."""
+    """Cost of scoring every unscored event with Claude. Uses the measured average tokens per
+    story from earlier runs (score_calls) when there are any; otherwise characters / 4."""
     evs = unscored("claude", PROMPT_VERSION)
     if n_events is not None:
         evs = evs[:n_events]
-    sys_tok = len(SYSTEM) / 4 + 350  # + schema / format overhead
-    tin = sum(sys_tok + len(_user_prompt(e, _targets(e["symbols"]))) / 4 for e in evs)
-    tout = sum(40 + 70 * max(1, len(_targets(e["symbols"]))) for e in evs)
+    with news.connect() as con:
+        m = con.execute("SELECT COUNT(*) n, AVG(input_tokens) i, AVG(output_tokens) o FROM score_calls").fetchone()
+    if m["n"]:
+        tin, tout, basis = m["i"] * len(evs), m["o"] * len(evs), f"measured on {m['n']} stories"
+    else:
+        sys_tok = len(SYSTEM) / 4 + 350
+        tin = sum(sys_tok + len(_user_prompt(e, _targets(e["symbols"]))) / 4 for e in evs)
+        tout = sum(40 + 70 * max(1, len(_targets(e["symbols"]))) for e in evs)
+        basis = "rough, from text length"
     cost = tin / 1e6 * PRICE_IN + tout / 1e6 * PRICE_OUT
-    return {"events": len(evs), "input_tokens": int(tin), "output_tokens": int(tout),
-            "cost_usd": round(cost, 2), "cost_usd_batch": round(cost / 2, 2), "model": CLAUDE_MODEL}
+    return {"events": len(evs), "input_tokens": int(tin), "output_tokens": int(tout), "cost_usd": round(cost, 2),
+            "cost_usd_batch": round(cost / 2, 2), "model": CLAUDE_MODEL, "basis": basis}
 
 
 def sample(n: int = 40) -> List[Dict]:
