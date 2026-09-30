@@ -92,3 +92,25 @@ def score_claude(req: ClaudeRunReq):
         cached_estimate(force=True)
         return out
     return jobs.submit("news-score", work).public()
+
+
+# ----------------------------------------------------------------- impact study (step 4)
+from autobot import event_study  # noqa: E402
+
+
+class ImpactReq(BaseModel):
+    scorer: str = Field("rules", pattern="^(rules|claude)$")
+
+
+@router.get("/api/news/impact")
+def impact():
+    """The last saved event study (data/event_study.json), or 404 if it hasn't been run."""
+    from fastapi import HTTPException
+    if not event_study.OUT.exists():
+        raise HTTPException(404, "No impact study yet. Run it from the News page.")
+    return json.loads(event_study.OUT.read_text(encoding="utf-8"))
+
+
+@router.post("/api/news/impact")
+def run_impact(req: ImpactReq):
+    return jobs.submit("impact", lambda progress: {"counts": event_study.run(req.scorer, progress)["counts"]}).public()

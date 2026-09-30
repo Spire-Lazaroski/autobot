@@ -4,6 +4,7 @@ import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
 import { api, useJob, type Job, type Row } from "../lib/api";
 import { fmt, nyTime } from "../lib/format";
+import { NewsImpact } from "./NewsImpact";
 
 interface Status {
   collector: { running: boolean; pid?: number; heartbeat_age_s?: number; stream_items?: number; poll_new?: number; last_item_at?: string | null; connected?: boolean };
@@ -69,7 +70,7 @@ export function News() {
         )}
       </Panel>
       <ScoresPanel symbols={st.data?.symbols ?? []} />
-      <p className="text-[11.5px] text-dim">The impact study (step 4) will appear on this page.</p>
+      <NewsImpact />
     </div>
   );
 }
