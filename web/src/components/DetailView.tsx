@@ -34,7 +34,7 @@ export function DetailView({ run, strategy, params, symbols, initialSymbol, onCl
   const m = d?.metrics, b = d?.benchmark_metrics;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-[rgb(26_26_46/0.35)] backdrop-blur-[1px] flex" onClick={onClose}>
       <div className="m-0 sm:m-4 flex-1 bg-bg border border-line rounded-md flex flex-col min-w-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <header className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-line">
           <span className="font-semibold num">{strategy}</span>
@@ -44,7 +44,7 @@ export function DetailView({ run, strategy, params, symbols, initialSymbol, onCl
           <div className="flex gap-1 ml-auto flex-wrap">
             {symbols.map((s) => (
               <button key={s} onClick={() => setSymbol(s)}
-                className={`chip border num ${s === symbol ? "border-accent text-accent bg-accent/10" : "border-line-2 text-muted hover:text-fg"}`}>{s}</button>
+                className={`chip border num ${s === symbol ? "tab-on" : "border-line-2 text-muted hover:text-fg"}`}>{s}</button>
             ))}
           </div>
           <button className="btn" onClick={onClose} aria-label="Close">✕</button>

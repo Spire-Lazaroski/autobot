@@ -228,7 +228,7 @@ function LiveChart({ symbols, timeframe }: { symbols: string[]; timeframe?: stri
     <Panel title={`Live candles${q.data ? ` · ${q.data.timeframe}` : ""} · markers = actual paper fills · refreshes every 30 s`}
       right={<div className="flex gap-1 flex-wrap">{symbols.map((s) => (
         <button key={s} onClick={() => setSym(s)}
-          className={`chip border num ${s === current ? "border-accent text-accent bg-accent/10" : "border-line-2 text-muted"}`}>{s}</button>
+          className={`chip border num ${s === current ? "tab-on" : "border-line-2 text-muted"}`}>{s}</button>
       ))}</div>}>
       {!current && <p className="text-muted text-[12px]">No symbols in jobs or positions.</p>}
       {q.isLoading && <Spinner label="Loading bars…" />}

@@ -28,8 +28,8 @@ export function StrategyCards({ strategies, picked, onChange }: {
       <div className="flex flex-wrap items-center gap-1.5">
         {families.map((f) => (
           <button key={f} onClick={() => setFam(f)}
-            className={`chip border ${fam === f ? "border-accent text-accent bg-accent/10" : "border-line-2 text-muted hover:text-fg"}`}>
-            {FAMILY_ICON[f] ?? ""} {f.replace("_", " ")}
+            className={`chip border ${fam === f ? "tab-on" : "border-line-2 text-muted hover:text-fg"}`}>
+            {FAMILY_ICON[f] && <i className={`bi ${FAMILY_ICON[f]} mr-1`} />}{f.replace("_", " ")}
           </button>
         ))}
         <span className="ml-auto text-[11px] text-muted num">{count} on</span>
@@ -42,20 +42,20 @@ export function StrategyCards({ strategies, picked, onChange }: {
           const changed = JSON.stringify(p.params) !== JSON.stringify(s.defaults);
           return (
             <div key={s.name} className={`panel p-2.5 transition-opacity ${p.on ? "" : "opacity-50"}`}
-              style={{ borderLeft: `3px solid ${p.on ? colorFor(s.name) : "#2a3444"}` }}>
+              style={{ borderLeft: `3px solid ${p.on ? colorFor(s.name) : "var(--line-strong)"}` }}>
               <div className="flex items-start gap-2">
                 <input type="checkbox" className="mt-0.5" checked={p.on} aria-label={`use ${s.name}`}
                   onChange={(e) => update(s.name, { ...p, on: e.target.checked })} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-semibold num text-[12px] truncate">{s.name}</span>
-                    <span className="chip bg-line text-muted">{FAMILY_ICON[s.family]} {s.family.replace("_", " ")}</span>
+                    <span className="chip bg-panel-2 border border-line text-muted"><i className={`bi ${FAMILY_ICON[s.family]} mr-1`} />{s.family.replace("_", " ")}</span>
                   </div>
                   <p className="text-[11px] text-muted leading-snug mt-0.5">{s.description}</p>
                   {s.source && <p className="text-[10px] text-dim italic mt-0.5 truncate" title={s.source}>{s.source}</p>}
                 </div>
                 {changed && (
-                  <button className="text-[10px] text-muted hover:text-accent" title="Reset to defaults"
+                  <button className="text-[10px] text-muted hover:text-fg underline" title="Reset to defaults"
                     onClick={() => update(s.name, { ...p, params: s.defaults })}>reset</button>
                 )}
               </div>

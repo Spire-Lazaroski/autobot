@@ -1,3 +1,5 @@
+import { benchmarkGrey, series, states } from "../theme";
+
 export const fmt = (v: unknown, d = 2): string => {
   if (v === null || v === undefined || (typeof v === "number" && !isFinite(v))) return "–";
   if (typeof v === "number") return v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -11,16 +13,13 @@ export const signed = (v: number | null | undefined, d = 2) =>
 export const pnl = (v: number | null | undefined) =>
   v === null || v === undefined || v === 0 ? "text-fg" : v > 0 ? "text-up" : "text-down";
 
-const PALETTE = ["#4aa3ff", "#f5b942", "#c084fc", "#2dd4bf", "#fb7185", "#a3e635", "#f97316",
-  "#60a5fa", "#e879f9", "#facc15", "#34d399", "#f472b6", "#38bdf8", "#fbbf24", "#818cf8", "#4ade80"];
+// Series order from the brand (navy, gold, then distinguishable extras); fixed colours for
+// the benchmark (always grey, drawn dotted) and for regimes / states.
+const FIXED: Record<string, string> = { buy_and_hold: benchmarkGrey, ...states };
 const assigned = new Map<string, string>();
-const FIXED: Record<string, string> = {
-  buy_and_hold: "#9ca3af", flat: "#374151", warmup: "#1f2937",
-  trend: "#22c55e", range: "#4aa3ff", high_vol: "#ef4444", long: "#22c55e", short: "#ef4444",
-};
 export function colorFor(name: string): string {
   if (FIXED[name]) return FIXED[name];
-  if (!assigned.has(name)) assigned.set(name, PALETTE[assigned.size % PALETTE.length]);
+  if (!assigned.has(name)) assigned.set(name, series[assigned.size % series.length]);
   return assigned.get(name)!;
 }
 
@@ -31,6 +30,8 @@ const nyFmt = new Intl.DateTimeFormat("en-US", {
 });
 export const nyTime = (s: number) => nyFmt.format(new Date(s * 1000));
 
+/** Bootstrap Icons class per strategy family. */
 export const FAMILY_ICON: Record<string, string> = {
-  benchmark: "◎", trend: "↗", mean_reversion: "⇄", breakout: "⇪", intraday: "◷", meta: "⎇",
+  benchmark: "bi-flag", trend: "bi-graph-up-arrow", mean_reversion: "bi-arrow-left-right",
+  breakout: "bi-rocket-takeoff", intraday: "bi-clock", meta: "bi-diagram-3",
 };

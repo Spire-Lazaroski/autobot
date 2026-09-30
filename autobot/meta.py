@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from . import indicators as ind
+from .indicators import COL
 from .backtest import CostModel, run_backtest
 from .strategies import STRATEGIES, StrategySpec, get_signal
 
@@ -206,8 +207,8 @@ def _(df, p):
               "er": (ind.efficiency_ratio(df.close, p["er_period"]), p["er_trend"]),
               "vr": (ind.variance_ratio(df.close, p["vr_period"]), p["vr_trend"])}[m]
     vp = ind.vol_percentile(df.close, p["vol_period"], p["vol_lookback"])
-    return {"panes": [ind._pane(f"trend strength ({m})", [ind._line(m, s, "#4aa3ff")], [thr]),
-                      ind._pane("vol percentile", [ind._line("vol pct", vp, "#fb7185")], [p["high_vol_pct"]], [0, 1])]}
+    return {"panes": [ind._pane(f"trend strength ({m})", [ind._line(m, s, COL['primary'])], [thr]),
+                      ind._pane("vol percentile", [ind._line("vol pct", vp, COL['vol'])], [p["high_vol_pct"]], [0, 1])]}
 
 
 @ind.plot("perf_rotation")
@@ -223,7 +224,7 @@ def _(df, p):
     p = {**ENSEMBLE_DEFAULTS, **p}
     avg, _ = _vote(df, p, False)
     t = float(p["threshold"])
-    return {"panes": [ind._pane("net vote", [ind._line("vote", avg, "#c084fc")], [t, -t, 0], [-1, 1])]}
+    return {"panes": [ind._pane("net vote", [ind._line("vote", avg, COL['osc'])], [t, -t, 0], [-1, 1])]}
 
 
 # ----------------------------------------------------------------- registry

@@ -1,43 +1,59 @@
 @import "tailwindcss";
 
+/* Tailwind names -> Spire brand tokens (defined once, in theme.ts -> brand.css).
+   bg/panel = white paper, panel-2 = sunk, fg = ink, muted = ink-soft,
+   up/down = profit/loss (not brand colours), warn = AA-safe warning text, accent = navy. */
 @theme {
-  --color-bg: #0a0d11;
-  --color-panel: #11161d;
-  --color-panel-2: #161c25;
-  --color-line: #1f2733;
-  --color-line-2: #2a3444;
-  --color-fg: #d4d9e1;
-  --color-muted: #7b8698;
-  --color-dim: #4b5566;
-  --color-up: #22c55e;
-  --color-down: #ef4444;
-  --color-warn: #f5b942;
-  --color-accent: #4aa3ff;
-  --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --color-bg: var(--paper);
+  --color-panel: var(--paper);
+  --color-panel-2: var(--sunk);
+  --color-line: var(--line);
+  --color-line-2: var(--line-strong);
+  --color-fg: var(--ink);
+  --color-muted: var(--ink-soft);
+  --color-dim: var(--ink-faint);
+  --color-up: var(--profit);
+  --color-down: var(--loss);
+  --color-warn: var(--warn-ink);
+  --color-warn-bg: var(--warn-bg);
+  --color-accent: var(--navy);
+  --color-navy: var(--navy);
+  --color-amber: var(--amber);
+  --font-sans: "Inter", sans-serif;
+  --font-heading: "Manrope", sans-serif;
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 html, body, #root { height: 100%; }
 body {
   @apply bg-bg text-fg antialiased;
-  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-family: "Inter", sans-serif;
   font-size: 13px;
 }
-@utility num {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.panel { @apply bg-panel border border-line rounded-md; }
-.panel-title { @apply text-[11px] uppercase tracking-wider text-muted font-semibold; }
+h1, h2, h3, .panel-title { font-family: "Manrope", sans-serif; }
+.panel { @apply bg-panel border border-line rounded-xl; }
+.panel-title { @apply text-[12px] tracking-wide text-muted font-bold; }
 .input {
-  @apply bg-bg border border-line-2 rounded px-2 py-1 text-fg outline-none focus:border-accent num text-[12px];
+  @apply bg-bg border border-line-2 rounded-lg px-2 py-1 text-fg outline-none num text-[12.5px];
 }
-.btn {
-  @apply inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-semibold border border-line-2
-         bg-panel-2 hover:border-accent disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap;
-}
-.btn-primary { @apply bg-accent/15 border-accent/60 text-accent hover:bg-accent/25; }
-.btn-danger { @apply bg-down/15 border-down/60 text-down hover:bg-down/25; }
-.chip { @apply inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #2a3444; border-radius: 4px; }
+.input:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgb(217 140 43 / 0.18); }
+/* buttons follow the brand pill (sp-btn in brand.css) */
+.btn { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; background:var(--paper);
+  border:1px solid var(--line); border-radius:30px; padding:6px 14px; cursor:pointer; font-weight:600; font-size:12.5px;
+  color:var(--ink-soft); transition:background .15s, color .15s, border-color .15s; }
+.btn:hover:not(:disabled) { background:var(--amber); border-color:var(--amber); color:#fff; }
+.btn:disabled { opacity:.45; cursor:not-allowed; }
+.btn-primary { background:linear-gradient(140deg, var(--gold), var(--amber)); border-color:transparent; color:var(--navy); }
+.btn-primary:hover:not(:disabled) { background:var(--amber); color:#fff; }
+.btn-danger { color:var(--loss); border-color:var(--loss); }
+.btn-danger:hover:not(:disabled) { background:var(--loss); border-color:var(--loss); color:#fff; }
+.chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold tracking-wide; }
+.chip-warn { background:var(--warn-bg); color:var(--warn-ink); border:1px solid rgb(217 140 43 / 0.45); }
+.tab-on { background:linear-gradient(140deg, var(--gold), var(--amber)); color:var(--navy); border-color:transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

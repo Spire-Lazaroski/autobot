@@ -1,0 +1,47 @@
+{
+  "brand": {
+    "navy": "#1a1a2e",
+    "gold": "#e8b23d",
+    "amber": "#d98c2b",
+    "paper": "#ffffff",
+    "sunk": "#fbfaf6",
+    "line": "#e7e2d6",
+    "ink": "#201d2b",
+    "ink-soft": "#52514e"
+  },
+  "extra": {
+    "profit": "#1e7d4f",
+    "loss": "#c23b3b",
+    "warn-ink": "#8a5a12",
+    "warn-bg": "#fdf3e1",
+    "line-strong": "#d6cfbf",
+    "ink-faint": "#6b6964",
+    "mark2": "#3a3a52"
+  },
+  "series": [
+    "#1a1a2e",
+    "#e8b23d",
+    "#1b9aaa",
+    "#3f6fd8",
+    "#8e5bd0",
+    "#d6457a",
+    "#5b8c3a",
+    "#b86b2b",
+    "#2f4858",
+    "#7a7a7a"
+  ],
+  "benchmarkGrey": "#8d8a83",
+  "states": {
+    "trend": "#1b9aaa",
+    "range": "#3f6fd8",
+    "high_vol": "#c23b3b",
+    "flat": "#cfc9bb",
+    "warmup": "#ece8de",
+    "long": "#1e7d4f",
+    "short": "#c23b3b"
+  },
+  "fonts": {
+    "heading": "'Manrope', sans-serif",
+    "ui": "'Inter', sans-serif"
+  }
+}

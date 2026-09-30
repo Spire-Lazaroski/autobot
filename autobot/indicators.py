@@ -7,12 +7,21 @@ overlays on the price pane and extra panes (RSI, MACD, ...) with guide levels.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Callable, Dict, List
 
 import numpy as np
 import pandas as pd
 
 RTH_OPEN, RTH_CLOSE = 9 * 60 + 30, 16 * 60  # minutes after midnight, New York
+
+# Overlay colours come from the Spire brand (web/src/theme.ts -> autobot/assets/brand.json).
+_B = json.loads((Path(__file__).resolve().parent / "assets" / "brand.json").read_text(encoding="utf-8"))
+COL = {
+    "primary": _B["brand"]["navy"], "secondary": _B["brand"]["gold"], "up": _B["extra"]["profit"],
+    "down": _B["extra"]["loss"], "osc": _B["series"][4], "vol": _B["series"][5], "hist": _B["extra"]["line-strong"],
+}
 
 
 # ----------------------------------------------------------------- basics
@@ -197,88 +206,88 @@ def plot(name):
 
 @plot("sma_cross")
 def _(df, p):
-    return {"overlays": [_line(f"SMA {p['fast']}", sma(df.close, p["fast"]), "#f5c542"),
-                         _line(f"SMA {p['slow']}", sma(df.close, p["slow"]), "#4aa3ff")]}
+    return {"overlays": [_line(f"SMA {p['fast']}", sma(df.close, p["fast"]), COL['secondary']),
+                         _line(f"SMA {p['slow']}", sma(df.close, p["slow"]), COL['primary'])]}
 
 
 @plot("ema_cross")
 def _(df, p):
-    return {"overlays": [_line(f"EMA {p['fast']}", ema(df.close, p["fast"]), "#f5c542"),
-                         _line(f"EMA {p['slow']}", ema(df.close, p["slow"]), "#4aa3ff")]}
+    return {"overlays": [_line(f"EMA {p['fast']}", ema(df.close, p["fast"]), COL['secondary']),
+                         _line(f"EMA {p['slow']}", ema(df.close, p["slow"]), COL['primary'])]}
 
 
 @plot("macd")
 def _(df, p):
     line, sig, hist = macd_lines(df.close, p["fast"], p["slow"], p["signal"])
-    return {"panes": [_pane("MACD", [_line("hist", hist, "#6b7280"), _line("macd", line, "#4aa3ff"),
-                                      _line("signal", sig, "#f5c542")], [0])]}
+    return {"panes": [_pane("MACD", [_line("hist", hist, COL['hist']), _line("macd", line, COL['primary']),
+                                      _line("signal", sig, COL['secondary'])], [0])]}
 
 
 @plot("rsi_reversion")
 def _(df, p):
-    return {"panes": [_pane(f"RSI {p['period']}", [_line("rsi", rsi(df.close, p["period"]), "#c084fc")],
+    return {"panes": [_pane(f"RSI {p['period']}", [_line("rsi", rsi(df.close, p["period"]), COL['osc'])],
                             [p["oversold"], p["exit_level"], p["overbought"]], [0, 100])]}
 
 
 @plot("bollinger_reversion")
 def _(df, p):
     lo, mid, hi = bollinger(df.close, p["period"], p["num_std"])
-    return {"overlays": [_line("upper", hi, "#4aa3ff", "dot"), _line("mid", mid, "#f5c542"),
-                         _line("lower", lo, "#4aa3ff", "dot")]}
+    return {"overlays": [_line("upper", hi, COL['primary'], "dot"), _line("mid", mid, COL['secondary']),
+                         _line("lower", lo, COL['primary'], "dot")]}
 
 
 @plot("donchian_breakout")
 def _(df, p):
     hi, lo_exit, _, _ = donchian(df, p["entry"], p["exit"])
-    return {"overlays": [_line(f"{p['entry']}-bar high", hi, "#22c55e", "dot"),
-                         _line(f"{p['exit']}-bar low", lo_exit, "#ef4444", "dot")]}
+    return {"overlays": [_line(f"{p['entry']}-bar high", hi, COL['up'], "dot"),
+                         _line(f"{p['exit']}-bar low", lo_exit, COL['down'], "dot")]}
 
 
 @plot("vwap_reversion")
 def _(df, p):
     v = session_vwap(df)
     b = p["band_pct"] / 100
-    return {"overlays": [_line("VWAP", v, "#f5c542"), _line("band -", v * (1 - b), "#4aa3ff", "dot"),
-                         _line("band +", v * (1 + b), "#4aa3ff", "dot")]}
+    return {"overlays": [_line("VWAP", v, COL['secondary']), _line("band -", v * (1 - b), COL['primary'], "dot"),
+                         _line("band +", v * (1 + b), COL['primary'], "dot")]}
 
 
 @plot("momentum")
 def _(df, p):
     roc = df.close.pct_change(p["lookback"]) * 100
-    return {"panes": [_pane(f"ROC {p['lookback']} %", [_line("roc", roc, "#4aa3ff")],
+    return {"panes": [_pane(f"ROC {p['lookback']} %", [_line("roc", roc, COL['primary'])],
                             [p["threshold"], -p["threshold"]])]}
 
 
 @plot("connors_rsi2")
 def _(df, p):
-    return {"overlays": [_line(f"SMA {p['trend']}", sma(df.close, p["trend"]), "#4aa3ff"),
-                         _line(f"SMA {p['exit_sma']}", sma(df.close, p["exit_sma"]), "#f5c542")],
-            "panes": [_pane(f"RSI {p['rsi_period']}", [_line("rsi", rsi(df.close, p["rsi_period"]), "#c084fc")],
+    return {"overlays": [_line(f"SMA {p['trend']}", sma(df.close, p["trend"]), COL['primary']),
+                         _line(f"SMA {p['exit_sma']}", sma(df.close, p["exit_sma"]), COL['secondary'])],
+            "panes": [_pane(f"RSI {p['rsi_period']}", [_line("rsi", rsi(df.close, p["rsi_period"]), COL['osc'])],
                             [p["entry"], 100 - p["entry"]], [0, 100])]}
 
 
 @plot("ibs_reversion")
 def _(df, p):
-    return {"panes": [_pane("IBS", [_line("ibs", ibs(df), "#c084fc")], [p["low"], p["high"]], [0, 1])]}
+    return {"panes": [_pane("IBS", [_line("ibs", ibs(df), COL['osc'])], [p["low"], p["high"]], [0, 1])]}
 
 
 @plot("opening_range_breakout")
 def _(df, p):
     hi, lo = opening_range(df, p["range_min"])
-    return {"overlays": [_line("OR high", hi, "#22c55e", "dot"), _line("OR low", lo, "#ef4444", "dot")]}
+    return {"overlays": [_line("OR high", hi, COL['up'], "dot"), _line("OR low", lo, COL['down'], "dot")]}
 
 
 @plot("intraday_momentum")
 def _(df, p):
     r = first_period_return(df, p["signal_min"]) * 100
-    return {"panes": [_pane(f"first {p['signal_min']} min return %", [_line("ret", r, "#4aa3ff")], [0])]}
+    return {"panes": [_pane(f"first {p['signal_min']} min return %", [_line("ret", r, COL['primary'])], [0])]}
 
 
 @plot("noise_area")
 def _(df, p):
     up, lo = noise_bands(df, p["lookback"], p["band_mult"])
-    return {"overlays": [_line("noise +", up, "#22c55e", "dot"), _line("noise -", lo, "#ef4444", "dot"),
-                         _line("VWAP", session_vwap(df), "#f5c542")]}
+    return {"overlays": [_line("noise +", up, COL['up'], "dot"), _line("noise -", lo, COL['down'], "dot"),
+                         _line("VWAP", session_vwap(df), COL['secondary'])]}
 
 
 def plot_indicators(name: str, df: pd.DataFrame, params: Dict) -> Dict[str, List]:

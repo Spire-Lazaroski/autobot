@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, useStrategies, type Params } from "../lib/api";
-import { colorFor, FAMILY_ICON } from "../lib/format";
+import { colorFor } from "../lib/format";
 import { ParamInput } from "./ParamInput";
 import { ErrorBox, Panel, Spinner } from "./ui";
 
@@ -95,7 +95,7 @@ export function JobsEditor({ botRunning }: { botRunning: boolean }) {
         {draft.jobs.map((j, i) => {
           const spec = specs[j.strategy];
           return (
-            <div key={i} className={`panel p-2.5 bg-panel-2 ${j.enabled ? "" : "opacity-60"}`} style={{ borderLeft: `3px solid ${j.enabled ? colorFor(j.strategy) : "#2a3444"}` }}>
+            <div key={i} className={`panel p-2.5 bg-panel-2 ${j.enabled ? "" : "opacity-60"}`} style={{ borderLeft: `3px solid ${j.enabled ? colorFor(j.strategy) : "var(--line-strong)"}` }}>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex items-center gap-1.5 text-[12px] pb-1.5 cursor-pointer">
                   <input type="checkbox" checked={j.enabled} onChange={(e) => setJob(i, { enabled: e.target.checked })} aria-label={`enable ${j.name}`} />
@@ -110,7 +110,7 @@ export function JobsEditor({ botRunning }: { botRunning: boolean }) {
                   <select className="input" value={j.strategy}
                     onChange={(e) => setJob(i, { strategy: e.target.value, params: structuredClone(specs[e.target.value]?.defaults ?? {}) })}>
                     {["benchmark", "trend", "mean_reversion", "breakout", "intraday", "meta"].map((fam) => (
-                      <optgroup key={fam} label={`${FAMILY_ICON[fam] ?? ""} ${fam.replace("_", " ")}`}>
+                      <optgroup key={fam} label={fam.replace("_", " ")}>
                         {strategies.data!.filter((s) => s.family === fam).map((s) => <option key={s.name}>{s.name}</option>)}
                       </optgroup>
                     ))}

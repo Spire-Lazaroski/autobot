@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "brand": "node scripts/gen-brand.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
+    "bootstrap-icons": "^1.13.1",
     "lightweight-charts": "^5.2.1",
     "plotly.js-dist-min": "^4.1.1",
     "react": "^19.3.0",

@@ -8,6 +8,7 @@ import { SortTable } from "../components/SortTable";
 import { pickedOf } from "../components/StrategyCards";
 import { Empty, ErrorBox, Kpi, LowTrades, Panel, Spinner } from "../components/ui";
 import { api, useStrategies, type Frame, type Params, type Row, type RunReq } from "../lib/api";
+import { C } from "../lib/chart";
 import { colorFor, fmt, pnl, signed, toDates } from "../lib/format";
 import { useSettings } from "../lib/settings";
 import { setPageState, usePageState } from "../lib/usePageState";
@@ -89,7 +90,7 @@ export function Shifting() {
           </div>
         )}
         {spec && JSON.stringify(params) !== JSON.stringify(spec.defaults) && (
-          <button className="text-[11px] text-muted hover:text-accent mt-2" onClick={() => setParamsBy({ ...paramsBy, [meta]: spec.defaults })}>reset to defaults</button>
+          <button className="text-[11px] text-muted underline mt-2" onClick={() => setParamsBy({ ...paramsBy, [meta]: spec.defaults })}>reset to defaults</button>
         )}
         <p className="text-[11px] text-dim mt-2">
           Decisions at bar t use only bars up to t and are traded on bar t+1. Each underlying strategy runs continuously, so it takes over in its
@@ -136,7 +137,7 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
 
   const lineTraces = Object.keys(res.equity.series).map((n) => ({
     x, y: res.equity.series[n].map((v) => (v === null ? null : (v - 1) * 100)), name: n, type: "scatter", mode: "lines",
-    line: { color: n === res.strategy ? "#f8fafc" : colorFor(n), width: n === res.strategy ? 2.6 : 1.2, dash: n === "buy_and_hold" ? "dot" : "solid" },
+    line: { color: n === res.strategy ? C.navy : colorFor(n), width: n === res.strategy ? 2.8 : 1.2, dash: n === "buy_and_hold" ? "dot" : "solid" },
     hovertemplate: "%{y:.2f}%",
   }));
 
@@ -155,7 +156,7 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
       <Panel title="Equity vs underlying strategies vs buy & hold · band = what was active"
         right={<div className="flex gap-1 flex-wrap">{syms.map((s) => (
           <button key={s} onClick={() => setSym(s)}
-            className={`chip border num ${s === sym ? "border-accent text-accent bg-accent/10" : "border-line-2 text-muted"}`}>{s}</button>
+            className={`chip border num ${s === sym ? "tab-on" : "border-line-2 text-muted"}`}>{s}</button>
         ))}</div>}>
         <Plot height={440} data={[...lineTraces, ...bandTraces]}
           layout={{
@@ -169,7 +170,7 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
           {[...new Set([...tl.active.map((s) => s.name), ...(tl.regimes ?? []).map((s) => s.name)])].map((n) => (
             <span key={n} className="flex items-center gap-1 text-muted"><span className="inline-block w-3 h-2 rounded-sm" style={{ background: colorFor(n) }} />{n}</span>
           ))}
-          <button className="ml-auto text-accent hover:underline" onClick={() => onOpen(sym)}>open {sym} candles ↗</button>
+          <button className="ml-auto text-fg font-semibold underline" onClick={() => onOpen(sym)}>open {sym} candles ↗</button>
         </div>
         <p className="text-[11px] text-dim mt-1">Equity lines are equal-weight across all symbols; the band shows {sym}.</p>
       </Panel>
@@ -178,7 +179,7 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
         <Panel title="Time in each (all symbols, % of bars)">
           <Plot height={280} data={[{
             type: "pie", labels: Object.keys(res.time_in), values: Object.values(res.time_in), hole: 0.55, sort: false,
-            marker: { colors: Object.keys(res.time_in).map(colorFor), line: { color: "#0a0d11", width: 2 } },
+            marker: { colors: Object.keys(res.time_in).map(colorFor), line: { color: C.paper, width: 2 } },
             textinfo: "percent", textfont: { size: 10 }, hovertemplate: "%{label}: %{value:.1f}%<extra></extra>",
           }]} layout={{ margin: { l: 8, r: 8, t: 8, b: 8 }, legend: { orientation: "v", x: 1, y: 0.5, font: { size: 10 } } }} />
         </Panel>
@@ -196,11 +197,11 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
 
       <Panel title="Metrics (portfolio across symbols)">
         <SortTable rows={res.summary} rowKey={(r) => r.strategy} initialSort={{ key: "sharpe", desc: true }}
-          highlight={(r) => (r.role === "meta" ? "bg-accent/5" : r.role === "benchmark" ? "text-muted" : undefined)}
+          highlight={(r) => (r.role === "meta" ? "bg-panel-2 font-semibold" : r.role === "benchmark" ? "text-muted" : undefined)}
           cols={[
             { key: "strategy", label: "Strategy", render: (r) => (
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full" style={{ background: r.role === "meta" ? "#f8fafc" : colorFor(r.strategy) }} />
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: r.role === "meta" ? C.navy : colorFor(r.strategy) }} />
                 <span className="num font-semibold">{r.strategy}</span>
                 <span className="chip bg-line text-muted">{r.role}</span>
                 <LowTrades n={r.total_trades} min={low} />

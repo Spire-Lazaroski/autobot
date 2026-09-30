@@ -6,6 +6,7 @@ import { SortTable } from "../components/SortTable";
 import { pickedOf } from "../components/StrategyCards";
 import { Empty, ErrorBox, LowTrades, Panel, Progress, Spinner } from "../components/ui";
 import { api, useJob, useStrategies, type Job, type Params, type Row, type RunReq } from "../lib/api";
+import { C, DIVERGING, SEQUENTIAL } from "../lib/chart";
 import { colorFor, fmt, pnl } from "../lib/format";
 import { useSettings } from "../lib/settings";
 import { usePageState } from "../lib/usePageState";
@@ -66,7 +67,7 @@ export function Search() {
             const n = Object.values(x.grid).reduce((a, v) => a * v.length, 1);
             return (
               <button key={x.name} onClick={() => setNames(on ? selected.filter((y) => y !== x.name) : [...selected, x.name])}
-                className={`chip border num normal-case ${on ? "border-accent text-fg bg-accent/10" : "border-line-2 text-muted"}`}
+                className={`chip border num normal-case ${on ? "border-line-2 text-fg bg-panel-2" : "border-line text-dim"}`}
                 style={on ? { borderLeft: `3px solid ${colorFor(x.name)}` } : undefined}>
                 {x.name} <span className="text-dim ml-1">×{n}</span>
               </button>
@@ -111,7 +112,7 @@ function Results({ res, onOpen, onUse }: {
           <Plot height={420}
             onClick={(e) => { const p = e.points?.[0]?.customdata; if (p) onOpen(p); }}
             data={[
-              { x: [lo, hi], y: [lo, hi], mode: "lines", line: { dash: "dot", color: "#4b5566", width: 1 }, hoverinfo: "skip", showlegend: false },
+              { x: [lo, hi], y: [lo, hi], mode: "lines", line: { dash: "dot", color: C.inkFaint, width: 1 }, hoverinfo: "skip", showlegend: false },
               ...Object.entries(byStrat).map(([name, rows]) => ({
                 x: rows.map((r) => r.train_sharpe), y: rows.map((r) => r.test_sharpe), name, type: "scatter", mode: "markers",
                 marker: { color: colorFor(name), size: 8, opacity: 0.85, symbol: rows.map((r) => (r.test_trades_total < low ? "circle-open" : "circle")) },
@@ -120,7 +121,7 @@ function Results({ res, onOpen, onUse }: {
               })),
             ]}
             layout={{ hovermode: "closest", xaxis: { title: { text: "train Sharpe" } }, yaxis: { title: { text: "test Sharpe (unseen)" } }, margin: { l: 52, r: 12, t: 8, b: 40 },
-              annotations: [{ x: hi, y: lo, xanchor: "right", yanchor: "bottom", showarrow: false, text: "overfit ↘", font: { color: "#ef4444", size: 10 } }] }} />
+              annotations: [{ x: hi, y: lo, xanchor: "right", yanchor: "bottom", showarrow: false, text: "overfit ↘", font: { color: C.loss, size: 10.5 } }] }} />
           <p className="text-[11px] text-dim mt-1">Open circles: fewer than {low} test trades.</p>
         </Panel>
         <ParamHeatmap res={res} onOpen={onOpen} />
@@ -144,7 +145,7 @@ function Results({ res, onOpen, onUse }: {
             { key: "test_max_dd_%", label: "Test DD %" },
             { key: "test_trades_total", label: "Test tr", digits: 0 },
             { key: "use", label: "", render: (r) => (
-              <button className="text-[11px] text-accent hover:underline" onClick={(e) => {
+              <button className="text-[11px] text-fg font-semibold underline" onClick={(e) => {
                 e.stopPropagation(); onUse(r.strategy, r.param_values); setUsed(r.strategy);
               }}>{used === r.strategy ? "✓ in Lab" : "use in Lab"}</button>) },
           ]} />
@@ -213,7 +214,7 @@ function ParamHeatmap({ res, onOpen }: {
       {keys.length === 0 ? <p className="text-muted text-[12px]">No parameters to vary.</p> : oneD ? (
         <Plot height={380} data={["train_sharpe", "test_sharpe"].map((k) => ({
           x: xs.map(String), y: xs.map((v) => rows.find((r) => JSON.stringify(r.param_values[xk]) === JSON.stringify(v))?.[k] ?? null),
-          name: k, type: "bar", marker: { color: k === "test_sharpe" ? "#4aa3ff" : "#4b5566" },
+          name: k, type: "bar", marker: { color: k === "test_sharpe" ? C.navy : C.lineStrong },
         }))} layout={{ xaxis: { title: { text: xk }, type: "category" }, barmode: "group", margin: { l: 44, r: 12, t: 8, b: 40 } }} />
       ) : (
         <Plot height={380}
@@ -222,8 +223,8 @@ function ParamHeatmap({ res, onOpen }: {
             type: "heatmap", x: xs.map(String), y: ys.map(String),
             z: ys.map((yv) => xs.map((xv) => cell(xv, yv)?.[metric] ?? null)),
             text: ys.map((yv) => xs.map((xv) => { const r = cell(xv, yv); return r ? `${fmt(r[metric], metric.includes("trades") ? 0 : 2)}${r.test_trades_total < res.low_trades_threshold ? "*" : ""}` : "invalid"; })),
-            texttemplate: "%{text}", textfont: { size: 11, family: "Consolas, monospace", color: "#e5e7eb" },
-            colorscale: metric.includes("trades") ? "Blues" : [[0, "#ef4444"], [0.5, "#161c25"], [1, "#22c55e"]],
+            texttemplate: "%{text}", textfont: { size: 11, family: "Inter, sans-serif", color: C.ink },
+            colorscale: metric.includes("trades") ? SEQUENTIAL : DIVERGING,
             zmid: metric.includes("trades") ? undefined : 0, xgap: 2, ygap: 2, colorbar: { thickness: 8 },
             hovertemplate: `${xk}=%{x} ${yk}=%{y}<br>%{z:.2f}<extra></extra>`,
           }]}

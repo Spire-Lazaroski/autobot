@@ -4,6 +4,7 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 import type { Candles, Fill, Line, Pane } from "../lib/api";
+import { C } from "../lib/chart";
 import { colorFor } from "../lib/format";
 
 const NY = "America/New_York";
@@ -46,13 +47,13 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
     if (!box.current) return;
     const chart = createChart(box.current, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "#0a0d11" }, textColor: "#aab3c2", fontSize: 11,
-        panes: { separatorColor: "#1f2733", separatorHoverColor: "#2a3444" } },
-      grid: { vertLines: { color: "#141a22" }, horzLines: { color: "#141a22" } },
+      layout: { background: { type: ColorType.Solid, color: C.paper }, textColor: C.inkSoft, fontSize: 11, fontFamily: "Inter, sans-serif",
+        panes: { separatorColor: C.line, separatorHoverColor: C.lineStrong } },
+      grid: { vertLines: { color: C.line }, horzLines: { color: C.line } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#1f2733" },
+      rightPriceScale: { borderColor: C.line },
       timeScale: {
-        borderColor: "#1f2733", timeVisible: true, secondsVisible: false,
+        borderColor: C.line, timeVisible: true, secondsVisible: false,
         tickMarkFormatter: (time: Time, type: number) => {
           const s = time as number;
           if (type === 0) return nyFormat(s, { year: "numeric" });
@@ -68,12 +69,12 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
 
     // --- price pane
     const price = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e", downColor: "#ef4444", borderVisible: false, wickUpColor: "#22c55e", wickDownColor: "#ef4444",
+      upColor: C.profit, downColor: C.loss, borderVisible: false, wickUpColor: C.profit, wickDownColor: C.loss,
     });
     price.setData(t.map((time, i) => ({ time: time as UTCTimestamp, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i] })));
     for (const o of overlays) {
       const s = chart.addSeries(LineSeries, {
-        color: o.color ?? "#f5b942", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        color: o.color ?? C.navy, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
         lineStyle: o.dash ? LineStyle.Dotted : LineStyle.Solid, title: o.name,
       });
       s.setData(toLine(t, o.values));
@@ -82,7 +83,7 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
       time: f.time as UTCTimestamp,
       position: f.side === "buy" ? "belowBar" : "aboveBar",
       shape: f.side === "buy" ? "arrowUp" : "arrowDown",
-      color: f.kind === "exit" ? "#9ca3af" : f.side === "buy" ? "#22c55e" : "#ef4444",
+      color: f.kind === "exit" ? C.grey : f.side === "buy" ? C.profit : C.loss,
       text: f.label ?? (f.kind === "exit" ? "x" : f.to > 0 ? "L" : "S"),
     }));
     if (markers.length) createSeriesMarkers(price, markers);
@@ -97,16 +98,16 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
       p.series.forEach((l, k) => {
         const isHist = l.name === "hist";
         const s = isHist
-          ? chart.addSeries(HistogramSeries, { color: "#4b5566", priceLineVisible: false, lastValueVisible: false }, pane)
-          : chart.addSeries(LineSeries, { color: l.color ?? "#4aa3ff", lineWidth: 1, priceLineVisible: false, lastValueVisible: k === 0, title: k === 0 ? p.name : "" }, pane);
+          ? chart.addSeries(HistogramSeries, { color: C.lineStrong, priceLineVisible: false, lastValueVisible: false }, pane)
+          : chart.addSeries(LineSeries, { color: l.color ?? C.navy, lineWidth: 1, priceLineVisible: false, lastValueVisible: k === 0, title: k === 0 ? p.name : "" }, pane);
         if (isHist) {
           s.setData(t.map((time, i) => (l.values[i] === null ? { time: time as UTCTimestamp }
-            : { time: time as UTCTimestamp, value: l.values[i] as number, color: (l.values[i] as number) >= 0 ? "#22c55e66" : "#ef444466" })));
+            : { time: time as UTCTimestamp, value: l.values[i] as number, color: (l.values[i] as number) >= 0 ? `${C.profit}66` : `${C.loss}66` })));
         } else {
           s.setData(toLine(t, l.values));
         }
         if (k === (isHist ? 1 : 0) || (p.series.length === 1 && k === 0)) {
-          for (const lv of p.levels) s.createPriceLine({ price: lv, color: "#4b5566", lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false, title: "" });
+          for (const lv of p.levels) s.createPriceLine({ price: lv, color: C.inkFaint, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false, title: "" });
         }
       });
     }
@@ -124,7 +125,7 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
       pane += 1;
       stretch.push(0.6);
       const s = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, title: "position" }, pane);
-      s.setData(t.map((time, i) => ({ time: time as UTCTimestamp, value: position[i], color: position[i] > 0 ? "#22c55e99" : position[i] < 0 ? "#ef444499" : "#00000000" })));
+      s.setData(t.map((time, i) => ({ time: time as UTCTimestamp, value: position[i], color: position[i] > 0 ? `${C.profit}99` : position[i] < 0 ? `${C.loss}99` : "#00000000" })));
     }
 
     // --- equity (percent)
@@ -133,10 +134,10 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
       stretch.push(1.8);
       const pct = (v: number[]) => v.map((x) => (x === null ? null : (x - 1) * 100));
       if (equity.benchmark) {
-        chart.addSeries(LineSeries, { color: "#9ca3af", lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, title: "B&H %" }, pane)
+        chart.addSeries(LineSeries, { color: C.grey, lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, title: "B&H %" }, pane)
           .setData(toLine(t, pct(equity.benchmark)));
       }
-      chart.addSeries(LineSeries, { color: "#4aa3ff", lineWidth: 2, priceLineVisible: false, title: "strategy %" }, pane)
+      chart.addSeries(LineSeries, { color: C.navy, lineWidth: 2, priceLineVisible: false, title: "strategy %" }, pane)
         .setData(toLine(t, pct(equity.strategy)));
     }
 

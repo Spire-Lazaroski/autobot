@@ -16,7 +16,7 @@ export function Confirm({ title, children, confirmLabel, danger, busy, onConfirm
     return () => window.removeEventListener("keydown", k);
   }, [onCancel]);
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-[rgb(26_26_46/0.35)] backdrop-blur-[1px] flex items-center justify-center p-4" onClick={onCancel}>
       <div role="dialog" aria-modal="true" aria-label={title}
         className="panel w-full max-w-md p-4 flex flex-col gap-3 border-line-2" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-[15px] font-semibold">{title}</h2>

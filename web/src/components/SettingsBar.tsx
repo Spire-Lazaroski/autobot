@@ -21,11 +21,11 @@ export function SettingsBar({ action, extra }: { action?: ReactNode; extra?: Rea
   return (
     <div className="panel p-2.5 flex flex-wrap items-end gap-x-3 gap-y-2">
       <Field label="Data">
-        <div className="flex rounded border border-line-2 overflow-hidden">
+        <div className="flex rounded-full border border-line-2 overflow-hidden p-0.5 gap-0.5">
           {(["demo", "alpaca"] as const).map((src) => (
             <button key={src} onClick={() => set({ source: src })} disabled={src === "alpaca" && noKeys}
               title={src === "alpaca" && noKeys ? "No Alpaca keys in .env" : undefined}
-              className={`px-2.5 py-1 text-[12px] font-semibold disabled:opacity-40 ${s.source === src ? (src === "demo" ? "bg-warn/20 text-warn" : "bg-up/20 text-up") : "text-muted hover:text-fg"}`}>
+              className={`px-3 py-1 rounded-full text-[12px] font-semibold disabled:opacity-40 ${s.source === src ? "tab-on" : "text-muted hover:text-fg"}`}>
               {src === "demo" ? "Demo" : "Alpaca"}
             </button>
           ))}
@@ -63,7 +63,7 @@ export function SettingsBar({ action, extra }: { action?: ReactNode; extra?: Rea
       {extra}
       <div className="ml-auto flex gap-2">{action}</div>
       {s.source === "demo" && (
-        <div className="basis-full text-[11px] text-warn">
+        <div className="basis-full text-[11.5px] text-warn bg-warn-bg rounded-lg px-2.5 py-1.5">
           Demo data is synthetic: it tests the plumbing, not which strategy works.
         </div>
       )}

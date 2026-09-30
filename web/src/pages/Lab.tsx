@@ -7,6 +7,7 @@ import { SortTable, type Col } from "../components/SortTable";
 import { StrategyCards, pickedOf } from "../components/StrategyCards";
 import { Empty, ErrorBox, Kpi, LowTrades, Panel, Spinner } from "../components/ui";
 import { api, useStrategies, type CompareResult, type Params, type RunReq } from "../lib/api";
+import { C, DIVERGING } from "../lib/chart";
 import { colorFor, fmt, pnl, signed, toDates } from "../lib/format";
 import { useSettings } from "../lib/settings";
 import { usePageState } from "../lib/usePageState";
@@ -120,7 +121,7 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        <Kpi label="Best Sharpe" value={best?.strategy} sub={`Sharpe ${fmt(best?.sharpe)}`} tone="text-accent" />
+        <Kpi label="Best Sharpe" value={best?.strategy} sub={`Sharpe ${fmt(best?.sharpe)}`} tone="text-fg" />
         <Kpi label="Its return" value={`${signed(best?.["total_return_%"])}%`} tone={pnl(best?.["total_return_%"])}
           sub={bh ? `${signed(best["total_return_%"] - bh["total_return_%"])}% vs B&H` : undefined} />
         <Kpi label="Its max drawdown" value={`${fmt(best?.["max_drawdown_%"])}%`} tone="text-down"
@@ -145,7 +146,7 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
               textfont: { size: 10 },
               marker: {
                 size: summary.map((r) => 8 + Math.sqrt(Math.max(1, r.total_trades)) * 2.2),
-                color: summary.map((r) => colorFor(r.strategy)), opacity: 0.8, line: { width: 1, color: "#0a0d11" },
+                color: summary.map((r) => colorFor(r.strategy)), opacity: 0.85, line: { width: 1, color: C.paper },
               },
               hovertemplate: "%{text}<br>ret %{y:.2f}%<br>dd %{x:.2f}%<extra></extra>",
             }]}
@@ -163,11 +164,11 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
         <Plot height={Math.max(260, strats.length * 24 + 60)}
           onClick={(e) => e.points?.[0] && onOpen(e.points[0].y, e.points[0].x)}
           data={[{
-            z: heat, x: syms, y: strats, type: "heatmap", colorscale: [[0, "#ef4444"], [0.5, "#161c25"], [1, "#22c55e"]],
-            zmid: 0, text: heatText, texttemplate: "%{text}", textfont: { size: 10, family: "Consolas, monospace", color: "#e5e7eb" },
+            z: heat, x: syms, y: strats, type: "heatmap", colorscale: DIVERGING,
+            zmid: 0, text: heatText, texttemplate: "%{text}", textfont: { size: 10.5, family: "Inter, sans-serif", color: C.ink },
             hovertemplate: "%{y} · %{x}: %{z:.2f}%<extra></extra>", xgap: 2, ygap: 2, colorbar: { thickness: 8, ticksuffix: "%" },
           }]}
-          layout={{ hovermode: "closest", yaxis: { autorange: "reversed", tickfont: { family: "Consolas, monospace", size: 10 } }, margin: { l: 150, r: 12, t: 8, b: 32 } }} />
+          layout={{ hovermode: "closest", yaxis: { autorange: "reversed", tickfont: { size: 10.5 } }, margin: { l: 150, r: 12, t: 8, b: 32 } }} />
       </Panel>
       <p className="text-[11px] text-dim">
         {req.data.source === "demo" ? "Demo data. " : ""}Costs: {req.fee_bps} bps fee + {req.slippage_bps} bps slippage per unit turned over.

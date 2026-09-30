@@ -5,6 +5,7 @@ import { SortTable } from "../components/SortTable";
 import { pickedOf } from "../components/StrategyCards";
 import { Empty, ErrorBox, Kpi, LowTrades, Panel, Progress, Spinner } from "../components/ui";
 import { api, useJob, useStrategies, type Frame, type Job, type Params, type Row } from "../lib/api";
+import { C } from "../lib/chart";
 import { fmt, nyTime, pnl, signed, toDates } from "../lib/format";
 import { useSettings } from "../lib/settings";
 import { usePageState } from "../lib/usePageState";
@@ -24,9 +25,9 @@ interface WFResult {
 const TF_MIN: Record<string, number> = { "1Min": 1, "5Min": 5, "15Min": 15, "30Min": 30, "1Hour": 60, "1Day": 390 };
 const RANKS = ["sharpe", "sortino", "calmar", "total_return_%"];
 const LINES = {
-  walk_forward: { label: "walk-forward (re-optimized)", color: "#4aa3ff", dash: "solid", width: 2.2 },
-  fixed: { label: "fixed params", color: "#f5b942", dash: "solid", width: 1.4 },
-  buy_and_hold: { label: "buy & hold", color: "#9ca3af", dash: "dot", width: 1.2 },
+  walk_forward: { label: "walk-forward (re-optimized)", color: C.navy, dash: "solid", width: 2.2 },
+  fixed: { label: "fixed params", color: C.gold, dash: "solid", width: 1.4 },
+  buy_and_hold: { label: "buy & hold", color: C.grey, dash: "dot", width: 1.2 },
 } as const;
 
 export function WalkForward() {
@@ -107,7 +108,7 @@ function Results({ res }: { res: WFResult }) {
   const edge = (m.walk_forward["total_return_%"] ?? 0) - (m.fixed["total_return_%"] ?? 0);
   const bands = res.windows.map((w, i) => ({
     type: "rect", xref: "x", yref: "paper", x0: new Date(w.test_start * 1000), x1: new Date(w.test_end * 1000), y0: 0, y1: 1,
-    fillcolor: i % 2 ? "rgba(74,163,255,0.05)" : "rgba(0,0,0,0)", line: { width: 0 }, layer: "below",
+    fillcolor: i % 2 ? C.sunk : "rgba(0,0,0,0)", line: { width: 0 }, layer: "below",
   }));
 
   return (
@@ -152,7 +153,7 @@ function Results({ res }: { res: WFResult }) {
             <Plot height={70 * keys.length + 60}
               data={keys.map((k, i) => ({
                 x: res.windows.map((w) => new Date(w.test_start * 1000)), y: res.windows.map((w) => String(w.params[k])), name: k,
-                type: "scatter", mode: "lines+markers", line: { shape: "hv", width: 1.5, color: ["#4aa3ff", "#f5b942", "#c084fc", "#2dd4bf"][i % 4] },
+                type: "scatter", mode: "lines+markers", line: { shape: "hv", width: 1.5, color: C.series[i % C.series.length] },
                 yaxis: i ? `y${i + 1}` : "y", showlegend: false, hovertemplate: `${k}=%{y}<extra></extra>`,
               }))}
               layout={{
@@ -163,7 +164,7 @@ function Results({ res }: { res: WFResult }) {
                   return [i ? `yaxis${i + 1}` : "yaxis", {
                     domain: [1 - (i + 1) * h + 0.06, 1 - i * h], title: { text: k, font: { size: 10 } },
                     type: "category", categoryorder: "array", categoryarray: (res.grid[k] as unknown[]).map(String),
-                    gridcolor: "#1c2430", tickfont: { size: 10 },
+                    gridcolor: C.line, tickfont: { size: 10 },
                   }];
                 })),
               }} />
