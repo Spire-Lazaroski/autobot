@@ -74,6 +74,10 @@ STRATEGIES: Dict[str, Dict[str, str]] = {
         nick="back the recent winner", idea="Every few bars, give control to the strategy that has done best recently.",
         likes="Periods where one style keeps working.", hates="Markets where yesterday's winner is today's loser.",
         behavior="Switches now and then; can sit flat when everything has been losing."),
+    "news_guard": dict(
+        nick="step aside for news", idea="Runs another strategy, but takes no new position for a while after an important news story on the stock, and around its earnings releases.",
+        likes="Markets where news days bring sudden, unpredictable swings.", hates="Stocks whose best moves happen right after news.",
+        behavior="Fewer trades on news and earnings days; otherwise identical to the strategy it wraps."),
     "ensemble_vote": dict(
         nick="majority vote", idea="Ask several strategies and only take the position most of them agree on.",
         likes="Clear markets where signals agree.", hates="Mixed markets, where it mostly stays out.",

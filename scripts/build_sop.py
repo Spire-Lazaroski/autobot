@@ -32,7 +32,8 @@ from autobot.strategies import STRATEGIES  # noqa: E402
 DOCS = ROOT / "docs"
 NY, SKOPJE = ZoneInfo("America/New_York"), ZoneInfo("Europe/Skopje")
 FAMILY = {"benchmark": "Benchmark", "trend": "Trend following", "mean_reversion": "Buy the dip / mean reversion",
-          "breakout": "Breakout", "intraday": "Intraday (flat every night)", "meta": "Strategy shifting"}
+          "breakout": "Breakout", "intraday": "Intraday (flat every night)", "meta": "Strategy shifting",
+          "news": "News-aware"}
 
 
 # ----------------------------------------------------------------- facts from code and config
@@ -154,7 +155,7 @@ def build(f: dict) -> list:
     by_fam = {}
     for name, spec in STRATEGIES.items():
         by_fam.setdefault(spec.family, []).append(name)
-    for fam in ["benchmark", "trend", "mean_reversion", "breakout", "intraday", "meta"]:
+    for fam in ["benchmark", "trend", "mean_reversion", "breakout", "intraday", "meta", "news"]:
         names = by_fam.get(fam, [])
         if not names:
             continue

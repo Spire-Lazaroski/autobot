@@ -81,6 +81,7 @@ def fetch_bars(symbols: List[str], timeframe="15Min", days=90, end: datetime | N
             ny = df.index.tz_convert("America/New_York")
             mins = ny.hour * 60 + ny.minute
             df = df[(mins >= 9 * 60 + 30) & (mins < 16 * 60)]
+        df.attrs["symbol"] = sym  # lets news-aware strategies find this symbol's news
         out[sym] = df
     return out
 
@@ -107,7 +108,9 @@ def _download(sym, timeframe, start, end, feed) -> pd.DataFrame:
     if isinstance(df.index, pd.MultiIndex):
         df = df.xs(sym, level="symbol")
     df.index = pd.to_datetime(df.index, utc=True)
-    return df[["open", "high", "low", "close", "volume"] + (["vwap"] if "vwap" in df else [])]
+    out = df[["open", "high", "low", "close", "volume"] + (["vwap"] if "vwap" in df else [])].copy()
+    out.attrs["symbol"] = sym
+    return out
 
 
 # ----------------------------------------------------------------- demo data

@@ -37,7 +37,7 @@ def _check(names: List[str]):
             continue
         if n not in STRATEGIES:
             raise ValueError(f"unknown strategy '{n}'")
-        if STRATEGIES[n].family == "meta":
+        if STRATEGIES[n].family in ("meta", "news"):
             raise ValueError(f"'{n}' is a meta-strategy; meta-strategies can't be nested")
 
 
