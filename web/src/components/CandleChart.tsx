@@ -83,7 +83,7 @@ export function CandleChart({ candles, overlays = [], panes = [], fills = [], po
       position: f.side === "buy" ? "belowBar" : "aboveBar",
       shape: f.side === "buy" ? "arrowUp" : "arrowDown",
       color: f.kind === "exit" ? "#9ca3af" : f.side === "buy" ? "#22c55e" : "#ef4444",
-      text: f.kind === "exit" ? "x" : f.to > 0 ? "L" : "S",
+      text: f.label ?? (f.kind === "exit" ? "x" : f.to > 0 ? "L" : "S"),
     }));
     if (markers.length) createSeriesMarkers(price, markers);
 

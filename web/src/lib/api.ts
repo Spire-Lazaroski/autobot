@@ -61,6 +61,7 @@ export interface Fill {
   kind: "entry" | "exit";
   from: number;
   to: number;
+  label?: string; // marker text override (live fills show quantity)
 }
 export interface Candles {
   t: number[];

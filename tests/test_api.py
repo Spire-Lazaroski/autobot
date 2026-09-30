@@ -96,3 +96,25 @@ def test_detail_meta_has_active():
     r = client.post("/api/detail", json={"data": DATA, "symbol": "SPY", "strategy": "perf_rotation"})
     assert r.status_code == 200, r.text
     assert len(r.json()["active"]["names"]) == len(r.json()["candles"]["t"])
+
+
+def test_config_rejects_bad_params():
+    cfg = client.get("/api/config").json()
+    jobs = cfg["live"]["jobs"]
+    bad = {**cfg, "live": {**cfg["live"], "jobs": [{**jobs[0], "params": {"fastt": 3}}] + jobs[1:]}}
+    r = client.put("/api/config", json=bad)
+    assert r.status_code == 422 and "unknown params" in r.text
+
+
+def test_stop_needs_confirmation():
+    r = client.post("/api/live/stop", json={})
+    assert r.status_code == 400
+
+
+def test_start_refused_while_running(monkeypatch):
+    import api.live as L
+    monkeypatch.setattr(L, "bot_state", lambda: {"running": True, "pid": 4242})
+    called = []
+    monkeypatch.setattr(L.subprocess, "Popen", lambda *a, **k: called.append(a))
+    r = client.post("/api/live/start")
+    assert r.status_code == 409 and not called

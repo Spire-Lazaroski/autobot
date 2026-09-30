@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { useHealth } from "./lib/api";
 import { Lab } from "./pages/Lab";
+import { Live } from "./pages/Live";
 import { Search } from "./pages/Search";
 import { Shifting } from "./pages/Shifting";
 import { WalkForward } from "./pages/WalkForward";
@@ -16,6 +17,7 @@ export const PAGES: Page[] = [
   { id: "search", label: "Param search", Component: Search },
   { id: "walkforward", label: "Walk-forward", Component: WalkForward },
   { id: "shifting", label: "Strategy shifting", Component: Shifting },
+  { id: "live", label: "Live monitor", Component: Live },
 ];
 
 function useHashPage() {

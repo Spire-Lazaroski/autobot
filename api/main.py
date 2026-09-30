@@ -21,12 +21,16 @@ from autobot.data import TIMEFRAMES, fetch_bars, synthetic_bars
 from autobot.indicators import plot_indicators
 from autobot.strategies import STRATEGIES, get_signal
 
+from autobot.liveconfig import validate_live
+
 from . import jobs
+from .live import router as live_router
 from .models import CompareReq, DataReq, DetailReq, SearchReq, ShiftReq, WalkForwardReq
 from .serialize import frame, plain, records, times, values
 from .settings import CONFIG_PATH, WEB_PORT
 
 app = FastAPI(title="autobot lab", version="0.1")
+app.include_router(live_router)
 app.add_middleware(CORSMiddleware, allow_methods=["*"], allow_headers=["*"],
                    allow_origins=[f"http://127.0.0.1:{WEB_PORT}", f"http://localhost:{WEB_PORT}"])
 
@@ -283,16 +287,9 @@ def job_status(job_id: str):
 def _validate_config(cfg: Dict):
     if not isinstance(cfg, dict) or "backtest" not in cfg or "live" not in cfg:
         raise HTTPException(422, "config needs 'backtest' and 'live' sections")
-    seen = {}
-    for j in cfg["live"].get("jobs", []):
-        if j.get("strategy") not in STRATEGIES:
-            raise HTTPException(422, f"job '{j.get('name')}': unknown strategy '{j.get('strategy')}'")
-        if not j.get("enabled", True):
-            continue
-        for s in j.get("symbols", []):
-            if s in seen:
-                raise HTTPException(422, f"{s} is in enabled jobs '{seen[s]}' and '{j['name']}'. One job per symbol.")
-            seen[s] = j.get("name")
+    errs = validate_live(cfg["live"])  # the same rules live.py applies when it reloads
+    if errs:
+        raise HTTPException(422, "; ".join(errs))
 
 
 @app.get("/api/config")
