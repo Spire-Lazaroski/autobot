@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { SpireHeader } from "./components/SpireHeader";
 import { useHealth } from "./lib/api";
 import { usePageState } from "./lib/usePageState";
+import { Help } from "./pages/Help";
 import { Lab } from "./pages/Lab";
 import { Live } from "./pages/Live";
 import { Reports } from "./pages/Reports";
@@ -24,17 +25,13 @@ function SearchHub() {
   );
 }
 
-function Placeholder({ what }: { what: string }) {
-  return <div className="panel p-8 text-center text-muted">{what} is being built next.</div>;
-}
-
 const PAGES: Record<string, { title: string; Component: ComponentType }> = {
   live: { title: "Live monitor", Component: Live },
   lab: { title: "Backtest lab", Component: Lab },
   search: { title: "Parameter search & walk-forward", Component: SearchHub },
   shifting: { title: "Strategy shifting", Component: Shifting },
   reports: { title: "Trading reports", Component: Reports },
-  help: { title: "Help & operating procedure", Component: () => <Placeholder what="The Help page" /> },
+  help: { title: "Help & operating procedure", Component: Help },
 };
 
 function useHashPage() {

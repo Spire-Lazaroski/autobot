@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
         "/api": { target: `http://${api}`, changeOrigin: true },
         "/ws": { target: `ws://${api}`, ws: true },
         "/reports": { target: `http://${api}`, changeOrigin: true },
+        "/docs": { target: `http://${api}`, changeOrigin: true },
       },
     },
   };

@@ -41,6 +41,7 @@ BRAND = json.loads((ASSETS / "brand.json").read_text(encoding="utf-8"))
 EDGE = [Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
         Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")]
 TIMELINE_MAX = 40
+SWITCH_LIMIT = 8  # switches per symbol per day above which the report warns (also used by the SOP)
 
 
 # ----------------------------------------------------------------- the data a report is built from
@@ -369,7 +370,7 @@ def went_badly(ri, a, w: Words) -> List[str]:
     per_day = {}
     for s in a["switches"]:
         per_day[(s["symbol"], _ny(s["bar_time"]).date())] = per_day.get((s["symbol"], _ny(s["bar_time"]).date()), 0) + 1
-    busy = {k: v for k, v in per_day.items() if v > 8}
+    busy = {k: v for k, v in per_day.items() if v > SWITCH_LIMIT}
     if busy:
         (sym, d), n = max(busy.items(), key=lambda kv: kv[1])
         out.append(f"Strategy switching was very frequent: {sym} switched {n} times on {d:%a %d %b}. Each switch that changes the position costs money.")

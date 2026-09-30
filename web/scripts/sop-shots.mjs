@@ -1,0 +1,57 @@
+// Screenshots for the SOP, taken from the running lab (start_lab.bat first).
+// Usage: node web/scripts/sop-shots.mjs docs/img
+// Read-only: it never presses Start, Save or a real Stop. The Stop dialog is captured with a
+// simulated "running" bot and the stop request is intercepted, so no STOP file is ever written.
+import { chromium } from "playwright-core";
+import { existsSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+
+const OUT = resolve(process.argv[2] ?? "docs/img");
+const BASE = process.env.LAB_URL ?? `http://127.0.0.1:${process.env.WEB_PORT ?? 5190}`;
+const EDGE = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+mkdirSync(OUT, { recursive: true });
+
+const browser = await chromium.launch({ executablePath: EDGE, headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
+const shot = async (name, locator) => {
+  await page.waitForTimeout(600);
+  if (locator) await locator.screenshot({ path: `${OUT}/${name}.png` });
+  else await page.screenshot({ path: `${OUT}/${name}.png` });
+  console.log("wrote", name);
+};
+
+// 1. Live page: connection, bot state, account
+await page.goto(`${BASE}/#/live`);
+await page.waitForSelector("text=Paper equity", { timeout: 60000 });
+await page.waitForTimeout(3500);
+await page.screenshot({ path: `${OUT}/live_top.png`, clip: { x: 0, y: 0, width: 1280, height: 330 } });
+console.log("wrote live_top");
+await shot("live_state", page.locator("main .panel").first());
+// 2. Jobs editor
+const jobs = page.locator("section", { hasText: "Jobs · config.yaml" }).first();
+await jobs.scrollIntoViewIfNeeded();
+await shot("jobs_editor", jobs);
+// 3. Reports page
+await page.goto(`${BASE}/#/reports`);
+await page.waitForSelector("text=Automatic daily report");
+await shot("reports", null);
+
+// 4. Stop dialog with a simulated running bot (nothing is sent)
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 760 } });
+const p2 = await ctx.newPage();
+const snap = { time: 0, bot: { running: true, unresponsive: false, pid: 1234, heartbeat_age_s: 1, process_alive: true, stop_requested: false },
+  status: null, trades: [], log: [], ok: true, positions: [], orders: [],
+  account: { number_tail: "DEMO", status: "ACTIVE", equity: 100000, last_equity: 100000, day_pnl: 0, day_pnl_pct: 0, cash: 100000, buying_power: 200000 } };
+await p2.routeWebSocket(/\/ws\/live/, (ws) => { ws.send(JSON.stringify(snap)); });
+await p2.route("**/api/live/stop", (r) => r.abort());
+await p2.route("**/api/live/start", (r) => r.abort());
+await p2.goto(`${BASE}/#/live`);
+await p2.waitForSelector("text=bot running");
+await p2.locator("button", { hasText: "Stop + flatten" }).first().click();
+await p2.waitForSelector("role=dialog");
+await p2.waitForTimeout(400);
+await p2.screenshot({ path: `${OUT}/stop_dialog.png` });
+console.log("wrote stop_dialog");
+await p2.getByRole("button", { name: "Cancel" }).click();
+
+await browser.close();

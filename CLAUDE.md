@@ -25,6 +25,8 @@ cd web && npx tsc --noEmit                      # typecheck the web app
 
 There is no linter config. `run_backtest.py --demo` is the quickest end-to-end check of `strategies` → `backtest` without network access. `tests/test_no_lookahead.py` recomputes every registered strategy on truncated data and must pass for any new strategy. Ports come from `.env` (`API_PORT`, `WEB_PORT`); 8000/8001 are used by other things on this machine, and everything binds to 127.0.0.1 only. Anything touching `live.py` needs real paper keys in `.env` (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`).
 
+Docs and reports: `python scripts/build_sop.py --shots` (lab running) regenerates `docs/SOP.md|html|pdf` from `autobot/plain.py`, the strategy registry, `config.yaml` and code thresholds, with screenshots from `web/scripts/sop-shots.mjs` (read-only; the Stop dialog uses a simulated bot). The daily report runs inside the API (`api/reports.py`, 10 min after the close from Alpaca's calendar); `reports/` is git-ignored.
+
 ## Architecture
 
 - **Lab (`api/` + `web/`)**: FastAPI wraps the `autobot` package; it never reimplements backtest logic. Slow work (search, walk-forward) runs through `api/jobs.py` (thread pool, poll `GET /api/jobs/{id}`). Bars are cached in memory per request key on top of `data_cache/`. The web app is React + Vite + Tailwind v4 (custom classes used with `@apply` must be declared with `@utility`), TanStack Query, Plotly via `react-plotly.js/factory`, and lightweight-charts v5 (`chart.addSeries(LineSeries, opts, paneIndex)`, `createSeriesMarkers`). Times cross the API as UTC unix seconds and are shown in New York time.

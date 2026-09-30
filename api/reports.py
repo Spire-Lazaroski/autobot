@@ -64,6 +64,19 @@ def serve(fname: str):
     return FileResponse(p, media_type="application/pdf" if p.suffix == ".pdf" else "text/html")
 
 
+DOCS = rpt.ROOT / "docs"
+DOC_TYPES = {".html": "text/html", ".pdf": "application/pdf", ".png": "image/png", ".md": "text/markdown"}
+
+
+@router.get("/docs/{path:path}")
+def serve_doc(path: str):
+    """The SOP (docs/SOP.html, .pdf, .md and its screenshots) for the Help page."""
+    p = (DOCS / path).resolve()
+    if DOCS.resolve() not in p.parents or p.suffix not in DOC_TYPES or not p.exists():
+        raise HTTPException(404, "No such document")
+    return FileResponse(p, media_type=DOC_TYPES[p.suffix])
+
+
 def _live_name(d0: date, d1: date) -> str:
     return d0.isoformat() if d0 == d1 else f"{d0.isoformat()}_to_{d1.isoformat()}"
 
