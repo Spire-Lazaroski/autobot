@@ -146,6 +146,8 @@ def _user_prompt(ev: Dict, targets: List[str]) -> str:
 
 def claude_client():
     import anthropic
+    from dotenv import load_dotenv
+    load_dotenv(news.ROOT / ".env")  # picks up a key added after the lab started
     return anthropic.Anthropic(max_retries=4, timeout=60.0)
 
 
@@ -223,6 +225,7 @@ def run_claude(limit: int, progress=None) -> Dict[str, int]:
     client = claude_client()
     evs = unscored("claude", PROMPT_VERSION, limit)
     done = failed = 0
+    import anthropic
     for i, ev in enumerate(evs):
         targets = _targets(ev["symbols"])
         if not targets:
@@ -230,6 +233,14 @@ def run_claude(limit: int, progress=None) -> Dict[str, int]:
         try:
             save(ev["id"], claude_score(client, ev, targets), "claude", PROMPT_VERSION, CLAUDE_MODEL)
             done += 1
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+            raise RuntimeError(f"Anthropic account problem, stopping: {e.message}") from e
+        except anthropic.BadRequestError as e:
+            if "credit balance" in str(e.message).lower():  # account-wide: every further call would fail the same way
+                raise RuntimeError("Anthropic credit balance is too low: add credits in the Console (Plans & Billing), "
+                                   "then run again. Nothing was scored or charged.") from e
+            failed += 1
+            print(f"event {ev['id']}: {type(e).__name__}: {e.message}")
         except Exception as e:  # noqa: BLE001  one bad item must not stop the run; it stays unscored
             failed += 1
             print(f"event {ev['id']}: {type(e).__name__}: {e}")

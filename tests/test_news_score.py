@@ -69,3 +69,29 @@ def test_each_event_scored_once_per_version(tmp_path, monkeypatch):
     assert ns.run_rules() == 1
     assert ns.run_rules() == 0  # cached: nothing left to score
     assert ns.estimate()["events"] == 1  # Claude hasn't scored it yet
+
+
+def test_run_stops_at_the_first_credit_error(tmp_path, monkeypatch):
+    import anthropic
+    import httpx2
+    db = tmp_path / "n.db"
+    monkeypatch.setattr(news, "DB_PATH", db)
+    news.store([{"id": i, "headline": f"Tesla story {i}", "symbols": ["TSLA"], "created_at": f"2026-09-2{i}T20:05:00Z"} for i in range(1, 4)], "backfill", path=db)
+    news.collapse_events(db)
+    calls = []
+
+    class Broke:
+        messages = None
+
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kw):
+            calls.append(1)
+            req = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+            raise anthropic.BadRequestError("Your credit balance is too low to access the Anthropic API.",
+                                            response=httpx2.Response(400, request=req), body=None)
+    monkeypatch.setattr(ns, "claude_client", Broke)
+    with pytest.raises(RuntimeError, match="credit balance"):
+        ns.run_claude(10)
+    assert len(calls) == 1
