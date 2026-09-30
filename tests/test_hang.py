@@ -55,17 +55,18 @@ def stuck_bot(tmp_path, monkeypatch):
     monkeypatch.setattr(liveconfig, "STOP_FILE", tmp_path / "STOP")
     monkeypatch.setattr(liveconfig, "PID_FILE", tmp_path / "bot.pid")
     tc = StuckTC()
-    tc.stuck.set()
     cfg = yaml.safe_load(yaml.safe_dump(BASE))
     bot = live.Bot(cfg, tc=tc)
+    tc.stuck.set()  # stuck from the first loop turn on (startup itself reads the clock)
     exits = []
     bot._exit = exits.append
     bot.step = 1 / 60  # 1-second bars so the loop enters step_once (and gets stuck) at once
     th = threading.Thread(target=bot.run, daemon=True)
     yield bot, tc, exits, th, tmp_path
-    bot.halted = True  # let the main loop finish after the test
+    bot._quit.set()  # stop the bot (and its watchdog) before this test's temporary paths go away
     tc.release.set()
-    th.join(10)
+    th.join(15)
+    assert not th.is_alive()
 
 
 def _wait(cond, secs=8):

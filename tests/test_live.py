@@ -1,6 +1,7 @@
 """live.py with a fake broker: hot reload, rejected configs, closing dropped symbols,
 the single-bot lock, and a full step. Nothing here talks to Alpaca."""
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -150,3 +151,41 @@ def test_pid_alive_does_not_kill():
 def test_paper_is_hardwired():
     src = Path(live.__file__).read_text(encoding="utf-8")
     assert "paper=True" in src and "paper=False" not in src
+
+
+class DayTC(FakeTC):
+    """Clock and account we can move to the next day."""
+    def __init__(self):
+        super().__init__()
+        self.now = datetime(2026, 10, 1, 15, 0, tzinfo=timezone.utc)
+        self.open, self.eq, self.last_eq = True, "97000", "100000"
+
+    def get_clock(self):
+        return SimpleNamespace(is_open=self.open, timestamp=self.now, next_close=self.now + timedelta(hours=5))
+
+    def get_account(self):
+        return SimpleNamespace(equity=self.eq, last_equity=self.last_eq, account_number="PA-TEST")
+
+
+def test_loss_limit_halts_until_the_next_trading_day(env):
+    tc = DayTC()
+    bot = live.Bot(yaml.safe_load(env.read_text()), tc=tc)
+    assert bot.check_risk() is False and bot.halted and tc.flattened == 1   # -3% vs a 2% limit
+    assert bot.check_risk() is False and tc.flattened == 1                  # halted: no repeated flattening
+    tc.now += timedelta(hours=12)
+    tc.open = False
+    assert bot.roll_day(tc.get_clock()) is False and bot.halted             # overnight, market closed: still halted
+    tc.now += timedelta(hours=6)
+    tc.open, tc.eq, tc.last_eq = True, "97100", "97000"                     # next session opens
+    assert bot.roll_day(tc.get_clock()) is True
+    assert not bot.halted and bot.day_start_equity == 97000.0               # new starting point: yesterday's close
+    assert bot.check_risk() is True
+
+
+def test_second_copy_exits_quietly(env, monkeypatch):
+    monkeypatch.setattr(live, "bot_state", lambda: {"running": True, "unresponsive": False, "pid": 4242})
+    monkeypatch.setattr(sys, "argv", ["live.py"])
+    monkeypatch.setattr(live, "setup_logging", lambda: None)
+    with pytest.raises(SystemExit) as e:
+        live.main()
+    assert e.value.code == live.EXIT_ALREADY_RUNNING

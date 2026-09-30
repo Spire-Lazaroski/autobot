@@ -1,7 +1,10 @@
 @echo off
 REM Starts the strategy lab: API (FastAPI) + web (Vite) on 127.0.0.1, then opens the browser.
-REM Ports come from .env (API_PORT, WEB_PORT). Close the two windows to stop.
+REM Ports come from .env (API_PORT, WEB_PORT). Close the windows to stop.
+REM "start_lab.bat auto" (used by the log-on task): minimized windows, no browser.
 cd /d %~dp0
+set MIN=
+if /i "%~1"=="auto" set MIN=/min
 if not exist .venv (
   python -m venv .venv
   .venv\Scripts\python -m pip install --upgrade pip
@@ -19,9 +22,10 @@ if not exist web\node_modules (
   call npm install
   popd
 )
-start "autobot API :%API_PORT%" cmd /k .venv\Scripts\python -m api
-start "autobot web :%WEB_PORT%" cmd /k "cd web && npm run dev"
+start "autobot API :%API_PORT%" %MIN% cmd /k .venv\Scripts\python -m api
+start "autobot web :%WEB_PORT%" %MIN% cmd /k "cd web && npm run dev"
 REM News collector: backfills what is missing, then collects live news (never trades)
-start "autobot news" cmd /k .venv\Scripts\python news_collector.py
+start "autobot news" %MIN% cmd /k .venv\Scripts\python news_collector.py
+if /i "%~1"=="auto" exit /b
 timeout /t 4 /nobreak >nul
 start "" http://127.0.0.1:%WEB_PORT%/

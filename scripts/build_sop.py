@@ -117,10 +117,18 @@ def build(f: dict) -> list:
              ", ".join(j["symbols"]), f"{j['allocation_pct']}%"] for j in jobs])]
     B += [("img", "img/jobs_editor.png", "The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.")]
 
+    B += [("h3", "Automatic start (optional)")]
+    B += [("p", "The bot and the lab can start by themselves 2 minutes after you log on to Windows (Task Scheduler tasks "
+                "<b>Spire autobot</b> and <b>Spire autobot lab</b>). Turn it on with <b>autostart_on.bat</b> and off with "
+                "<b>autostart_off.bat</b> in E:\\autobot; turning it off doesn't stop anything already running. "
+                "Started this way, a supervisor restarts the bot after a crash (at most 3 times an hour) and writes each crash "
+                "to logs/bot.log. If a bot is already running, a second one exits quietly.")]
+
     # 3
     B += [("h2", "3. Starting the bot")]
     B += [("ol", [
-        "On the <b>Live</b> page press <b>▶ Start bot</b> (top right).",
+        "On the <b>Live</b> page press <b>▶ Start bot</b> (top right), or double-click <b>start_bot.bat</b> "
+        "(this one also restarts the bot after a crash).",
         "Within a few seconds the status changes to <b>BOT RUNNING</b> with a green dot, a process number (pid) and <i>beat 1s ago</i>. The beat number must stay small (under 10 seconds).",
         f"Wait for the first tick: within one {tf} bar, <i>Bot last tick</i> shows the current time and the <i>Bot view per symbol</i> table fills in.",
         "If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as <i>unresponsive</i>). Never start a second bot.",
@@ -131,7 +139,7 @@ def build(f: dict) -> list:
     B += [("h2", "4. Stopping the bot")]
     B += [("h3", "Normal stop")]
     B += [("ol", [
-        "Live page → <b>⏹ Stop + flatten</b>.",
+        "Live page → <b>⏹ Stop + flatten</b> (or double-click <b>stop_bot.bat</b>).",
         "Read the confirmation and press <b>Stop + flatten</b>. The bot closes <b>every</b> open position in the paper account (including ones it didn't open) and exits within a few seconds.",
         "Confirm all is flat (see below).",
     ])]

@@ -1,6 +1,6 @@
 # Operating procedure: Spire Analytics paper-trading bot
 
-Version generated 30 September 2026 22:14 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
+Version generated 01 October 2026 01:27 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
 
 ## 1. What the bot is, and what it isn't
 
@@ -39,9 +39,13 @@ The US market opens at 09:30 New York time, which is usually **15:30** in Skopje
 ![The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.](img/jobs_editor.png)
 *The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.*
 
+### Automatic start (optional)
+
+The bot and the lab can start by themselves 2 minutes after you log on to Windows (Task Scheduler tasks **Spire autobot** and **Spire autobot lab**). Turn it on with **autostart_on.bat** and off with **autostart_off.bat** in E:\autobot; turning it off doesn't stop anything already running. Started this way, a supervisor restarts the bot after a crash (at most 3 times an hour) and writes each crash to logs/bot.log. If a bot is already running, a second one exits quietly.
+
 ## 3. Starting the bot
 
-1. On the **Live** page press **▶ Start bot** (top right).
+1. On the **Live** page press **▶ Start bot** (top right), or double-click **start_bot.bat** (this one also restarts the bot after a crash).
 2. Within a few seconds the status changes to **BOT RUNNING** with a green dot, a process number (pid) and *beat 1s ago*. The beat number must stay small (under 10 seconds).
 3. Wait for the first tick: within one 5Min bar, *Bot last tick* shows the current time and the *Bot view per symbol* table fills in.
 4. If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as *unresponsive*). Never start a second bot.
@@ -53,7 +57,7 @@ The US market opens at 09:30 New York time, which is usually **15:30** in Skopje
 
 ### Normal stop
 
-1. Live page → **⏹ Stop + flatten**.
+1. Live page → **⏹ Stop + flatten** (or double-click **stop_bot.bat**).
 2. Read the confirmation and press **Stop + flatten**. The bot closes **every** open position in the paper account (including ones it didn't open) and exits within a few seconds.
 3. Confirm all is flat (see below).
 
@@ -215,6 +219,15 @@ The bot closes all stock positions 5 minutes before the US close (15:55 New York
 - **Likes:** Clear markets where signals agree.
 - **Hates:** Mixed markets, where it mostly stays out.
 - **Typical behaviour:** Fewer trades than any single strategy, smoother results.
+
+### News-aware
+
+**Step aside for news** (`news_guard`)
+
+- Runs another strategy, but takes no new position for a while after an important news story on the stock, and around its earnings releases.
+- **Likes:** Markets where news days bring sudden, unpredictable swings.
+- **Hates:** Stocks whose best moves happen right after news.
+- **Typical behaviour:** Fewer trades on news and earnings days; otherwise identical to the strategy it wraps.
 
 ### Market moods (regimes)
 

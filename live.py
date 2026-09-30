@@ -26,6 +26,17 @@ logs/decisions.jsonl: strategy in charge, regime and the indicator values behind
 signal, action, order ids and fill price; plus every regime change and strategy
 switch with before/after values. Reports are built from this file.
 
+Runs for many days: the daily-loss starting point resets when a new trading day opens, a
+loss-limit halt lasts until the next trading day (the process keeps running), and after the PC
+wakes from sleep the bot notices the gap, re-reads the market clock and doesn't mistake the
+sleep for a hang.
+
+Exit codes (run_bot.py restarts only on crashes):
+  0  normal stop (STOP file / Stop + flatten, --once, --flatten)
+  3  watchdog: the main loop was stuck
+  4  another bot is already running (this copy exits quietly)
+  other  crash
+
 Paper only: TradingClient is created with paper=True and there is no switch to change it.
 """
 from __future__ import annotations
@@ -56,6 +67,9 @@ LOGS.mkdir(exist_ok=True)
 STOP_FILE = ROOT / "STOP"
 
 log = logging.getLogger("autobot")
+EXIT_OK, EXIT_STALLED, EXIT_ALREADY_RUNNING = 0, 3, 4
+NY_TZ = "America/New_York"
+SLEEP_GAP_S = 60  # a gap this long between loop turns means the PC slept (or the process was paused)
 
 
 def setup_logging():
@@ -111,6 +125,7 @@ class Bot:
         self._progress = time.time()  # last time the main loop moved forward
         self._exit = os._exit          # replaceable in tests
         self._stop_watch = threading.Event()
+        self._quit = threading.Event()  # ends run() cleanly (tests; embedding)
         self.rec = Recorder(LOGS / "decisions.jsonl")
         self.watch_risk_after = 60.0   # seconds of no progress before the watchdog checks the loss limit
         self.cfg_path = cfg_path
@@ -122,6 +137,7 @@ class Bot:
         self.changes: list[dict] = []
         acct = self.tc.get_account()
         self.day_start_equity = float(acct.last_equity)
+        self.trading_day = self._today(self.tc.get_clock())
         self.halted = False
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
@@ -250,7 +266,30 @@ class Bot:
             df = df[(m >= 570) & (m < 960)]
         return df
 
+    @staticmethod
+    def _today(clock) -> str:
+        """The New York calendar date of the market clock."""
+        return pd.Timestamp(clock.timestamp).tz_convert(NY_TZ).date().isoformat()
+
+    def roll_day(self, clock) -> bool:
+        """At the first tick of a new trading day (market open): reset the daily-loss starting
+        point to the account's previous close and lift a loss-limit halt. Returns True if rolled."""
+        today = self._today(clock)
+        if today == self.trading_day or not clock.is_open:
+            return False
+        acct = self.tc.get_account()
+        old, self.day_start_equity = self.day_start_equity, float(acct.last_equity)
+        was_halted, self.halted = self.halted, False
+        log.warning("NEW DAY %s: daily-loss start %.2f -> %.2f%s", today, old, self.day_start_equity,
+                    " (loss-limit halt lifted)" if was_halted else "")
+        self._safe(self.rec.event, "new_day", f"New trading day {today}: the daily loss limit now counts from "
+                                              f"${self.day_start_equity:,.2f}" + (", and yesterday's halt is lifted." if was_halted else "."))
+        self.trading_day = today
+        return True
+
     def check_risk(self) -> bool:
+        if self.halted:
+            return False  # already flat and halted for today; the next trading day lifts it
         acct = self.tc.get_account()
         eq = float(acct.equity)
         dd = (eq / self.day_start_equity - 1) * 100
@@ -258,6 +297,7 @@ class Bot:
             self.flatten_all(f"daily loss {dd:.2f}% hit limit")
             self._safe(self.rec.event, "risk", f"The daily loss limit was reached ({dd:.2f}% vs {self.risk['max_daily_loss_pct']}%); "
                                                  "the bot sold everything and stopped for the day.")
+            log.warning("Halted for the rest of the trading day by the loss limit; the bot keeps running and resumes tomorrow.")
             self.halted = True
         return not self.halted
 
@@ -268,6 +308,7 @@ class Bot:
     def step_once(self):
         self.reload_config()
         clock = self.tc.get_clock()
+        self.roll_day(clock)
         if not self.check_risk():
             return
         held = self.positions()
@@ -340,7 +381,13 @@ class Bot:
         STOP and the loss limit when the loop is stuck; exits the process on a long stall.
         It must never die: every check is guarded and the loop keeps going."""
         state = {"wtc": None, "last_risk": 0.0}
+        last_tick = time.time()
         while not self._stop_watch.wait(tick):
+            now = time.time()
+            if now - last_tick > SLEEP_GAP_S:  # the PC slept: don't count that time as a stuck loop
+                log.warning("WAKE: watchdog resumed after %.0f min without ticks (PC sleep?)", (now - last_tick) / 60)
+                self._progress = now
+            last_tick = now
             try:
                 if self._watch_once(started, state):
                     return
@@ -373,20 +420,30 @@ class Bot:
             log.critical("WATCHDOG: main loop made no progress for %.0fs; exiting without trading. "
                          "Positions are left as they are.", idle)
             release_lock()
-            self._exit(3)
+            self._exit(EXIT_STALLED)
             return True
         return False
 
-    def run(self, once=False):
+    def run(self, once=False) -> int:
         started = time.time()
         last_bar = None
+        last_turn = time.time()
         write_lock(started)
         self._progress = time.time()
         watch = threading.Thread(target=self._watchdog, args=(started,), name="watchdog", daemon=True)
         watch.start()
         try:
             while True:
-                self._progress = time.time()
+                turn = time.time()
+                if turn - last_turn > SLEEP_GAP_S:
+                    log.warning("WAKE: resumed after %.0f min (PC sleep?); re-reading the market clock", (turn - last_turn) / 60)
+                    self._safe(self.rec.event, "wake", f"The bot resumed after {(turn - last_turn) / 60:.0f} minutes without running "
+                                                       "(the PC was probably asleep).")
+                    last_bar = None  # act at the next bar with a fresh clock
+                last_turn = turn
+                self._progress = turn
+                if self._quit.is_set():
+                    break
                 if STOP_FILE.exists():
                     self.flatten_all("STOP file found")
                     STOP_FILE.unlink(missing_ok=True)
@@ -402,13 +459,11 @@ class Bot:
                         log.exception("step failed: %s", e)
                     if once:
                         break
-                if self.halted:
-                    log.warning("Halted for the day by risk limit.")
-                    break
-                time.sleep(self.cfg.get("poll_seconds", 5))
+                self._quit.wait(self.cfg.get("poll_seconds", 5))
         finally:
             self._stop_watch.set()
             release_lock()
+        return EXIT_OK
 
 
 def main():
@@ -420,9 +475,8 @@ def main():
     setup_logging()
     state = bot_state()
     if (state["running"] or state["unresponsive"]) and not a.flatten:
-        log.error("Another bot process is alive (pid %s, heartbeat %ss ago). Not starting a second one.",
-                  state["pid"], state["heartbeat_age_s"])
-        sys.exit(1)
+        log.info("Another bot is already running (pid %s); this copy exits.", state["pid"])
+        sys.exit(EXIT_ALREADY_RUNNING)
     cfg_path = Path(a.config)
     cfg = yaml.safe_load(cfg_path.read_text())
     bot = Bot(cfg, cfg_path=cfg_path)

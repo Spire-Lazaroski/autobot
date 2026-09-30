@@ -43,6 +43,12 @@ No keys yet? Pick **Demo** in the settings bar, or run `python run_backtest.py -
 The research-based ones cite their source in the UI. Published edges tend to shrink after publication,
 so judge them on your own out-of-sample results.
 
+## Automatic start
+`autostart_on.bat` creates two Task Scheduler tasks that run 2 minutes after you log on: **Spire autobot**
+(the bot under `run_bot.py`, which restarts it after a crash, max 3 per hour, logging to `logs/bot.log`) and
+**Spire autobot lab** (API, dashboard, news collector). `autostart_off.bat` disables them.
+Manual: `start_bot.bat` / `stop_bot.bat` (stop closes every position).
+
 ## Paper bot (`python live.py` or Start on the Live monitor)
 - Each **job** = one strategy + its symbols + allocation %. One job per symbol, because Alpaca nets positions per symbol.
 - Acts once per closed bar (e.g. every 5 min) and trades at market.
