@@ -24,7 +24,7 @@ cd web && npx tsc --noEmit                      # typecheck the web app
 .venv/Scripts/python live.py --flatten          # close every paper position
 ```
 
-There is no test suite or linter config. `run_backtest.py --demo` is the quickest end-to-end check of `strategies` → `backtest` without network access. Anything touching `live.py` needs real paper keys in `.env` (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`).
+There is no linter config. `run_backtest.py --demo` is the quickest end-to-end check of `strategies` → `backtest` without network access. `tests/test_no_lookahead.py` recomputes every registered strategy on truncated data and must pass for any new strategy. Ports come from `.env` (`API_PORT`, `WEB_PORT`); 8000/8001 are used by other things on this machine, and everything binds to 127.0.0.1 only. Anything touching `live.py` needs real paper keys in `.env` (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`).
 
 ## Architecture
 
