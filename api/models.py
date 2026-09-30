@@ -62,3 +62,8 @@ class WalkForwardReq(RunReq):
     rank_by: Literal["sharpe", "total_return_%", "sortino", "calmar"] = "sharpe"
     grid: Optional[Dict[str, List[Any]]] = None
     fixed_params: Optional[Dict[str, Any]] = None  # the comparison curve; defaults if None
+
+
+class ShiftReq(RunReq):
+    strategy: Literal["regime_switch", "perf_rotation", "ensemble_vote"]
+    params: Dict[str, Any] = Field(default_factory=dict)

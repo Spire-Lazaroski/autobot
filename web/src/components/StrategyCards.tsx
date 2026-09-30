@@ -5,7 +5,7 @@ import type { Picked } from "../lib/settings";
 import { ParamInput } from "./ParamInput";
 
 export const pickedOf = (s: StrategyInfo, picked: Record<string, Picked>): Picked =>
-  picked[s.name] ?? { on: s.family !== "meta", params: s.defaults };
+  picked[s.name] ?? { on: true, params: s.defaults };
 
 /** Toggle + parameter card for every strategy, filterable by family. */
 export function StrategyCards({ strategies, picked, onChange }: {

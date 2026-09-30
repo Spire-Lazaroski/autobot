@@ -75,3 +75,24 @@ def test_walkforward_job():
     res = job["result"]
     assert set(res["equity"]["series"]) == {"walk_forward", "fixed", "buy_and_hold"}
     assert res["windows"][0]["params"]["fast"] in (5, 9, 12)
+
+
+def test_shift_regime():
+    r = client.post("/api/shift", json={"data": DATA, "strategy": "regime_switch", "params": {"vol_lookback": 200}})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert set(b["equity"]["series"]) == {"regime_switch", "ema_cross", "rsi_reversion", "buy_and_hold"}
+    assert b["timelines"]["SPY"]["regimes"] and b["timelines"]["SPY"]["active"]
+    assert b["switches"]["SPY"]["switches"] >= b["switches"]["SPY"]["switches_that_traded"]
+    assert abs(sum(b["time_in"].values()) - 100) < 0.1
+
+
+def test_shift_rejects_nested_meta():
+    r = client.post("/api/shift", json={"data": DATA, "strategy": "perf_rotation", "params": {"candidates": ["ensemble_vote"]}})
+    assert r.status_code == 422
+
+
+def test_detail_meta_has_active():
+    r = client.post("/api/detail", json={"data": DATA, "symbol": "SPY", "strategy": "perf_rotation"})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["active"]["names"]) == len(r.json()["candles"]["t"])

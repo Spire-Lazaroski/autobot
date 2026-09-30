@@ -96,7 +96,9 @@ with tab_strat:
             st.caption(f"*{spec.family}* · {spec.description}")
             params = {}
             for p, v in spec.defaults.items():
-                if isinstance(v, float):
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    params[p] = v  # lists/dicts/text (meta-strategies): edit in the new lab
+                elif isinstance(v, float):
                     params[p] = st.number_input(p, value=v, step=0.05, key=f"{name}_{p}", disabled=not on)
                 else:
                     params[p] = int(st.number_input(p, value=int(v), step=1, key=f"{name}_{p}", disabled=not on))

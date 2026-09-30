@@ -14,8 +14,12 @@ export const pnl = (v: number | null | undefined) =>
 const PALETTE = ["#4aa3ff", "#f5b942", "#c084fc", "#2dd4bf", "#fb7185", "#a3e635", "#f97316",
   "#60a5fa", "#e879f9", "#facc15", "#34d399", "#f472b6", "#38bdf8", "#fbbf24", "#818cf8", "#4ade80"];
 const assigned = new Map<string, string>();
+const FIXED: Record<string, string> = {
+  buy_and_hold: "#9ca3af", flat: "#374151", warmup: "#1f2937",
+  trend: "#22c55e", range: "#4aa3ff", high_vol: "#ef4444", long: "#22c55e", short: "#ef4444",
+};
 export function colorFor(name: string): string {
-  if (name === "buy_and_hold") return "#9ca3af";
+  if (FIXED[name]) return FIXED[name];
   if (!assigned.has(name)) assigned.set(name, PALETTE[assigned.size % PALETTE.length]);
   return assigned.get(name)!;
 }

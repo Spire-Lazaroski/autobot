@@ -12,7 +12,7 @@ The backtester trades it on the NEXT bar, so there is no look-ahead.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -195,6 +195,7 @@ class StrategySpec:
     grid: Dict[str, List] = field(default_factory=dict)  # parameter search space
     warmup_days: int = 0      # calendar days of history the live bot must load (0 = default)
     source: str = ""          # where the idea comes from (shown in the UI)
+    explain: Optional[Callable] = None  # meta only: (df, params, allow_short) -> per-bar active labels
 
 
 STRATEGIES: Dict[str, StrategySpec] = {

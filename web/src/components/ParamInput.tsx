@@ -1,4 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useStrategies } from "../lib/api";
+import { colorFor } from "../lib/format";
+
+const CHOICES: Record<string, string[]> = { trend_measure: ["adx", "er", "vr"], method: ["majority", "average"] };
 
 /** Editor for one strategy parameter; picks a control from the default value's type. */
 export function ParamInput({ name, value, onChange, disabled, options }: {
@@ -8,7 +12,29 @@ export function ParamInput({ name, value, onChange, disabled, options }: {
   disabled?: boolean;
   options?: string[];
 }) {
+  const strategies = useStrategies();
+  const pool = (strategies.data ?? []).filter((x) => x.family !== "meta").map((x) => x.name);
   const label = <span className="text-[10px] text-muted truncate" title={name}>{name}</span>;
+  options = options ?? CHOICES[name] ?? (name.endsWith("_strategy") ? ["flat", ...pool] : undefined);
+  if (name === "candidates" && Array.isArray(value)) {
+    const picked = value as string[];
+    return (
+      <div className="flex flex-col gap-0.5 min-w-0 col-span-full">
+        {label}
+        <div className="flex flex-wrap gap-1">
+          {pool.map((n) => {
+            const on = picked.includes(n);
+            return (
+              <button key={n} type="button" disabled={disabled}
+                onClick={() => onChange(on ? picked.filter((x) => x !== n) : [...picked, n])}
+                className={`chip border num normal-case ${on ? "text-fg bg-panel-2" : "border-line-2 text-dim hover:text-muted"}`}
+                style={on ? { borderColor: colorFor(n) } : undefined}>{n}</button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   if (options) {
     return (
       <label className="flex flex-col gap-0.5 min-w-0">

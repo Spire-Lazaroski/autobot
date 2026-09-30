@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
-from typing import Dict
+from typing import Dict, List
 
 import pandas as pd
 import yaml
@@ -22,7 +22,7 @@ from autobot.indicators import plot_indicators
 from autobot.strategies import STRATEGIES, get_signal
 
 from . import jobs
-from .models import CompareReq, DataReq, DetailReq, SearchReq, WalkForwardReq
+from .models import CompareReq, DataReq, DetailReq, SearchReq, ShiftReq, WalkForwardReq
 from .serialize import frame, plain, records, times, values
 from .settings import CONFIG_PATH, WEB_PORT
 
@@ -153,9 +153,77 @@ def detail(req: DetailReq):
         "metrics": plain(m), "benchmark_metrics": plain(metrics(bh)),
         "low_trades": m["trades"] < LOW_TRADES,
     }
-    if spec.family == "meta" and getattr(spec, "explain", None):
-        out["active"] = spec.explain(df, params, req.allow_short)
+    if spec.explain:
+        out["active"] = plain(spec.explain(df, params, req.allow_short))
     return out
+
+
+# ----------------------------------------------------------------- strategy shifting
+def _segments(t: List[int], names: List) -> List[Dict]:
+    """Collapse a per-bar label list into [start, end) runs for the timeline band."""
+    out = []
+    for i, n in enumerate(names):
+        if out and out[-1]["name"] == n:
+            out[-1]["end"] = t[i]
+        else:
+            out.append({"name": n, "start": t[i], "end": t[i]})
+    return [o for o in out if o["name"] is not None]
+
+
+def _underlying(spec_name: str, p: Dict) -> List[str]:
+    if spec_name == "regime_switch":
+        names = [p["trend_strategy"], p["range_strategy"], p["high_vol_strategy"]]
+    else:
+        names = list(p["candidates"])
+    return [n for n in dict.fromkeys(names) if n != "flat"]
+
+
+@app.post("/api/shift")
+def shift(req: ShiftReq):
+    spec = _strategy(req.strategy)
+    data = load(req.data)
+    costs = CostModel(req.fee_bps, req.slippage_bps)
+    p = {**spec.defaults, **req.params}
+    try:
+        unders = _underlying(req.strategy, p)
+        for n in unders:
+            _strategy(n)
+        cand = p.get("candidate_params") or {}
+        runs = {req.strategy: p, **{n: cand.get(n, {}) for n in unders}, "buy_and_hold": {}}
+        summary, equity, per_sym = compare_strategies(data, runs, costs, req.allow_short)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+    total = per_sym.groupby("strategy")["trades"].sum()
+    summary = summary.assign(total_trades=total.reindex(summary.index).astype(int))
+    summary = summary.reset_index().rename(columns={"index": "strategy"})
+    role = {req.strategy: "meta", "buy_and_hold": "benchmark"}
+    summary["role"] = [role.get(n, "underlying") for n in summary.strategy]
+
+    timelines, time_in, switches = {}, {}, {}
+    for sym, df in data.items():
+        ex = spec.explain(df, p, req.allow_short)
+        names = ex["names"]
+        pos = get_signal(req.strategy, df, p, req.allow_short).to_numpy()
+        t = times(df.index)
+        changes = [i for i in range(1, len(names)) if names[i] != names[i - 1] and names[i - 1] is not None]
+        switches[sym] = {"switches": len(changes),
+                         "switches_that_traded": sum(1 for i in changes if pos[i] != pos[i - 1])}
+        timelines[sym] = {"active": _segments(t, names),
+                          "regimes": _segments(t, ex["regimes"]) if "regimes" in ex else None}
+        for n in names:
+            if n is not None:
+                time_in[n] = time_in.get(n, 0) + 1
+    tot = sum(time_in.values()) or 1
+    return {
+        "strategy": req.strategy, "params": plain(p), "underlying": unders,
+        "summary": records(summary.assign(low_trades=summary.total_trades < LOW_TRADES)),
+        "per_symbol": records(per_sym),
+        "equity": frame(equity, 6),
+        "timelines": timelines, "switches": switches,
+        "time_in": {k: round(v / tot * 100, 2) for k, v in sorted(time_in.items(), key=lambda kv: -kv[1])},
+        "low_trades_threshold": LOW_TRADES,
+    }
 
 
 # ----------------------------------------------------------------- parameter search (async)
