@@ -19,7 +19,7 @@ Windows, with the venv at `.venv` (created by `start.bat`). Use `.venv/Scripts/p
 .venv/Scripts/python live.py --flatten          # close every paper position
 ```
 
-There is no test suite, linter config, or git repo. `run_backtest.py --demo` is the quickest end-to-end check of `strategies` → `backtest` without network access. Anything touching `live.py` needs real paper keys in `.env` (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`).
+There is no test suite or linter config. `run_backtest.py --demo` is the quickest end-to-end check of `strategies` → `backtest` without network access. Anything touching `live.py` needs real paper keys in `.env` (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`).
 
 ## Architecture
 
