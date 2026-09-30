@@ -1,5 +1,5 @@
 @echo off
-REM First run: creates a virtual environment and installs everything. Then opens the dashboard.
+REM First run: creates a virtual environment and asks for your Alpaca paper keys. Then opens the strategy lab.
 cd /d %~dp0
 if not exist .venv (
   python -m venv .venv
@@ -12,4 +12,4 @@ if not exist .env (
   notepad .env
   exit /b
 )
-.venv\Scripts\streamlit run app.py
+call start_lab.bat

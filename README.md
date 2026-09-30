@@ -6,37 +6,49 @@ without fooling yourself, then run the winners as paper-trading jobs.
 ## Quick start (Windows)
 1. Install Python 3.10+ from python.org (tick "Add to PATH").
 2. In Alpaca, switch to **Paper Trading**, then API Keys, then Generate.
-3. Double-click `start.bat`. The first run installs packages and opens `.env`, where you paste the keys.
-   Run `start.bat` again and the dashboard opens at http://localhost:8501.
+3. Install Node.js 20+ from nodejs.org (for the web UI).
+4. Double-click `start.bat`. The first run installs packages and opens `.env`, where you paste the keys.
+   Run `start.bat` (or `start_lab.bat`) again and the lab opens at http://127.0.0.1:5190.
 
-Manual: `pip install -r requirements.txt`, then `streamlit run app.py`.
-No keys yet? Choose **Demo (synthetic)** in the sidebar, or run `python run_backtest.py --demo`.
+Manual: `pip install -r requirements.txt`, then `python -m api` and, in `web/`, `npm install` and `npm run dev`.
+Ports live in `.env` (`API_PORT`, `WEB_PORT`); everything binds to 127.0.0.1 only.
+No keys yet? Pick **Demo** in the settings bar, or run `python run_backtest.py --demo`.
 
 ## What's inside
 | File | What it does |
 |---|---|
-| `app.py` | Dashboard: settings, strategy comparison, parameter search, bot control |
-| `autobot/strategies.py` | 9 strategies (add your own: write a function, register a `StrategySpec`) |
-| `autobot/backtest.py` | Vectorized backtester, metrics, train/test parameter search |
+| `web/` | Lab UI (React): Backtest Lab, Param search, Walk-forward, Strategy shifting, Live monitor |
+| `api/` | Local API (FastAPI) the UI talks to; wraps the `autobot` package |
+| `autobot/strategies.py` | 14 strategies (add your own: write a function, register a `StrategySpec`) |
+| `autobot/meta.py` | Strategy shifting: regime switch, performance rotation, ensemble vote |
+| `autobot/indicators.py` | Indicator math shared by strategies and charts |
+| `autobot/backtest.py` | Vectorized backtester, metrics, train/test parameter search, walk-forward |
+| `autobot/liveconfig.py` | Config validation and the single-bot lock, shared by the bot and the API |
 | `autobot/data.py` | Alpaca bars (stocks + crypto) with local cache; synthetic demo data |
 | `live.py` | Paper-trading runner for the jobs in `config.yaml` |
 | `run_backtest.py` | Same comparison from the command line |
-| `config.yaml` | All settings (the dashboard edits it) |
+| `config.yaml` | All settings (the Jobs editor edits it) |
+| `tests/` | `pytest`: no look-ahead, walk-forward, meta-strategies, live bot with a fake broker, API |
 
 ## Strategies
 | Family | Strategies |
 |---|---|
 | Benchmark | buy_and_hold |
 | Trend | sma_cross, ema_cross, macd, momentum |
-| Mean reversion | rsi_reversion, bollinger_reversion |
+| Mean reversion | rsi_reversion, bollinger_reversion, connors_rsi2, ibs_reversion |
 | Breakout | donchian_breakout |
-| Intraday | vwap_reversion |
+| Intraday | vwap_reversion, opening_range_breakout, intraday_momentum, noise_area |
+| Meta (strategy shifting) | regime_switch, perf_rotation, ensemble_vote |
 
-## Paper bot (`python live.py` or the Start button)
+The research-based ones cite their source in the UI. Published edges tend to shrink after publication,
+so judge them on your own out-of-sample results.
+
+## Paper bot (`python live.py` or Start on the Live monitor)
 - Each **job** = one strategy + its symbols + allocation %. One job per symbol, because Alpaca nets positions per symbol.
 - Acts once per closed bar (e.g. every 5 min) and trades at market.
+- Re-reads `config.yaml` every bar: edits in the Jobs editor apply without a restart and are logged. Only one bot can run at a time.
 - Risk: max daily loss % (flattens and halts), max $ per symbol, flatten N min before the close.
-- Kill switch: the **Stop + flatten** button, or create a file named `STOP` in this folder.
+- Kill switch: the **Stop + flatten** button (asks to confirm), or create a file named `STOP` in this folder.
 - `TradingClient(paper=True)` is hard-coded. There is no live-money switch.
 - Logs: `logs/bot.log`, `logs/trades.csv`, `logs/status.json`.
 - `python live.py --once` runs a single tick for testing. `python live.py --flatten` closes everything.
