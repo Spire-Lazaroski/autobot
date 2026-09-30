@@ -37,3 +37,58 @@ def items(symbol: Optional[str] = None, limit: int = 100):
         d["symbols"] = json.loads(d["symbols"])
         out.append(d)
     return out
+
+
+# ----------------------------------------------------------------- scores (step 3)
+from pydantic import BaseModel, Field  # noqa: E402
+
+from autobot import news_score  # noqa: E402
+
+from . import jobs  # noqa: E402
+
+
+_est = {"at": 0.0, "value": None}
+
+
+def cached_estimate(force: bool = False):
+    """The Claude cost estimate scans every unscored story (~10 s); keep it for 10 minutes."""
+    import time
+    if force or _est["value"] is None or time.time() - _est["at"] > 600:
+        _est.update(at=time.time(), value=news_score.estimate())
+    return _est["value"]
+
+
+@router.get("/api/news/scores")
+def scores(scorer: str = "rules", category: Optional[str] = None, symbol: Optional[str] = None,
+           min_materiality: int = 1, limit: int = 60):
+    news_score.ensure_schema()
+    version = news_score.RULES_VERSION if scorer == "rules" else news_score.PROMPT_VERSION
+    q = ("SELECT e.id event_id, e.created_at, e.headline, e.n_items, s.symbol, s.relevance, s.sentiment, s.surprise, "
+         "s.category, s.materiality, s.rationale, s.model FROM scores s JOIN events e ON e.id = s.event_id "
+         "WHERE s.scorer = ? AND s.version = ? AND s.materiality >= ?")
+    args: list = [scorer, version, min_materiality]
+    if category:
+        q += " AND s.category = ?"; args.append(category)
+    if symbol:
+        q += " AND s.symbol = ?"; args.append(symbol.upper())
+    q += " ORDER BY e.created_at DESC LIMIT ?"; args.append(max(1, min(limit, 500)))
+    with news.connect() as con:
+        rows = [dict(r) for r in con.execute(q, args)]
+        summary = {s: {r["category"]: r["c"] for r in con.execute(
+            "SELECT category, COUNT(*) c FROM scores WHERE scorer=? AND version=? GROUP BY category", (s, v))}
+            for s, v in (("rules", news_score.RULES_VERSION), ("claude", news_score.PROMPT_VERSION))}
+    return {"rows": rows, "summary": summary, "versions": {"rules": news_score.RULES_VERSION, "claude": news_score.PROMPT_VERSION},
+            "model": news_score.CLAUDE_MODEL, "estimate": cached_estimate()}
+
+
+class ClaudeRunReq(BaseModel):
+    limit: int = Field(50, ge=1, le=2000)
+
+
+@router.post("/api/news/score-claude")
+def score_claude(req: ClaudeRunReq):
+    def work(progress):
+        out = news_score.run_claude(req.limit, progress)
+        cached_estimate(force=True)
+        return out
+    return jobs.submit("news-score", work).public()

@@ -102,7 +102,8 @@ def story_hash(headline: str, symbols: Iterable[str]) -> str:
 
 
 @contextmanager
-def connect(path: Path = DB_PATH):
+def connect(path: Optional[Path] = None):
+    path = path or DB_PATH  # looked up at call time (tests point it elsewhere)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30)
     con.row_factory = sqlite3.Row
@@ -119,7 +120,7 @@ def _field(n, k, default=None):
     return n.get(k, default) if isinstance(n, dict) else getattr(n, k, default)
 
 
-def store(items: Iterable, origin: str, received_at: Optional[str] = None, path: Path = DB_PATH) -> Dict[str, int]:
+def store(items: Iterable, origin: str, received_at: Optional[str] = None, path: Optional[Path] = None) -> Dict[str, int]:
     """Insert new items; apply edits (later updated_at) in place. Returns counts."""
     counts = {"new": 0, "updated": 0, "same": 0}
     with _lock, connect(path) as con:
@@ -151,26 +152,34 @@ def store(items: Iterable, origin: str, received_at: Optional[str] = None, path:
     return counts
 
 
-def meta_get(key: str, path: Path = DB_PATH) -> Optional[str]:
+def meta_get(key: str, path: Optional[Path] = None) -> Optional[str]:
     with connect(path) as con:
         r = con.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return r["value"] if r else None
 
 
-def meta_set(key: str, value: str, path: Path = DB_PATH):
+def meta_set(key: str, value: str, path: Optional[Path] = None):
     with _lock, connect(path) as con:
         con.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, value))
 
 
+_sym_cache: Dict = {"mtime": None, "value": DEFAULT_SYMBOLS}
+
+
 def configured_symbols() -> List[str]:
+    """news.symbols from config.yaml; re-read only when the file changes (called per story)."""
+    path = ROOT / "config.yaml"
     try:
-        cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
-        return [s.upper() for s in (cfg.get("news") or {}).get("symbols") or DEFAULT_SYMBOLS]
+        m = path.stat().st_mtime
+        if m != _sym_cache["mtime"]:
+            cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+            _sym_cache.update(mtime=m, value=[s.upper() for s in (cfg.get("news") or {}).get("symbols") or DEFAULT_SYMBOLS])
     except OSError:
-        return DEFAULT_SYMBOLS
+        pass
+    return list(_sym_cache["value"])
 
 
-def stats(path: Path = DB_PATH) -> Dict:
+def stats(path: Optional[Path] = None) -> Dict:
     with connect(path) as con:
         tot = con.execute("SELECT COUNT(*) c, MIN(created_at) a, MAX(created_at) b FROM items").fetchone()
         by = {r["origin"]: r["c"] for r in con.execute("SELECT origin, COUNT(*) c FROM items GROUP BY origin")}
@@ -184,7 +193,7 @@ def stats(path: Path = DB_PATH) -> Dict:
 
 
 # ----------------------------------------------------------------- backfill (REST)
-def backfill(symbols: List[str], start: datetime, end: datetime, client=None, progress=None, path: Path = DB_PATH) -> Dict[str, int]:
+def backfill(symbols: List[str], start: datetime, end: datetime, client=None, progress=None, path: Optional[Path] = None) -> Dict[str, int]:
     """Download history month by month (the client pages through each month)."""
     from alpaca.data.requests import NewsRequest
     if client is None:
@@ -251,7 +260,7 @@ def similarity(a: frozenset, b: frozenset) -> float:
     return len(a & b) / len(a | b)
 
 
-def collapse_events(path: Path = DB_PATH) -> Dict[str, int]:
+def collapse_events(path: Optional[Path] = None) -> Dict[str, int]:
     """Give every item without an event one: an existing event of the same story (same hash,
     or a similar headline on a shared symbol within 6 h), or a new event. Incremental."""
     ours = set(configured_symbols())
