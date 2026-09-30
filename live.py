@@ -15,6 +15,12 @@ enabled jobs has its position closed.
 
 Only one bot runs at a time: logs/bot.pid holds the pid and a heartbeat.
 
+Hang protection: every Alpaca request has a timeout, and a watchdog thread (with its
+own client) keeps working if the main loop gets stuck: it honours the STOP file,
+enforces the daily-loss limit, and if the loop makes no progress for stall_seconds
+(default 300) it logs CRITICAL and exits WITHOUT trading, so the lab shows it stopped.
+The heartbeat is written only while the main loop is making progress.
+
 Paper only: TradingClient is created with paper=True and there is no switch to change it.
 """
 from __future__ import annotations
@@ -24,7 +30,9 @@ import csv
 import json
 import logging
 import math
+import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,7 +40,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from autobot.data import TIMEFRAMES, _download, _keys, is_crypto
+from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
 from autobot.strategies import STRATEGIES, get_signal
 
@@ -89,10 +97,15 @@ def config_diff(old: dict, new: dict) -> list[str]:
 class Bot:
     def __init__(self, cfg: dict, tc=None, cfg_path: Path | None = None):
         if tc is None:
-            from alpaca.trading.client import TradingClient
-            key, sec = _keys()
-            tc = TradingClient(key, sec, paper=True)  # <- hard-wired to paper
+            tc = self._new_client()
+            self._watch_tc_factory = self._new_client  # the watchdog gets its own connection
+        else:
+            self._watch_tc_factory = lambda: tc  # injected (tests)
         self.tc = tc
+        self._progress = time.time()  # last time the main loop moved forward
+        self._exit = os._exit          # replaceable in tests
+        self._stop_watch = threading.Event()
+        self.watch_risk_after = 60.0   # seconds of no progress before the watchdog checks the loss limit
         self.cfg_path = cfg_path
         self._cfg_mtime = cfg_path.stat().st_mtime if cfg_path and cfg_path.exists() else None
         errs = validate_live(cfg["live"])
@@ -106,8 +119,15 @@ class Bot:
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
 
+    @staticmethod
+    def _new_client():
+        from alpaca.trading.client import TradingClient
+        key, sec = _keys()
+        return with_timeout(TradingClient(key, sec, paper=True))  # <- hard-wired to paper
+
     def _apply(self, live: dict):
         self.cfg = live
+        self.stall_s = float(live.get("stall_seconds", 300))
         self.tf = live["timeframe"]
         self.step = tf_minutes(self.tf)
         self.risk = live["risk"]
@@ -229,6 +249,7 @@ class Bot:
         for job in self.jobs:
             spec = STRATEGIES[job["strategy"]]
             for sym in job["symbols"]:
+                self._progress = time.time()
                 crypto = is_crypto(sym)
                 if not crypto and not clock.is_open:
                     continue
@@ -268,12 +289,53 @@ class Bot:
                                           "signal": target_dir, "position": cur, "target": target_qty, "active": active}
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
 
+    # ------------------------------------------------------------ watchdog
+    def _watchdog(self, started: float, tick: float = 1.0):
+        """Runs beside the main loop. Heartbeat only while the loop progresses; takes over
+        STOP and the loss limit when the loop is stuck; exits the process on a long stall."""
+        wtc = None
+        last_risk = 0.0
+        while not self._stop_watch.wait(tick):
+            idle = time.time() - self._progress
+            if idle < self.stall_s:
+                write_lock(started)
+            try:
+                if STOP_FILE.exists() and time.time() - STOP_FILE.stat().st_mtime > 10:
+                    log.warning("WATCHDOG: STOP file not handled by the main loop; flattening and exiting")
+                    wtc = wtc or self._watch_tc_factory()
+                    wtc.close_all_positions(cancel_orders=True)
+                    STOP_FILE.unlink(missing_ok=True)
+                    release_lock()
+                    self._exit(0)
+                    return
+                if idle > self.watch_risk_after and time.time() - last_risk > 30 and not self.halted:
+                    last_risk = time.time()
+                    wtc = wtc or self._watch_tc_factory()
+                    eq = float(wtc.get_account().equity)
+                    dd = (eq / self.day_start_equity - 1) * 100
+                    if dd <= -abs(self.risk["max_daily_loss_pct"]):
+                        log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
+                        wtc.close_all_positions(cancel_orders=True)
+                        self.halted = True
+            except Exception as e:  # noqa: BLE001
+                log.error("WATCHDOG check failed: %s", e)
+            if idle >= self.stall_s:
+                log.critical("WATCHDOG: main loop made no progress for %.0fs; exiting without trading. "
+                             "Positions are left as they are.", idle)
+                release_lock()
+                self._exit(3)
+                return
+
     def run(self, once=False):
         started = time.time()
         last_bar = None
+        write_lock(started)
+        self._progress = time.time()
+        watch = threading.Thread(target=self._watchdog, args=(started,), name="watchdog", daemon=True)
+        watch.start()
         try:
             while True:
-                write_lock(started)  # heartbeat
+                self._progress = time.time()
                 if STOP_FILE.exists():
                     self.flatten_all("STOP file found")
                     STOP_FILE.unlink(missing_ok=True)
@@ -294,6 +356,7 @@ class Bot:
                     break
                 time.sleep(self.cfg.get("poll_seconds", 5))
         finally:
+            self._stop_watch.set()
             release_lock()
 
 

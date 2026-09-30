@@ -29,6 +29,27 @@ def _keys():
     return key, sec
 
 
+# alpaca-py sends requests without a timeout, so one dead connection can block forever
+# (a bot once hung for hours with a half-closed socket). Every client gets one.
+HTTP_TIMEOUT = (5, 20)  # seconds: connect, read
+
+
+def with_timeout(client, timeout=HTTP_TIMEOUT):
+    """Give an alpaca-py client (trading or data) default request timeouts."""
+    from requests import Session
+
+    class _TimeoutSession(Session):
+        def request(self, method, url, **kw):
+            kw.setdefault("timeout", timeout)
+            return super().request(method, url, **kw)
+
+    old = client._session
+    client._session = _TimeoutSession()
+    client._session.headers.update(old.headers)
+    old.close()
+    return client
+
+
 def _tf(label: str):
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
     amt, unit = TIMEFRAMES[label]
@@ -69,14 +90,14 @@ def _download(sym, timeframe, start, end, feed) -> pd.DataFrame:
     if is_crypto(sym):
         from alpaca.data.historical import CryptoHistoricalDataClient
         from alpaca.data.requests import CryptoBarsRequest
-        client = CryptoHistoricalDataClient(key, sec)
+        client = with_timeout(CryptoHistoricalDataClient(key, sec))
         bars = client.get_crypto_bars(CryptoBarsRequest(
             symbol_or_symbols=sym, timeframe=_tf(timeframe), start=start, end=end))
     else:
         from alpaca.data.enums import Adjustment, DataFeed
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest
-        client = StockHistoricalDataClient(key, sec)
+        client = with_timeout(StockHistoricalDataClient(key, sec))
         bars = client.get_stock_bars(StockBarsRequest(
             symbol_or_symbols=sym, timeframe=_tf(timeframe), start=start, end=end,
             adjustment=Adjustment.ALL, feed=DataFeed(feed)))

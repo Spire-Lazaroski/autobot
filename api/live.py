@@ -22,7 +22,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from autobot.data import TIMEFRAMES, _download, _keys, is_crypto
+from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
 from autobot.liveconfig import STOP_FILE, bot_state
 
 from .serialize import times, values
@@ -42,7 +42,7 @@ def _client():
     with _tc_lock:
         if _tc is None:
             from alpaca.trading.client import TradingClient
-            _tc = TradingClient(*_keys(), paper=True)
+            _tc = with_timeout(TradingClient(*_keys(), paper=True))
         return _tc
 
 
