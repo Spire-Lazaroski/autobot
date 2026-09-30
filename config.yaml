@@ -1,0 +1,53 @@
+backtest:
+  symbols:
+  - SPY
+  - QQQ
+  - AAPL
+  - NVDA
+  - TSLA
+  timeframe: 15Min
+  days: 90
+  rth_only: true
+  fee_bps: 0.0
+  slippage_bps: 2.0
+  allow_short: false
+  train_frac: 0.7
+live:
+  timeframe: 5Min
+  poll_seconds: 5
+  allow_short: false
+  starting_note: paper only - live trading is disabled in code
+  risk:
+    max_daily_loss_pct: 2.0
+    max_position_usd: 10000
+    flatten_before_close_min: 5
+  jobs:
+  - name: trend
+    strategy: ema_cross
+    params:
+      fast: 9
+      slow: 21
+    symbols:
+    - SPY
+    - QQQ
+    allocation_pct: 20
+    enabled: true
+  - name: reversion
+    strategy: rsi_reversion
+    params:
+      period: 7
+      oversold: 20
+      exit_level: 50
+    symbols:
+    - AAPL
+    allocation_pct: 15
+    enabled: true
+  - name: crypto_breakout
+    strategy: donchian_breakout
+    params:
+      entry: 20
+      exit: 10
+    symbols:
+    - BTC/USD
+    allocation_pct: 10
+    enabled: false
