@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -56,6 +56,37 @@ def _trades(bt: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype=float)
     grp = (1 + bt.ret[in_trade]).groupby(trade_id[in_trade]).prod() - 1
     return grp
+
+
+def fills(df: pd.DataFrame, bt: pd.DataFrame) -> List[Dict]:
+    """Every position change as a fill for chart markers.
+    A change that takes effect on bar t was decided on bar t-1 and filled at its close."""
+    pos = bt.position.values
+    out = []
+    for t in np.flatnonzero(np.diff(pos, prepend=0.0) != 0):
+        if t == 0:
+            continue
+        prev, new = pos[t - 1], pos[t]
+        out.append({"time": df.index[t - 1], "price": float(df.close.iloc[t - 1]),
+                    "side": "buy" if new > prev else "sell",
+                    "kind": "entry" if abs(new) > abs(prev) or prev * new < 0 else "exit",
+                    "from": float(prev), "to": float(new)})
+    return out
+
+
+def round_trips(df: pd.DataFrame, bt: pd.DataFrame) -> List[Dict]:
+    """One row per trade (a run of bars with the same non-zero position)."""
+    pos = bt.position
+    tid = (pos != pos.shift()).cumsum()
+    rows = []
+    for _, g in bt[pos != 0].groupby(tid[pos != 0]):
+        i0 = df.index.get_loc(g.index[0])
+        rows.append({"entry_time": df.index[max(i0 - 1, 0)], "exit_time": g.index[-1],
+                     "side": "long" if g.position.iloc[0] > 0 else "short", "bars": len(g),
+                     "entry_price": float(df.close.iloc[max(i0 - 1, 0)]),
+                     "exit_price": float(df.close.loc[g.index[-1]]),
+                     "return_%": round(float((1 + g.ret).prod() - 1) * 100, 3)})
+    return rows
 
 
 def metrics(bt: pd.DataFrame) -> Dict:
@@ -130,39 +161,57 @@ def _valid(params: Dict) -> bool:
     return True
 
 
+def param_combos(name: str, grid: Dict[str, List] | None = None) -> List[Dict]:
+    """Every valid parameter set in a strategy's grid (or an override grid), defaults filled in."""
+    spec = STRATEGIES[name]
+    grid = spec.grid if grid is None else grid
+    keys = list(grid)
+    out = []
+    for combo in itertools.product(*[grid[k] for k in keys]) if keys else [()]:
+        params = {**spec.defaults, **dict(zip(keys, combo))}
+        if _valid(params):
+            out.append(params)
+    return out
+
+
 def parameter_search(data: Dict[str, pd.DataFrame], names: List[str] | None = None,
                      costs: CostModel = CostModel(), train_frac=0.7, allow_short=False,
-                     rank_by="sharpe") -> pd.DataFrame:
-    """Grid-search every strategy's parameter space. Rank on train, report test."""
+                     rank_by="sharpe", progress: Optional[Callable[[float, str], None]] = None,
+                     grids: Dict[str, Dict[str, List]] | None = None) -> pd.DataFrame:
+    """Grid-search every strategy's parameter space. Rank on train, report test.
+
+    progress(fraction, message) is called after each parameter set, if given.
+    grids overrides the search space per strategy, e.g. {"ema_cross": {"fast": [5, 9]}}.
+    """
     names = names or [n for n in STRATEGIES if STRATEGIES[n].grid]
+    grids = grids or {}
+    todo = [(name, params) for name in names for params in param_combos(name, grids.get(name))]
     out = []
-    for name in names:
+    for i, (name, params) in enumerate(todo):
         spec = STRATEGIES[name]
-        keys = list(spec.grid)
-        for combo in itertools.product(*[spec.grid[k] for k in keys]) if keys else [()]:
-            params = {**spec.defaults, **dict(zip(keys, combo))}
-            if not _valid(params):
-                continue
-            tr_m, te_m = [], []
-            for sym, df in data.items():
-                sig = get_signal(name, df, params, allow_short)
-                bt = run_backtest(df, sig, costs)
-                cut = int(len(bt) * train_frac)
-                tr_m.append(metrics(bt.iloc[:cut].assign(equity=(1 + bt.ret.iloc[:cut]).cumprod())))
-                te_m.append(metrics(bt.iloc[cut:].assign(equity=(1 + bt.ret.iloc[cut:]).cumprod())))
-            tr = pd.DataFrame(tr_m).mean(numeric_only=True)
-            te = pd.DataFrame(te_m).mean(numeric_only=True)
-            out.append({
-                "strategy": name,
-                "params": ", ".join(f"{k}={params[k]}" for k in keys),
-                "train_sharpe": round(tr["sharpe"], 2),
-                "test_sharpe": round(te["sharpe"], 2),
-                "train_return_%": round(tr["total_return_%"], 2),
-                "test_return_%": round(te["total_return_%"], 2),
-                "test_max_dd_%": round(te["max_drawdown_%"], 2),
-                "test_trades": int(te["trades"]),
-                "_params": params,
-            })
+        keys = list(grids.get(name, spec.grid))
+        tr_m, te_m = [], []
+        for sym, df in data.items():
+            sig = get_signal(name, df, params, allow_short)
+            bt = run_backtest(df, sig, costs)
+            cut = int(len(bt) * train_frac)
+            tr_m.append(metrics(bt.iloc[:cut].assign(equity=(1 + bt.ret.iloc[:cut]).cumprod())))
+            te_m.append(metrics(bt.iloc[cut:].assign(equity=(1 + bt.ret.iloc[cut:]).cumprod())))
+        tr = pd.DataFrame(tr_m).mean(numeric_only=True)
+        te = pd.DataFrame(te_m).mean(numeric_only=True)
+        out.append({
+            "strategy": name,
+            "params": ", ".join(f"{k}={params[k]}" for k in keys),
+            "train_sharpe": round(tr["sharpe"], 2),
+            "test_sharpe": round(te["sharpe"], 2),
+            "train_return_%": round(tr["total_return_%"], 2),
+            "test_return_%": round(te["total_return_%"], 2),
+            "test_max_dd_%": round(te["max_drawdown_%"], 2),
+            "test_trades": int(te["trades"]),
+            "_params": params,
+        })
+        if progress:
+            progress((i + 1) / len(todo), f"{name} {i + 1}/{len(todo)}")
     res = pd.DataFrame(out)
     if res.empty:
         return res

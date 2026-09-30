@@ -17,18 +17,11 @@ from typing import Callable, Dict, List
 import numpy as np
 import pandas as pd
 
+from . import indicators as ind
 
 # ----------------------------------------------------------------- helpers
-def _ema(s: pd.Series, n: int) -> pd.Series:
-    return s.ewm(span=n, adjust=False).mean()
-
-
-def _rsi(close: pd.Series, n: int) -> pd.Series:
-    delta = close.diff()
-    up = delta.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
-    down = (-delta.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
-    rs = up / down.replace(0, np.nan)
-    return (100 - 100 / (1 + rs)).fillna(50)
+_ema = ind.ema
+_rsi = ind.rsi
 
 
 def _state_machine(long_entry, long_exit, short_entry=None, short_exit=None) -> pd.Series:
@@ -109,11 +102,7 @@ def donchian_breakout(df, entry=20, exit=10, allow_short=False, **_):
 def vwap_reversion(df, band_pct=0.3, allow_short=False, **_):
     """Intraday mean reversion around session VWAP. Best on 1–15 min bars.
     Buy when price is band_pct % below VWAP, exit when it touches VWAP."""
-    day = df.index.tz_convert("America/New_York").date if df.index.tz is not None else df.index.date
-    tp = (df.high + df.low + df.close) / 3
-    pv = (tp * df.volume).groupby(day).cumsum()
-    vv = df.volume.groupby(day).cumsum().replace(0, np.nan)
-    vwap = (pv / vv).ffill()
+    vwap = ind.session_vwap(df)
     dev = (df.close / vwap - 1) * 100
     le, lx = dev < -band_pct, dev >= 0
     se, sx = (dev > band_pct, dev <= 0) if allow_short else (None, None)
@@ -129,6 +118,72 @@ def momentum(df, lookback=20, threshold=0.0, allow_short=False, **_):
     return _apply_side(sig, allow_short)
 
 
+# ----------------------------------------------------------------- from published research
+# These are here because they are well documented, not because they are known to work now.
+# Published edges usually shrink after publication; judge them on your own test_sharpe.
+def connors_rsi2(df, trend=200, rsi_period=2, entry=5, exit_sma=5, allow_short=False, **_):
+    """Connors RSI(2): in an uptrend (close > SMA trend), buy a very oversold short RSI,
+    exit when the close gets back above a short SMA. Designed for daily bars."""
+    r = ind.rsi(df.close, rsi_period)
+    long_trend, exit_ma = ind.sma(df.close, trend), ind.sma(df.close, exit_sma)
+    le = (df.close > long_trend) & (r < entry)
+    lx = df.close > exit_ma
+    se, sx = ((df.close < long_trend) & (r > 100 - entry), df.close < exit_ma) if allow_short else (None, None)
+    return _state_machine(le, lx, se, sx)
+
+
+def ibs_reversion(df, low=0.2, high=0.8, allow_short=False, **_):
+    """Internal bar strength: buy a close near the bar's low, exit on a close near its high.
+    Documented mainly on daily bars of equity index ETFs."""
+    v = ind.ibs(df)
+    le, lx = v < low, v > high
+    se, sx = (v > high, v < low) if allow_short else (None, None)
+    return _state_machine(le, lx, se, sx)
+
+
+def opening_range_breakout(df, range_min=30, allow_short=False, **_):
+    """Opening range breakout: after the first range_min minutes, go with a break of that
+    range; stop out on the opposite side; always flat at the close. Stocks, intraday bars only."""
+    if not ind.is_intraday(df):
+        return pd.Series(0.0, index=df.index)
+    hi, lo = ind.opening_range(df, range_min)
+    eod = ind.last_bar_of_session(df)
+    le, lx = (df.close > hi) & ~eod, (df.close < lo) | eod
+    se, sx = ((df.close < lo) & ~eod, (df.close > hi) | eod) if allow_short else (None, None)
+    return _state_machine(le, lx, se, sx)
+
+
+def intraday_momentum(df, signal_min=30, hold_min=30, allow_short=False, **_):
+    """Gao/Han/Li/Zhou: the return from yesterday's close to the first signal_min minutes
+    predicts the last hold_min minutes. Hold in that direction into the close, then flat."""
+    if not ind.is_intraday(df):
+        return pd.Series(0.0, index=df.index)
+    step = ind.step_minutes(df)
+    mins = ind.minute_of_day(df)
+    r = ind.first_period_return(df, signal_min)
+    # signal on bar t is held over bar t+1, so start one bar before the window and stop one bar early
+    window = (mins + step >= ind.RTH_CLOSE - hold_min) & ~ind.last_bar_of_session(df)
+    sig = np.sign(r).where(window, 0).fillna(0)
+    return _apply_side(sig, allow_short)
+
+
+def noise_area(df, lookback=14, band_mult=1.0, allow_short=False, **_):
+    """Zarattini/Aziz/Barbon 'Beat the Market': trade breaks out of the normal intraday
+    'noise area' around the open, trail a stop at the band or VWAP, flat at the close."""
+    if not ind.is_intraday(df):
+        return pd.Series(0.0, index=df.index)
+    up, lo = ind.noise_bands(df, lookback, band_mult)
+    vwap = ind.session_vwap(df)
+    eod = ind.last_bar_of_session(df)
+    le = (df.close > up) & ~eod
+    lx = (df.close < np.maximum(up, vwap)) | eod | up.isna()
+    se, sx = None, None
+    if allow_short:
+        se = (df.close < lo) & ~eod
+        sx = (df.close > np.minimum(lo, vwap)) | eod | lo.isna()
+    return _state_machine(le, lx, se, sx)
+
+
 # ----------------------------------------------------------------- registry
 @dataclass
 class StrategySpec:
@@ -138,6 +193,8 @@ class StrategySpec:
     description: str
     defaults: Dict
     grid: Dict[str, List] = field(default_factory=dict)  # parameter search space
+    warmup_days: int = 0      # calendar days of history the live bot must load (0 = default)
+    source: str = ""          # where the idea comes from (shown in the UI)
 
 
 STRATEGIES: Dict[str, StrategySpec] = {
@@ -177,6 +234,31 @@ STRATEGIES: Dict[str, StrategySpec] = {
                      "Long when trailing return over lookback is positive.",
                      {"lookback": 20, "threshold": 0.0},
                      {"lookback": [10, 20, 50, 100], "threshold": [0.0, 0.5]}),
+        StrategySpec("connors_rsi2", connors_rsi2, "mean_reversion",
+                     "Buy RSI(2) dips while above the 200 SMA; exit above a 5 SMA. Daily bars.",
+                     {"trend": 200, "rsi_period": 2, "entry": 5, "exit_sma": 5},
+                     {"rsi_period": [2, 3], "entry": [5, 10, 15], "exit_sma": [5, 10]},
+                     warmup_days=400, source="Connors & Alvarez, Short Term Trading Strategies That Work (2008)"),
+        StrategySpec("ibs_reversion", ibs_reversion, "mean_reversion",
+                     "Buy closes near the bar's low, sell closes near its high. Daily ETF bars.",
+                     {"low": 0.2, "high": 0.8},
+                     {"low": [0.1, 0.2, 0.3], "high": [0.7, 0.8, 0.9]},
+                     source="Pagonidis (2013); Pal & Bhattacharya, arXiv 2306.12434 (2023)"),
+        StrategySpec("opening_range_breakout", opening_range_breakout, "intraday",
+                     "Trade the break of the first N minutes' range, flat at the close.",
+                     {"range_min": 30},
+                     {"range_min": [5, 15, 30, 60]},
+                     source="Zarattini, Barbon & Aziz, A Profitable Day Trading Strategy (2024)"),
+        StrategySpec("intraday_momentum", intraday_momentum, "intraday",
+                     "First half-hour return sets the direction for the last half-hour.",
+                     {"signal_min": 30, "hold_min": 30},
+                     {"signal_min": [30, 60], "hold_min": [30, 60]},
+                     source="Gao, Han, Li & Zhou, Market Intraday Momentum, JFE (2018)"),
+        StrategySpec("noise_area", noise_area, "intraday",
+                     "Break out of the usual intraday noise band; VWAP trailing stop; flat at close.",
+                     {"lookback": 14, "band_mult": 1.0},
+                     {"lookback": [10, 14, 20], "band_mult": [0.8, 1.0, 1.2]},
+                     warmup_days=30, source="Zarattini, Aziz & Barbon, Beat the Market, SFI 24-97 (2024)"),
     ]
 }
 

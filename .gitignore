@@ -5,3 +5,6 @@ results/
 __pycache__/
 STOP
 .venv/
+node_modules/
+web/dist/
+*.yaml.tmp
