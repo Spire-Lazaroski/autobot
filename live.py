@@ -21,6 +21,11 @@ enforces the daily-loss limit, and if the loop makes no progress for stall_secon
 (default 300) it logs CRITICAL and exits WITHOUT trading, so the lab shows it stopped.
 The heartbeat is written only while the main loop is making progress.
 
+Every bar, for every symbol, the bot appends WHY it acted (or didn't) to
+logs/decisions.jsonl: strategy in charge, regime and the indicator values behind it,
+signal, action, order ids and fill price; plus every regime change and strategy
+switch with before/after values. Reports are built from this file.
+
 Paper only: TradingClient is created with paper=True and there is no switch to change it.
 """
 from __future__ import annotations
@@ -41,8 +46,9 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
+from autobot.decisions import Context, Recorder
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
-from autobot.strategies import STRATEGIES, get_signal
+from autobot.strategies import STRATEGIES
 
 ROOT = Path(__file__).resolve().parent
 LOGS = ROOT / "logs"
@@ -105,6 +111,7 @@ class Bot:
         self._progress = time.time()  # last time the main loop moved forward
         self._exit = os._exit          # replaceable in tests
         self._stop_watch = threading.Event()
+        self.rec = Recorder(LOGS / "decisions.jsonl")
         self.watch_risk_after = 60.0   # seconds of no progress before the watchdog checks the loss limit
         self.cfg_path = cfg_path
         self._cfg_mtime = cfg_path.stat().st_mtime if cfg_path and cfg_path.exists() else None
@@ -159,6 +166,7 @@ class Bot:
         self._apply(new)
         for line in diff:
             log.warning("CONFIG %s", line)
+            self._safe(self.rec.event, "config", f"Settings changed: {line}.")
         self._record(diff)
         dropped = old_syms - {s for j in self.jobs for s in j["symbols"]}
         if dropped:
@@ -203,9 +211,30 @@ class Bot:
         order = self.tc.submit_order(MarketOrderRequest(symbol=sym, qty=abs(qty), side=side, time_in_force=tif))
         log.info("ORDER %s %s %s @~%.2f (%s) id=%s", side.value, abs(qty), sym, price, reason, order.id)
         self._log_trade(sym, qty, reason, price, job, order.id, side.value)
+        return order
+
+    def fill_price(self, order_id) -> float | None:
+        """Market orders fill within moments during market hours; ask once."""
+        getter = getattr(self.tc, "get_order_by_id", None)
+        if getter is None:
+            return None
+        try:
+            time.sleep(0.4)
+            o = getter(order_id)
+            return float(o.filled_avg_price) if getattr(o, "filled_avg_price", None) else None
+        except Exception:  # noqa: BLE001  the report falls back to the account's fills
+            return None
+
+    def _safe(self, fn, *args, **kw):
+        """Recording must never stop trading."""
+        try:
+            return fn(*args, **kw)
+        except Exception as e:  # noqa: BLE001
+            log.error("decision log failed: %s", e)
 
     def flatten_all(self, why: str):
         log.warning("FLATTEN ALL: %s", why)
+        self._safe(self.rec.event, "flatten", f"The bot closed every position: {why}.")
         self.tc.close_all_positions(cancel_orders=True)
 
     # ------------------------------------------------------------ core
@@ -227,6 +256,8 @@ class Bot:
         dd = (eq / self.day_start_equity - 1) * 100
         if dd <= -abs(self.risk["max_daily_loss_pct"]):
             self.flatten_all(f"daily loss {dd:.2f}% hit limit")
+            self._safe(self.rec.event, "risk", f"The daily loss limit was reached ({dd:.2f}% vs {self.risk['max_daily_loss_pct']}%); "
+                                                 "the bot sold everything and stopped for the day.")
             self.halted = True
         return not self.halted
 
@@ -255,22 +286,27 @@ class Bot:
                     continue
                 cur = held.get(self._pos_key(sym), 0.0)
                 active = None
+                override = None
                 try:
                     df = self.recent_bars(sym, job)
                     if len(df) < 50:
                         log.info("%s: only %d bars, waiting for more history", sym, len(df))
                         continue
-                    sig = get_signal(job["strategy"], df, job.get("params"), self.cfg.get("allow_short", False))
-                    target_dir = float(sig.iloc[-1])
+                    ctx = Context(job["strategy"], df, job.get("params") or {}, self.cfg.get("allow_short", False))
+                    target_dir = float(ctx.signal.iloc[-1])
                     price = float(df.close.iloc[-1])
                     if spec.explain:
-                        active = spec.explain(df, {**spec.defaults, **(job.get("params") or {})},
-                                              self.cfg.get("allow_short", False))["names"][-1]
+                        active = ctx.active[-1]
                 except Exception as e:  # noqa: BLE001
                     log.error("%s: data/signal error: %s", sym, e)
+                    self._safe(self.rec.write, {"type": "decision", "job": job["name"], "symbol": sym,
+                                                  "strategy": job["strategy"], "bar_time": datetime.now(timezone.utc).isoformat(),
+                                                  "action": f"error: {e}", "reason": "The bot couldn't get data or compute the signal for this bar."})
                     continue
                 if not crypto and self.near_close(clock):
                     target_dir, reason = 0.0, "flatten before close"
+                    override = (f"The bot closes stock positions {self.risk.get('flatten_before_close_min')} minutes before "
+                                "the US market close so nothing is held overnight.")
                 else:
                     reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
                 if crypto and target_dir < 0:
@@ -279,12 +315,21 @@ class Bot:
                 raw = usd / price * abs(target_dir)  # fractional targets (ensemble average) size down
                 target_qty = (round(raw, 4) if crypto else math.floor(raw)) * (1 if target_dir > 0 else -1 if target_dir < 0 else 0)
                 delta = round(target_qty - cur, 4)
+                orders = []
                 # crossing zero (long->short) must be two orders on Alpaca
                 if cur != 0 and target_qty != 0 and (cur > 0) != (target_qty > 0):
-                    self.submit(sym, -cur, reason + " (close)", price, job["name"])
+                    orders.append(self.submit(sym, -cur, reason + " (close)", price, job["name"]))
                     delta = target_qty
                 if abs(delta) > 0 and (crypto or abs(delta) >= 1):
-                    self.submit(sym, delta, reason, price, job["name"])
+                    orders.append(self.submit(sym, delta, reason, price, job["name"]))
+                orders = [o for o in orders if o is not None]
+                traded = round(target_qty - cur, 4) if orders else 0.0
+                action = ("buy" if traded > 0 else "sell") if orders else "no change"
+                if override and orders:
+                    action = "flatten before close"
+                fill = self.fill_price(orders[-1].id) if orders else None
+                self._safe(self.rec.bar, job["name"], sym, ctx, cur, target_qty, action, abs(traded),
+                             [str(o.id) for o in orders], fill, override if orders else None)
                 status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "price": price,
                                           "signal": target_dir, "position": cur, "target": target_qty, "active": active}
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
