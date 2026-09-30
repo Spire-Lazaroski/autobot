@@ -329,7 +329,7 @@ class Bot:
                     action = "flatten before close"
                 fill = self.fill_price(orders[-1].id) if orders else None
                 self._safe(self.rec.bar, job["name"], sym, ctx, cur, target_qty, action, abs(traded),
-                             [str(o.id) for o in orders], fill, override if orders else None)
+                             [str(o.id) for o in orders], fill, override)
                 status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "price": price,
                                           "signal": target_dir, "position": cur, "target": target_qty, "active": active}
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))

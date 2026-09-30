@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { DetailView } from "../components/DetailView";
+import { GenerateReport } from "../components/GenerateReport";
 import { ParamInput } from "../components/ParamInput";
 import { Plot } from "../components/Plot";
 import { SettingsBar } from "../components/SettingsBar";
@@ -101,6 +102,11 @@ export function Shifting() {
 
       <ErrorBox error={q.error} />
       {!req && <Empty>Pick a method and press <b>Run shifting</b>.</Empty>}
+      {q.data && req && (
+        <Panel title="Plain-English report" right={<GenerateReport run={req} strategy={q.data.strategy} params={q.data.params} />}>
+          <p className="text-[12px] text-muted">Every regime change, strategy switch and trade of this run, explained in plain words.</p>
+        </Panel>
+      )}
       {q.data && req && <Results res={q.data} onOpen={setOpen} />}
       {open && req && q.data && (
         <DetailView run={req} strategy={q.data.strategy} params={q.data.params} symbols={req.data.symbols}

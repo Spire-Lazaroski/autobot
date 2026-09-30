@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { DetailView } from "../components/DetailView";
+import { GenerateReport } from "../components/GenerateReport";
 import { Plot } from "../components/Plot";
 import { SettingsBar } from "../components/SettingsBar";
 import { SortTable, type Col } from "../components/SortTable";
@@ -153,6 +154,11 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
             layout={{ hovermode: "closest", xaxis: { title: { text: "max drawdown %" } }, yaxis: { title: { text: "return %" } }, margin: { l: 52, r: 12, t: 8, b: 40 } }} />
         </Panel>
       </div>
+
+      <Panel title="Plain-English report" right={<GenerateReport run={req} strategy={best?.strategy} params={req.strategies[best?.strategy] ?? {}}
+        choices={summary.map((r) => r.strategy as string)} />}>
+        <p className="text-[12px] text-muted">Explains every trade and strategy switch of one strategy in plain words, with charts. It opens in a new tab and is kept on the Reports page.</p>
+      </Panel>
 
       <Panel title="Metrics · click a row for candles, indicators and trades">
         <SortTable rows={summary} cols={cols} rowKey={(r) => r.strategy} initialSort={{ key: "sharpe", desc: true }}

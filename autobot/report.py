@@ -508,7 +508,8 @@ def trade_sentence(t, w: Words) -> str:
 
 def _lower(s: str) -> str:
     s = (s or "reason not recorded").strip()
-    return s if s.startswith("'") else s[0].lower() + s[1:]
+    s = s if s.startswith("'") else s[0].lower() + s[1:]
+    return s if s.endswith((".", "!", "?")) else s + "."
 
 
 # ----------------------------------------------------------------- charts (static SVG, white)
@@ -665,6 +666,9 @@ def render(ri: ReportInput) -> str:
         if svg:
             price_charts += f"<figure>{svg}<figcaption>{_esc(sym)}: price with the bot's buys (▲) and sells (▼); shading shows the market mood.</figcaption></figure>"
     glossary = "".join(f"<tr><td><b>{_esc(t)}</b></td><td>{_esc(plain.GLOSSARY[t])}</td></tr>" for t in sorted(w.used))
+    if len(trades) > 60:  # long backtests: first and last 30, the middle is in the charts and totals
+        mid = len(trades) - 60
+        trades = trades[:30] + [f"… {mid} more trades in between (all are included in the totals and charts) …"] + trades[-30:]
     trades_html = "".join(f"<li>{_esc(s)}</li>" for s in trades)
     demo = ('<p class="note"><b>Demo data.</b> These prices are made up to test the software. '
             "The numbers below say nothing about how the strategy would do in real markets.</p>") if ri.is_demo else ""

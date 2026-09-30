@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/api": { target: `http://${api}`, changeOrigin: true },
         "/ws": { target: `ws://${api}`, ws: true },
+        "/reports": { target: `http://${api}`, changeOrigin: true },
       },
     },
   };

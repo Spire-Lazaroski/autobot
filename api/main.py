@@ -25,12 +25,22 @@ from autobot.liveconfig import validate_live
 
 from . import jobs
 from .live import router as live_router
+from .reports import router as reports_router
+from .reports import start_scheduler
 from .models import CompareReq, DataReq, DetailReq, SearchReq, ShiftReq, WalkForwardReq
 from .serialize import frame, plain, records, times, values
 from .settings import CONFIG_PATH, WEB_PORT
 
 app = FastAPI(title="autobot lab", version="0.1")
 app.include_router(live_router)
+app.include_router(reports_router)
+
+
+@app.on_event("startup")
+def _start_daily_report():
+    start_scheduler()
+
+
 app.add_middleware(CORSMiddleware, allow_methods=["*"], allow_headers=["*"],
                    allow_origins=[f"http://127.0.0.1:{WEB_PORT}", f"http://localhost:{WEB_PORT}"])
 

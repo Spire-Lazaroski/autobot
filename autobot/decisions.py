@@ -327,8 +327,8 @@ class Recorder:
             reason_override: Optional[str] = None) -> Dict:
         i = len(ctx.df) - 1
         snap = ctx.snapshot(i)
-        if reason_override:
-            snap["reason"] = reason_override
+        if reason_override:  # a bot rule (e.g. the close) overrode the strategy: say both
+            snap["reason"] = f"{reason_override} The strategy's own view: {snap['reason'][0].lower()}{snap['reason'][1:]}"
         bar_time = _iso(ctx.df.index[i])
         prev = self.last.get(symbol)
         if prev and prev["regime"] != snap["regime"] and snap["regime"] not in (None, "warmup"):

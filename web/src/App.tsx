@@ -4,6 +4,7 @@ import { useHealth } from "./lib/api";
 import { usePageState } from "./lib/usePageState";
 import { Lab } from "./pages/Lab";
 import { Live } from "./pages/Live";
+import { Reports } from "./pages/Reports";
 import { Search } from "./pages/Search";
 import { Shifting } from "./pages/Shifting";
 import { WalkForward } from "./pages/WalkForward";
@@ -32,7 +33,7 @@ const PAGES: Record<string, { title: string; Component: ComponentType }> = {
   lab: { title: "Backtest lab", Component: Lab },
   search: { title: "Parameter search & walk-forward", Component: SearchHub },
   shifting: { title: "Strategy shifting", Component: Shifting },
-  reports: { title: "Trading reports", Component: () => <Placeholder what="The Reports page" /> },
+  reports: { title: "Trading reports", Component: Reports },
   help: { title: "Help & operating procedure", Component: () => <Placeholder what="The Help page" /> },
 };
 
