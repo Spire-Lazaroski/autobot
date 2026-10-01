@@ -130,7 +130,10 @@ GLOSSARY: Dict[str, str] = {
     "Flatten before close": "The bot sells stock positions a few minutes before the US market closes so nothing is held overnight.",
     "Backtest": "Replaying a strategy on past prices to see how it would have done.",
     "Demo data": "Made-up prices used to test the software. Results on it say nothing about real markets.",
-    "Sharpe ratio": "Return divided by how bumpy the ride was; higher is better, above 1 is good.",
+    "News story": "An article from the Alpaca/Benzinga news feed about one of our symbols; reposts of the same story count once.",
+    "Materiality": "How much a news story could matter to the price, from 1 (routine) to 5 (major), scored by keyword rules or by Claude.",
+    "Earnings day": "The session that reacts to a company's quarterly results (results released after the close move the next day).",
+    "Sharpe ratio":"Return divided by how bumpy the ride was; higher is better, above 1 is good.",
 }
 
 

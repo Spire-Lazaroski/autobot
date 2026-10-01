@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from . import plain
+from . import plain, report_news
 from .backtest import CostModel, round_trips, run_backtest
 from .decisions import backtest_decisions, mood_adj, read_jsonl
 from .strategies import STRATEGIES, get_signal
@@ -62,6 +62,7 @@ class ReportInput:
     limits: Dict = field(default_factory=dict)
     open_positions: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
+    news: Dict = field(default_factory=dict)  # report_news.collect(...); empty = no news section
 
 
 def _trade_dict(symbol, side, qty_text, entry_time, entry_price, exit_time, exit_price, pnl, pnl_pct,
@@ -120,13 +121,15 @@ def from_backtest(data: Dict[str, pd.DataFrame], strategy: str, params: Dict | N
     notes = []
     if bsym != benchmark_symbol:
         notes.append(f"{benchmark_symbol} wasn't in this backtest, so the comparison uses simply holding {bsym}.")
+    nd = report_news.collect(list(data), lo, hi + pd.Timedelta(seconds=1), "backtest",
+                             news_aware=set(data) if strategy == "news_guard" else set(), is_demo=is_demo)
     return ReportInput(
         title=f"Backtest report: {strategy}", period_label=_period(lo, hi),
         source=f"Backtest on {'demo (made-up) data' if is_demo else 'Alpaca market data'} · {', '.join(data)} · "
                f"${capital:,.0f} split equally · costs {costs.fee_bps + costs.slippage_bps:g} bps per trade",
         kind="backtest", is_demo=is_demo, start_equity=capital, equity=equity, benchmark=bench, benchmark_symbol=bsym,
         bars=bars, records=sorted(recs, key=lambda r: r["bar_time"]), trades=sorted(trades, key=lambda t: t["entry_time"]),
-        limits={}, notes=notes)
+        limits={}, notes=notes, news=nd)
 
 
 # ----------------------------------------------------------------- from the paper account
@@ -162,6 +165,11 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
     eq = eq[eq > 0]
     if eq.empty:
         raise ValueError("The account has no value history for this period (market closed?).")
+    eq, jumps = remove_cash_jumps(eq)
+    for t, v in jumps:
+        notes.append(f"The broker's account-value history jumps by {_money(v, True)} at {_ny(t):%H:%M} on {_ny(t):%a %d %b}, "
+                     "more than trading could move it in 5 minutes (this happens around deposits and in a paper account's "
+                     "first days). The report leaves that jump out, so the result shows trading only.")
     start_equity = float(eq.iloc[0])
 
     # actual fills in the period
@@ -192,12 +200,34 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
     if bench_sym in bars and len(bars[bench_sym]):
         c = bars[bench_sym].close
         bench = start_equity * c / c.iloc[0]
+    jobs = [j for j in cfg["live"].get("jobs", []) if j.get("enabled", True)]
+    job_syms = [s for j in jobs for s in j["symbols"]]
+    nd = report_news.collect(sorted(set(symbols) | set(job_syms)), a, b, "live",
+                             news_aware={s for j in jobs if j["strategy"] == "news_guard" for s in j["symbols"]},
+                             watch_symbols=job_syms)
     return ReportInput(
         title="Daily trading report" if d0 == d1 else "Trading report", period_label=_period(a, b - pd.Timedelta(seconds=1), days_only=True),
         source="Alpaca paper account (pretend money)", kind="live", is_demo=False, start_equity=start_equity, equity=eq,
         benchmark=bench, benchmark_symbol=bench_sym, bars={s: d for s, d in bars.items() if s in symbols or s == bench_sym},
         records=sorted(recs, key=lambda r: r.get("bar_time") or r["time"]), trades=trades,
-        limits=dict(cfg["live"].get("risk", {})), open_positions=open_pos, notes=notes)
+        limits=dict(cfg["live"].get("risk", {})), open_positions=open_pos, notes=notes, news=nd)
+
+
+CASH_JUMP = 0.10  # one-bar change in account value above this share can't come from our trading
+
+
+def remove_cash_jumps(eq: pd.Series):
+    """Take out one-bar jumps larger than CASH_JUMP of the account value (deposits, or Alpaca's
+    paper history counting the opening deposit twice): every later point is shifted back by the
+    jump. Positions are capped far below this (risk.max_position_usd), so trading can't do it."""
+    eq = eq.copy()
+    jumps = []
+    for i in range(1, len(eq)):
+        d = eq.iloc[i] - eq.iloc[i - 1]
+        if abs(d) > CASH_JUMP * eq.iloc[i - 1]:
+            eq.iloc[i:] -= d
+            jumps.append((eq.index[i], float(d)))
+    return eq, jumps
 
 
 def _round_trips_from_fills(fills, a, b, by_order, recs, first_pos):
@@ -407,6 +437,10 @@ def watch_tomorrow(ri, a, w: Words) -> List[str]:
         out.append("Check the bot log (Live page) for the errors listed above before the next session.")
     if any("very frequent" in x for x in went_badly(ri, a, Words())):
         out.append("If switching stays this frequent, test a larger 'confirm_bars' in the Lab before changing the live job.")
+    news_watch = report_news.watch_lines(ri.news) if ri.news else []
+    if any("quarterly results" in x for x in news_watch):
+        w.use("Earnings day")
+    out += news_watch
     if not out:
         out.append("No specific warnings from the report's rules.")
     return out
@@ -486,7 +520,16 @@ def timeline(ri, w: Words) -> List[str]:
     return lines
 
 
-def trade_sentence(t, w: Words) -> str:
+def trade_sentence(t, w: Words, nd: Optional[Dict] = None) -> str:
+    s = _trade_sentence(t, w)
+    note = report_news.trade_note(nd or {}, t)
+    if note:
+        s += " " + note
+        w.use("Materiality", "News story")
+    return s
+
+
+def _trade_sentence(t, w: Words) -> str:
     verb = "Bought" if t["side"] == "long" else "Sold short"
     s = f"{verb} {t['symbol']} ({t['qty_text']}) at {_money(t['entry_price'])} on {_ny(t['entry_time']):%a %d %b %H:%M}. Why: {_lower(t['entry_reason'])}"
     if t["open"]:
@@ -595,6 +638,10 @@ def price_chart(ri, sym: str) -> Optional[str]:
                     ax.axvspan(start - 0.5, i - 0.5, color=colors[g], alpha=0.13 if g != "warmup" else 0.3, lw=0)
                 start = i
     ax.plot(x, df.close.values, color=BRAND["brand"]["navy"], lw=1.3)
+    marks = report_news.chart_marks(ri.news, sym, df) if ri.news else []
+    if marks:  # material stories: small diamonds just above the plot (clear of the legend)
+        ax.scatter(marks, [1.03] * len(marks), marker="D", s=16, color=BRAND["brand"]["gold"], edgecolors=BRAND["brand"]["navy"],
+                   linewidths=0.5, transform=ax.get_xaxis_transform(), zorder=6, clip_on=False)
     for t in ri.trades:
         if t["symbol"] != sym:
             continue
@@ -613,12 +660,41 @@ def price_chart(ri, sym: str) -> Optional[str]:
     handles = [Line2D([], [], marker="^", ls="", color=BRAND["extra"]["profit"], label="buy"),
                Line2D([], [], marker="v", ls="", color=BRAND["extra"]["loss"], label="sell")]
     handles += [Patch(color=BRAND["states"][g], alpha=0.35, label=plain.REGIMES[g]["short"]) for g in ("trend", "range", "high_vol")]
-    ax.legend(handles=handles, loc="upper left", ncol=5, fontsize=8)
+    if marks:
+        handles.append(Line2D([], [], marker="D", ls="", markersize=4, color=BRAND["brand"]["gold"],
+                              markeredgecolor=BRAND["brand"]["navy"], label="news story"))
+    ax.legend(handles=handles, loc="upper left", ncol=6, fontsize=8)
     return _svg(fig)
 
 
 # ----------------------------------------------------------------- HTML
-HEADER = """<header class="spire-hdr">
+def news_section(ri: ReportInput, w: Words) -> str:
+    """'News on our symbols': per-symbol summary, top headlines and the biggest move (live);
+    counts and the most material stories (backtest). Empty when there is nothing to say."""
+    nd = ri.news
+    if not nd:
+        return ""
+    intro = ("<p class='muted'>Stories about our symbols that could matter to the price (materiality 3 or more for "
+             "companies, 4 or more for index funds), scored by keyword rules unless Claude scored them; keyword scores are rough "
+             "and sometimes misfile a story (for example a preview of another company's results). The bot does not trade on news"
+             f"{' except through the news rules of a news-aware job' if nd.get('news_aware') else ''}; this section is context.</p>")
+    if not nd.get("available"):
+        return f"<h2>News on our symbols</h2><p class='muted'>{_esc(nd.get('note') or 'No news for this period.')}</p>"
+    blocks = report_news.section(nd, ri.bars)
+    w.use("Materiality", "News story")
+    parts = []
+    for blk in blocks:
+        if blk["summary"] and "Earnings day" in blk["summary"]:
+            w.use("Earnings day")
+        head = f"<h3>{_esc(blk['symbol'])}</h3>" if blk["symbol"] else ""
+        more = f"<li class='muted'>… {blk['more']} more</li>" if blk.get("more") else ""
+        lines = "<ul>" + "".join(f"<li>{_esc(x)}</li>" for x in blk["lines"]) + more + "</ul>" if blk["lines"] else ""
+        move = f"<p>{_esc(blk['move'])}</p>" if blk.get("move") else ""
+        parts.append(f"<div class='card sunk' style='margin-top:10px'>{head}<p>{_esc(blk['summary'])}</p>{lines}{move}</div>")
+    return f"<h2>News on our symbols</h2>{intro}{''.join(parts)}"
+
+
+HEADER ="""<header class="spire-hdr">
   <span style="display:flex;align-items:center;gap:10px">
     <span class="mark" aria-hidden="true"></span>
     <span><span class="word">SPIRE</span><span class="sub">ANALYTICS</span></span>
@@ -634,7 +710,8 @@ def render(ri: ReportInput) -> str:
     offset = int((datetime.now(LOCAL).utcoffset() - datetime.now(NY).utcoffset()).total_seconds() // 3600)
     head = headline(ri, a, w)
     tl = timeline(ri, w)
-    trades = [trade_sentence(t, w) for t in ri.trades]
+    trades = [trade_sentence(t, w, ri.news) for t in ri.trades]
+    news_html = news_section(ri, w)
     good, bad, watch = went_well(ri, a, w), went_badly(ri, a, w), watch_tomorrow(ri, a, w)
     strategies = sorted({r.get("strategy") for r in a["decisions"] if r.get("strategy")} |
                         {r.get("active") for r in a["decisions"] if r.get("active") in plain.STRATEGIES})
@@ -665,7 +742,8 @@ def render(ri: ReportInput) -> str:
     for sym in [s for s in ri.bars if s in a["symbols"] or (ri.kind == "backtest")][:6]:
         svg = price_chart(ri, sym)
         if svg:
-            price_charts += f"<figure>{svg}<figcaption>{_esc(sym)}: price with the bot's buys (▲) and sells (▼); shading shows the market mood.</figcaption></figure>"
+            news_cap = " Diamonds above the chart mark material news stories." if report_news.chart_marks(ri.news, sym, ri.bars[sym]) else ""
+            price_charts += f"<figure>{svg}<figcaption>{_esc(sym)}: price with the bot's buys (▲) and sells (▼); shading shows the market mood.{news_cap}</figcaption></figure>"
     glossary = "".join(f"<tr><td><b>{_esc(t)}</b></td><td>{_esc(plain.GLOSSARY[t])}</td></tr>" for t in sorted(w.used))
     if len(trades) > 60:  # long backtests: first and last 30, the middle is in the charts and totals
         mid = len(trades) - 60
@@ -703,6 +781,7 @@ body{{margin:0}} .sp-doc svg text{{font-family:Inter,sans-serif}}
 
 <h2>Prices, trades and market mood</h2>
 {price_charts or "<p class='muted'>No price data.</p>"}
+{news_html}
 
 <div class="grid" style="margin-top:24px">
   <div class="card ok"><h3>What went well</h3><ul>{li(good)}</ul></div>

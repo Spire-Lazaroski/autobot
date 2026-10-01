@@ -127,3 +127,13 @@ def test_live_report_uses_logged_reasons(tmp_path, monkeypatch):
     assert "logged entry reason" in html.lower()
     assert "reason not recorded" in html  # the exit had no decision record, and the report says so
     assert "made $250.00" in html
+
+
+def test_cash_jumps_are_left_out_of_the_account_curve():
+    idx = pd.date_range("2026-09-30 13:30", periods=6, freq="5min", tz="UTC")
+    eq = pd.Series([100000, 100000, 200000, 199990, 199950, 199941.0], index=idx)  # Alpaca: deposit counted twice
+    fixed, jumps = report.remove_cash_jumps(eq)
+    assert list(fixed) == [100000, 100000, 100000, 99990, 99950, 99941]
+    assert jumps == [(idx[2], 100000.0)]
+    same, none = report.remove_cash_jumps(pd.Series([100000, 99000, 101000.0], index=idx[:3]))  # 1-2% moves are trading
+    assert none == [] and list(same) == [100000, 99000, 101000]
