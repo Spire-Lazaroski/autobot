@@ -87,21 +87,24 @@ def run_once() -> int:
                                cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
 
 
-def supervise(run=run_once, sleep=time.sleep, clock=time.time) -> int:
+def supervise(run=run_once, sleep=time.sleep, clock=time.time, say=None, what: str = "the bot",
+              out_log: Path = OUT_LOG, how_to_start: str = "start_bot.bat or the lab's Start button") -> int:
+    """Run, and restart after a crash (RestartPolicy). Also used by run_news.py for the news collector."""
+    say = say or log
     policy = RestartPolicy()
     while True:
         code = run()
         if code == EXIT_OK:
-            log("the bot stopped normally (stop requested); not restarting")
+            say(f"{what} stopped normally (stop requested); not restarting")
             return EXIT_OK
         if code == EXIT_ALREADY_RUNNING:
-            return EXIT_ALREADY_RUNNING  # another bot is running: quiet
-        log(f"CRASH: the bot exited with code {code}. Last output:\n{tail(OUT_LOG)}", "ERROR")
+            return EXIT_ALREADY_RUNNING  # another copy is running: quiet
+        say(f"CRASH: {what} exited with code {code}. Last output:\n{tail(out_log)}", "ERROR")
         if not policy.allow(clock()):
-            log(f"giving up: {MAX_RESTARTS} crashes within the last hour. Check the log, then start it again "
-                "(start_bot.bat or the lab's Start button).", "CRITICAL")
+            say(f"giving up: {MAX_RESTARTS} crashes within the last hour. Check the log, then start it again "
+                f"({how_to_start}).", "CRITICAL")
             return code
-        log(f"restarting in {PAUSE_S} s ({len(policy.times)} of {MAX_RESTARTS} restarts allowed per hour)", "WARNING")
+        say(f"restarting in {PAUSE_S} s ({len(policy.times)} of {MAX_RESTARTS} restarts allowed per hour)", "WARNING")
         sleep(PAUSE_S)
 
 

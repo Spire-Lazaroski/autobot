@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent
 LOGS = ROOT / "logs"
 PID_FILE = LOGS / "news_collector.pid"
 POLL_SECONDS = 60
+EXIT_ALREADY_RUNNING = 4  # same code as live.py
 log = logging.getLogger("news")
 state = {"started": time.time(), "stream_items": 0, "poll_new": 0, "last_item_at": None, "connected": False}
 
@@ -128,7 +129,7 @@ def main():
     st = collector_state()
     if st.get("running") and not a.backfill_only:
         log.error("A news collector is already running (pid %s). Not starting another.", st.get("pid"))
-        sys.exit(1)
+        sys.exit(EXIT_ALREADY_RUNNING)  # run_news.py treats this as "nothing to do", not a crash
     symbols = news.configured_symbols()
     if not a.backfill_only:
         threading.Thread(target=heartbeat_loop, daemon=True, name="heartbeat").start()
