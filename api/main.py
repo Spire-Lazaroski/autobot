@@ -26,6 +26,7 @@ from autobot.liveconfig import validate_live
 from . import jobs
 from .live import router as live_router
 from .news import router as news_router
+from .recal import router as recal_router
 from .reports import router as reports_router
 from .reports import start_scheduler
 from .models import CompareReq, DataReq, DetailReq, SearchReq, ShiftReq, WalkForwardReq
@@ -36,6 +37,7 @@ app = FastAPI(title="autobot lab", version="0.1")
 app.include_router(live_router)
 app.include_router(reports_router)
 app.include_router(news_router)
+app.include_router(recal_router)
 
 
 @app.on_event("startup")

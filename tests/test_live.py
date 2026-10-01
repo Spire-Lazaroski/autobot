@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 import yaml
 
@@ -126,7 +127,11 @@ def test_step_trades_meta_job(env):
 
 
 def bot_price(env):
-    return float(live._download().close.iloc[-1])
+    """The price the bot used: the last bar that had finished (synthetic bars run to the end of
+    today's session, and during US market hours the bot rightly ignores the bars still to come)."""
+    bars = live._download()
+    done = bars[bars.index + pd.Timedelta(minutes=15) <= pd.Timestamp.now(tz="UTC")]
+    return float(done.close.iloc[-1])
 
 
 def test_lock(env, monkeypatch):

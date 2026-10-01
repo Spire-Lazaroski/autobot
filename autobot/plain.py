@@ -120,7 +120,7 @@ UNIVERSE_WARNINGS: Dict[str, str] = {
 
 # Nightly recalibration (autobot/recalibrate.py): one fixed sentence per decision.
 RECAL_REASONS: Dict[str, str] = {
-    "new_job": ("No job yet. {ch} scored {cs} on days it hadn't been tuned on, {d} more than doing nothing "
+    "new_job": ("No job yet. The best option, {ch}, scored {cs} on days it hadn't been tuned on, {d} more than doing nothing "
                 "(needs {edge}), with {n} trades. Proposed as a new job."),
     "no_job_weak": "No job: the best option, {ch}, scored {cs} on days it hadn't been tuned on, not enough above doing nothing (needs {edge}).",
     "replace": "Replace {inc} ({is}) with {ch} ({cs}): better by {d} on days neither had been tuned on, at least the {edge} required.",

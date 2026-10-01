@@ -213,7 +213,18 @@ def recal_tick(tc, now: Optional[datetime] = None, run=None, run_universe=None) 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"last_date": day.isoformat(), "at": now.isoformat(), "changes": res.get("changes", [])}))
     _recal.update(last_run=now.isoformat(), last_date=day.isoformat(), last_error=None)
+    if res.get("changes") and recalibrate.settings().get("mode") == "apply":
+        from autobot import recal_apply
+        recal_apply.apply(res, *recal_apply.broker_view(tc), now=now, by="scheduler (apply mode)")
     return day.isoformat()
+
+
+def pending_tick(tc, now: Optional[datetime] = None):
+    """Apply pending recalibration changes once they are allowed (market closed / coin flat)."""
+    from autobot import recal_apply
+    if not recal_apply.status()["pending"]:
+        return None
+    return recal_apply.tick(*recal_apply.broker_view(tc), now=now)
 
 
 def _loop():
@@ -231,6 +242,8 @@ def _loop():
         try:
             if tc is not None and time.time() - _recal.get("failed_at", 0) > 3600:  # after a failure, retry hourly
                 recal_tick(tc)
+            if tc is not None:
+                pending_tick(tc)
         except Exception as e:  # noqa: BLE001  a failed recalibration must not stop the report scheduler
             _recal["failed_at"] = time.time()
             _recal["last_error"] = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC: {type(e).__name__}: {e}"

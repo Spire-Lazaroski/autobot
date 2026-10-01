@@ -53,6 +53,8 @@ h1, h2, h3, .panel-title { font-family: "Manrope", sans-serif; }
 .btn-danger:hover:not(:disabled) { background:var(--loss); border-color:var(--loss); color:#fff; }
 .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold tracking-wide; }
 .chip-warn { background:var(--warn-bg); color:var(--warn-ink); border:1px solid rgb(217 140 43 / 0.45); }
+.chip-up { background:color-mix(in srgb, var(--profit) 8%, transparent); color:var(--profit); border:1px solid color-mix(in srgb, var(--profit) 40%, transparent); }
+.chip-down { background:color-mix(in srgb, var(--loss) 8%, transparent); color:var(--loss); border:1px solid color-mix(in srgb, var(--loss) 40%, transparent); }
 .tab-on { background:linear-gradient(140deg, var(--gold), var(--amber)); color:var(--navy); border-color:transparent; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
