@@ -63,3 +63,8 @@ def test_auto_section_follows_the_config():
     cfg["live"]["risk"]["profit_lock"] = {"enabled": True, "trigger_pct": 2.0, "giveback_pct": 40}
     md2 = build_sop.to_md(build_sop.build({**f, "auto": build_sop.auto_facts(cfg)}))
     assert "It only **proposes** changes" in md2 and "**On:** once the day's gain reaches 2.0%" in md2
+
+
+def test_sop_explains_the_trigger_and_peak_lines():
+    md = build_sop.to_md(build_sop.build(build_sop.facts()))
+    assert "### Reading the trigger and peak lines" in md and "sell < 762.70" in md and "never change an order" in md

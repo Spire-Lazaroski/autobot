@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { CandleChart } from "../components/CandleChart";
+import { CandleChart, type PriceMark } from "../components/CandleChart";
+import { C } from "../lib/chart";
 import { Confirm } from "../components/Confirm";
 import { JobsEditor } from "../components/JobsEditor";
 import { SortTable } from "../components/SortTable";
@@ -23,7 +24,7 @@ interface Snapshot {
   status: null | {
     time: string; equity: number; "day_pnl_%": number; market_open: boolean; halted: boolean; timeframe?: string;
     jobs?: Row[]; config_changes?: { time: string; change: string }[];
-    symbols: Record<string, { job: string; strategy: string; price: number; signal: number; position: number; target: number; active?: string | null }>;
+    symbols: Record<string, SymView>;
   };
   trades: Row[];
   log: string[];
@@ -33,6 +34,28 @@ interface Snapshot {
   positions: Row[];
   orders: Row[];
   market?: { is_open: boolean; next_open: number; next_close: number };
+}
+
+/** Display only (autobot/trigger.py): the price that changes the strategy's signal at the next close. */
+interface Trigger {
+  current_signal: number; flip_to: number; trigger_price: number | null; distance_pct: number | null;
+  direction: "above" | "below" | null; kind: "sell" | "buy"; already_past: boolean; bars_if_flat: number | null; last_close: number;
+}
+interface Peak { peak: number; gave_back_pct: number; since: string }
+interface SymView {
+  job: string; strategy: string; price: number; signal: number; position: number; target: number; active?: string | null;
+  trigger?: Trigger | null; trigger_note?: string; peak?: Peak | null;
+}
+
+const verb = (t: Trigger) => (t.kind === "sell" ? (t.flip_to < 0 ? "goes short" : "sells") : t.flip_to > 0 && t.current_signal < 0 ? "covers" : "buys");
+/** "sells below 762.70 (-0.12%, ~3 bars if flat)" / "sells at the next close unless above 105.52 (+0.05%)" */
+export function triggerText(t: Trigger | null | undefined, note?: string): string {
+  if (!t) return note ?? "–";
+  if (t.trigger_price === null) return `${verb(t)} at the next close (whatever the price within ±5%)`;
+  const p = fmt(t.trigger_price, 2), d = `${t.distance_pct! > 0 ? "+" : ""}${fmt(t.distance_pct, 2)}%`;
+  if (t.already_past) return `${verb(t)} at the next close unless ${t.direction === "below" ? "above" : "below"} ${p} (${d})`;
+  const flat = t.bars_if_flat ? `, ~${t.bars_if_flat} bar${t.bars_if_flat > 1 ? "s" : ""} if flat` : "";
+  return `${verb(t)} ${t.direction} ${p} (${d}${flat})`;
 }
 
 const ts = (s: string | number | null | undefined) => (s === null || s === undefined || s === "" ? "–" : nyTime(typeof s === "number" ? s : Date.parse(s) / 1000));
@@ -122,6 +145,9 @@ export function Live() {
                     { key: "unrealized_pl", label: "P&L $", tone: true },
                     { key: "unrealized_plpc", label: "P&L %", tone: true },
                     { key: "unrealized_intraday_pl", label: "Today $", tone: true },
+                    { key: "from_peak", label: "From peak", align: "left", title: "Best price since the bot opened this position (display only)",
+                      render: (r) => { const pk = peakOf(st?.symbols, r.symbol);
+                        return <span className="num whitespace-nowrap text-muted">{pk ? `gave back ${fmt(pk.gave_back_pct, 2)}% from ${fmt(pk.peak, 2)}` : "–"}</span>; } },
                   ]} />
               ) : <p className="text-muted text-[12px]">No open positions.</p>}
             </Panel>
@@ -137,12 +163,15 @@ export function Live() {
                     { key: "position", label: "Pos", digits: 4 },
                     { key: "target", label: "Target", digits: 4 },
                     { key: "price", label: "Price" },
+                    { key: "trigger", label: "Trigger", align: "left", title: "Price that would change the signal at the next bar's close (display only)",
+                      render: (r) => <span className={`num whitespace-normal block min-w-[18ch] max-w-[30ch] ${r.trigger ? (r.trigger.kind === "sell" ? "text-down" : "text-up") : "text-muted"}`}>
+                        {triggerText(r.trigger, r.trigger_note)}</span> },
                   ]} />
               ) : <p className="text-muted text-[12px]">{bot?.running ? "Waiting for the next bar…" : "Start the bot to see its per-symbol view."}</p>}
             </Panel>
           </div>
 
-          <LiveChart symbols={symbols} timeframe={st?.timeframe} />
+          <LiveChart symbols={symbols} timeframe={st?.timeframe} views={st?.symbols} />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             <Panel title="Orders (paper account, latest 50)">
@@ -210,9 +239,27 @@ export function Live() {
   );
 }
 
-function LiveChart({ symbols, timeframe }: { symbols: string[]; timeframe?: string }) {
+/** Alpaca reports BTC/USD positions as BTCUSD; the bot's status uses the job symbol. */
+function viewOf(views: Record<string, SymView> | undefined, symbol: string): SymView | undefined {
+  if (!views) return undefined;
+  return views[symbol] ?? Object.entries(views).find(([k]) => k.replace("/", "") === symbol)?.[1];
+}
+function peakOf(views: Record<string, SymView> | undefined, symbol: string): Peak | null | undefined {
+  return viewOf(views, symbol)?.peak;
+}
+
+function LiveChart({ symbols, timeframe, views }: { symbols: string[]; timeframe?: string; views?: Record<string, SymView> }) {
   const [sym, setSym] = useState<string | null>(null);
   const current = sym ?? symbols[0];
+  const v = current ? viewOf(views, current) : undefined;
+  const tp = v?.trigger?.trigger_price ?? null, tk = v?.trigger?.kind, td = v?.trigger?.direction, pk = v?.peak?.peak ?? null;
+  const priceLines: PriceMark[] = useMemo(() => {
+    const out: PriceMark[] = [];
+    if (tp !== null && tk) out.push({ price: tp, color: tk === "sell" ? C.loss : C.profit, style: "dashed",
+      title: `${tk} ${td === "below" ? "<" : ">"} ${fmt(tp, 2)}` });
+    if (pk !== null) out.push({ price: pk, color: C.inkFaint, style: "dotted", title: `peak ${fmt(pk, 2)}` });
+    return out;
+  }, [tp, tk, td, pk]);
   const q = useQuery({
     queryKey: ["live-candles", current, timeframe],
     queryFn: () => api<{ candles: Candles; fills: { time: number; price: number; side: string; qty: number }[]; timeframe: string }>(
@@ -233,7 +280,10 @@ function LiveChart({ symbols, timeframe }: { symbols: string[]; timeframe?: stri
       {!current && <p className="text-muted text-[12px]">No symbols in jobs or positions.</p>}
       {q.isLoading && <Spinner label="Loading bars…" />}
       <ErrorBox error={q.error} />
-      {q.data && <CandleChart candles={q.data.candles} fills={fills} height={420} />}
+      {q.data && <CandleChart candles={q.data.candles} fills={fills} priceLines={priceLines} height={420} />}
+      {v && (v.trigger || v.peak) && <p className="text-[11.5px] text-muted mt-1">
+        Dashed line, judged at the next bar's close: the strategy {triggerText(v.trigger, v.trigger_note)}.
+        {v.peak && ` Dotted line: the best price since the bot opened the position; it has given back ${fmt(v.peak.gave_back_pct, 2)}%.`} Display only.</p>}
     </Panel>
   );
 }

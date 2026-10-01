@@ -134,6 +134,19 @@ RECAL_REASONS: Dict[str, str] = {
     "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
     "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
 }
+LIVE_VIEW: Dict[str, str] = {
+    "trigger": ("<b>Trigger</b> (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current "
+                "strategy would change its mind at the next bar's close. Red 'sell &lt; 762.70' means it would sell if a bar closes below "
+                "762.70; green 'buy &gt; 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from "
+                "the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level."),
+    "already_past": ("'sells at the next close unless above X' means the change happens even if the price doesn't move "
+                     "(for example an old price drops out of a momentum look-back); only a close beyond X would prevent it."),
+    "none": "'–' means no close within 5% of the last price would change the strategy's mind at the next bar.",
+    "peak": ("<b>Peak since entry</b> (dotted line, and 'From peak' in Positions): the best price since the bot opened the position, "
+             "and how much of it has been given back."),
+    "display_only": "These lines are for reading only: the bot doesn't use them to trade, and they never change an order.",
+}
+
 REPORT_RECAL: Dict[str, str] = {
     "intro": ("Every night after the close the bot re-tests each symbol's strategy on recent prices (only on days the strategy "
               "had not been tuned on) and, if something is clearly better, switches. These are the changes in effect for this period."),
@@ -146,7 +159,7 @@ REPORT_RECAL: Dict[str, str] = {
     "universe_moves": "Added: {added}. Dropped: {dropped}.",
     "universe_none": "No trading list (universe) has been made yet.",
 }
-RECAL_TAKEOVER ="From now on the autobot manages this symbol: it moves from your job '{job}' to its own auto job."
+RECAL_TAKEOVER = "From now on the autobot manages this symbol: it moves from your job '{job}' to its own auto job."
 RECAL_SHAPES: Dict[str, str] = {
     "single": "{nick} ({name}{params})",
     "regime_switch": "switch by market mood: trending → {trend}, sideways → {range}, jumpy → stay out",

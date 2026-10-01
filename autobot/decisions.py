@@ -324,7 +324,9 @@ class Recorder:
 
     def bar(self, job: str, symbol: str, ctx: Context, position_before: float, target: float, action: str,
             qty: float = 0.0, order_ids: Optional[List[str]] = None, fill_price: Optional[float] = None,
-            reason_override: Optional[str] = None) -> Dict:
+            reason_override: Optional[str] = None, extra: Optional[Dict] = None) -> Dict:
+        """extra: more fields for the decision record (e.g. the display-only trigger, and "time"
+        when the record is written after the decision was made)."""
         i = len(ctx.df) - 1
         snap = ctx.snapshot(i)
         if reason_override:  # a bot rule (e.g. the close) overrode the strategy: say both
@@ -341,7 +343,7 @@ class Recorder:
         self.last[symbol] = {"regime": snap["regime"], "regime_values": began, "active": snap["active"]}
         rec = {"type": "decision", "bar_time": bar_time, "job": job, "symbol": symbol, **snap,
                "position_before": position_before, "target": target, "action": action, "qty": qty,
-               "order_ids": order_ids or [], "fill_price": fill_price}
+               "order_ids": order_ids or [], "fill_price": fill_price, **(extra or {})}
         self.write(rec)
         return rec
 

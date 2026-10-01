@@ -57,7 +57,7 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
-from autobot import sizing
+from autobot import sizing, trigger
 from autobot.decisions import Context, Recorder
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
 from autobot.strategies import STRATEGIES
@@ -71,6 +71,7 @@ log = logging.getLogger("autobot")
 EXIT_OK, EXIT_STALLED, EXIT_ALREADY_RUNNING = 0, 3, 4
 NY_TZ = "America/New_York"
 SLEEP_GAP_S = 60  # a gap this long between loop turns means the PC slept (or the process was paused)
+TRIGGER_BUDGET_S = 30  # display-only trigger levels: at most this long per bar, after all orders
 
 
 def setup_logging():
@@ -378,62 +379,96 @@ class Bot:
                                  "peak_pnl_%": None if self.day_peak_pnl is None else round(self.day_peak_pnl, 3),
                                  "lock_below_%": None if self.day_peak_pnl is None else
                                  round(self.day_peak_pnl * (1 - float(pl.get("giveback_pct", 50)) / 100), 3)}
-        for job in self.jobs:
-            spec = STRATEGIES[job["strategy"]]
-            for sym in job["symbols"]:
-                self._progress = time.time()
-                crypto = is_crypto(sym)
-                if not crypto and not clock.is_open:
-                    continue
-                cur = held.get(self._pos_key(sym), 0.0)
-                active = None
-                override = None
-                try:
-                    df = self.recent_bars(sym, job)
-                    if len(df) < 50:
-                        log.info("%s: only %d bars, waiting for more history", sym, len(df))
+        pending = []  # decision records, written after the display-only trigger is known
+        try:
+            for job in self.jobs:
+                spec = STRATEGIES[job["strategy"]]
+                for sym in job["symbols"]:
+                    self._progress = time.time()
+                    crypto = is_crypto(sym)
+                    if not crypto and not clock.is_open:
                         continue
-                    ctx = Context(job["strategy"], df, job.get("params") or {}, self.cfg.get("allow_short", False))
-                    target_dir = float(ctx.signal.iloc[-1])
-                    price = float(df.close.iloc[-1])
-                    if spec.explain:
-                        active = ctx.active[-1]
-                except Exception as e:  # noqa: BLE001
-                    log.error("%s: data/signal error: %s", sym, e)
-                    self._safe(self.rec.write, {"type": "decision", "job": job["name"], "symbol": sym,
-                                                  "strategy": job["strategy"], "bar_time": datetime.now(timezone.utc).isoformat(),
-                                                  "action": f"error: {e}", "reason": "The bot couldn't get data or compute the signal for this bar."})
-                    continue
-                if not crypto and self.near_close(clock):
-                    target_dir, reason = 0.0, "flatten before close"
-                    override = (f"The bot closes stock positions {self.risk.get('flatten_before_close_min')} minutes before "
-                                "the US market close so nothing is held overnight.")
-                else:
-                    reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
-                if crypto and target_dir < 0:
-                    target_dir = 0.0  # no crypto shorting on Alpaca
-                # dollars from autobot.sizing (fixed: min(allocation, max_position_usd)); fractional
-                # targets (ensemble average) size down; whole shares for stocks, 4-decimal crypto
-                target_qty = sizing.to_qty(budget.get(sym, 0.0), price, target_dir, crypto)
-                delta = round(target_qty - cur, 4)
-                orders = []
-                # crossing zero (long->short) must be two orders on Alpaca
-                if cur != 0 and target_qty != 0 and (cur > 0) != (target_qty > 0):
-                    orders.append(self.submit(sym, -cur, reason + " (close)", price, job["name"]))
-                    delta = target_qty
-                if abs(delta) > 0 and (crypto or abs(delta) >= 1):
-                    orders.append(self.submit(sym, delta, reason, price, job["name"]))
-                orders = [o for o in orders if o is not None]
-                traded = round(target_qty - cur, 4) if orders else 0.0
-                action = ("buy" if traded > 0 else "sell") if orders else "no change"
-                if override and orders:
-                    action = "flatten before close"
-                fill = self.fill_price(orders[-1].id) if orders else None
-                self._safe(self.rec.bar, job["name"], sym, ctx, cur, target_qty, action, abs(traded),
-                             [str(o.id) for o in orders], fill, override)
-                status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "price": price,
-                                          "signal": target_dir, "position": cur, "target": target_qty, "active": active}
+                    cur = held.get(self._pos_key(sym), 0.0)
+                    active = None
+                    override = None
+                    try:
+                        df = self.recent_bars(sym, job)
+                        if len(df) < 50:
+                            log.info("%s: only %d bars, waiting for more history", sym, len(df))
+                            continue
+                        ctx = Context(job["strategy"], df, job.get("params") or {}, self.cfg.get("allow_short", False))
+                        target_dir = float(ctx.signal.iloc[-1])
+                        price = float(df.close.iloc[-1])
+                        if spec.explain:
+                            active = ctx.active[-1]
+                    except Exception as e:  # noqa: BLE001
+                        log.error("%s: data/signal error: %s", sym, e)
+                        self._safe(self.rec.write, {"type": "decision", "job": job["name"], "symbol": sym,
+                                                      "strategy": job["strategy"], "bar_time": datetime.now(timezone.utc).isoformat(),
+                                                      "action": f"error: {e}", "reason": "The bot couldn't get data or compute the signal for this bar."})
+                        continue
+                    if not crypto and self.near_close(clock):
+                        target_dir, reason = 0.0, "flatten before close"
+                        override = (f"The bot closes stock positions {self.risk.get('flatten_before_close_min')} minutes before "
+                                    "the US market close so nothing is held overnight.")
+                    else:
+                        reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
+                    if crypto and target_dir < 0:
+                        target_dir = 0.0  # no crypto shorting on Alpaca
+                    # dollars from autobot.sizing (fixed: min(allocation, max_position_usd)); fractional
+                    # targets (ensemble average) size down; whole shares for stocks, 4-decimal crypto
+                    target_qty = sizing.to_qty(budget.get(sym, 0.0), price, target_dir, crypto)
+                    delta = round(target_qty - cur, 4)
+                    orders = []
+                    # crossing zero (long->short) must be two orders on Alpaca
+                    if cur != 0 and target_qty != 0 and (cur > 0) != (target_qty > 0):
+                        orders.append(self.submit(sym, -cur, reason + " (close)", price, job["name"]))
+                        delta = target_qty
+                    if abs(delta) > 0 and (crypto or abs(delta) >= 1):
+                        orders.append(self.submit(sym, delta, reason, price, job["name"]))
+                    orders = [o for o in orders if o is not None]
+                    traded = round(target_qty - cur, 4) if orders else 0.0
+                    action = ("buy" if traded > 0 else "sell") if orders else "no change"
+                    if override and orders:
+                        action = "flatten before close"
+                    fill = self.fill_price(orders[-1].id) if orders else None
+                    pending.append(dict(job=job, sym=sym, ctx=ctx, df=df, crypto=crypto, at=datetime.now(timezone.utc).isoformat(),
+                                        held_after=target_qty if orders else cur,
+                                        bar_args=(job["name"], sym, ctx, cur, target_qty, action, abs(traded),
+                                                  [str(o.id) for o in orders], fill, override)))
+                    status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "price": price,
+                                              "signal": target_dir, "position": cur, "target": target_qty, "active": active}
+        finally:  # display-only extras, after every order of this bar has been sent (also when one failed)
+            self._annotate(pending, status)
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
+
+    def _annotate(self, pending: list, status: dict):
+        """For the Live page and the decision log only (never used for trading): the price that
+        would change each signal at the next bar's close (autobot.trigger) and, for held
+        positions, the best price since entry. Bounded by TRIGGER_BUDGET_S per bar so a slow
+        meta-strategy can't hold the loop up; every step is guarded by _safe."""
+        deadline = time.time() + TRIGGER_BUDGET_S
+        trades = self._safe(self._trade_rows) or []
+        for p in pending:
+            self._progress = time.time()
+            sym, job = p["sym"], p["job"]
+            trig = peak = None
+            if time.time() < deadline:
+                trig = self._safe(trigger.trigger_level, job["strategy"], p["df"], job.get("params") or {},
+                                  bool(self.cfg.get("allow_short", False)), p["crypto"])
+                peak = self._safe(lambda: trigger.peak_since(p["df"], trigger.entry_time(trades, sym, p["held_after"]), p["held_after"]))
+            else:
+                status["symbols"][sym]["trigger_note"] = "not computed this bar (time budget)"
+            status["symbols"][sym]["trigger"] = trig
+            status["symbols"][sym]["peak"] = peak
+            self._safe(self.rec.bar, *p["bar_args"], extra={"time": p["at"], "trigger": trig, "peak_since_entry": peak})
+
+    def _trade_rows(self) -> list:
+        f = LOGS / "trades.csv"
+        if not f.exists():
+            return []
+        with open(f, newline="") as fh:
+            return list(csv.DictReader(fh))
 
     # ------------------------------------------------------------ watchdog
     def _watchdog(self, started: float, tick: float = 1.0):

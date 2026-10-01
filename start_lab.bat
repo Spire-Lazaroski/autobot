@@ -3,6 +3,10 @@ REM Starts the strategy lab: API (FastAPI) + web (Vite) on 127.0.0.1, then opens
 REM Ports come from .env (API_PORT, WEB_PORT). Close the windows to stop.
 REM "start_lab.bat auto" (used by the log-on task): minimized windows, no browser.
 cd /d %~dp0
+REM Temporary files on this drive (the system drive C: is nearly full): tmp\autobot at the drive root
+set TEMP=%~d0\tmp\autobot
+set TMP=%~d0\tmp\autobot
+if not exist "%TEMP%" mkdir "%TEMP%"
 set MIN=
 if /i "%~1"=="auto" set MIN=/min
 if not exist .venv (

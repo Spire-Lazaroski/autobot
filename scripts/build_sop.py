@@ -190,6 +190,8 @@ def build(f: dict) -> list:
         "If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as <i>unresponsive</i>). Never start a second bot.",
     ])]
     B += [("img", "img/live_state.png", "What 'running' looks like: BOT RUNNING, the pid, and a heartbeat a second or two old.")]
+    B += [("h3", "Reading the trigger and peak lines")]
+    B += [("ul", [plain.LIVE_VIEW[k] for k in ("trigger", "already_past", "none", "peak", "display_only")])]
 
     # 4
     B += [("h2", "4. Stopping the bot")]
