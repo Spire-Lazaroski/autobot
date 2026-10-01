@@ -57,6 +57,7 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
+from autobot import sizing
 from autobot.decisions import Context, Recorder
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
 from autobot.strategies import STRATEGIES
@@ -134,6 +135,9 @@ class Bot:
         if errs:
             raise ValueError("config.yaml live section is invalid:\n  " + "\n  ".join(errs))
         self._apply(cfg["live"])
+        self.buckets = sizing.bucket_map(cfg)   # universe buckets, for risk_balanced bucket caps
+        self._atr: dict = {}                    # ATR% per symbol, refreshed once per New York day
+        self._atr_day = None
         self.changes: list[dict] = []
         acct = self.tc.get_account()
         self.day_start_equity = float(acct.last_equity)
@@ -166,10 +170,12 @@ class Bot:
             return
         self._cfg_mtime = mtime
         try:
-            new = yaml.safe_load(self.cfg_path.read_text())["live"]
+            full = yaml.safe_load(self.cfg_path.read_text())
+            new = full["live"]
         except Exception as e:  # noqa: BLE001
             log.error("CONFIG reload failed, keeping previous config: %s", e)
             return
+        self.buckets = sizing.bucket_map(full)
         errs = validate_live(new)
         if errs:
             log.error("CONFIG rejected, keeping previous config: %s", "; ".join(errs))
@@ -301,6 +307,26 @@ class Bot:
             self.halted = True
         return not self.halted
 
+    def budgets(self, equity: float) -> dict:
+        """Dollars each job symbol may hold (autobot.sizing, the same function the backtester uses)."""
+        syms = [s for j in self.jobs for s in j["symbols"]]
+        alloc = {s: j["allocation_pct"] for j in self.jobs for s in j["symbols"]}
+        atr = {}
+        if self.risk.get("sizing", "fixed") == "risk_balanced":
+            today = pd.Timestamp.now(tz=NY_TZ).date()
+            days = int(sizing.settings(self.risk)["atr_days"])
+            if self._atr_day != today or set(syms) - set(self._atr):
+                for s in syms:
+                    try:
+                        d = _download(s, "1Day", datetime.now(timezone.utc) - timedelta(days=days * 2 + 15), None, "iex")
+                        self._atr[s] = sizing.daily_atr_pct(d, today, days)
+                    except Exception as e:  # noqa: BLE001  no ATR -> no budget for that symbol until it works
+                        log.error("%s: no daily bars for sizing: %s", s, e)
+                        self._atr[s] = None
+                self._atr_day = today
+            atr = self._atr
+        return sizing.budgets(equity, syms, self.risk, atr, alloc, self.buckets)
+
     def near_close(self, clock) -> bool:
         mins = self.risk.get("flatten_before_close_min", 0)
         return bool(mins) and clock.is_open and (clock.next_close - clock.timestamp) <= timedelta(minutes=mins)
@@ -318,6 +344,8 @@ class Bot:
                   "market_open": clock.is_open, "halted": self.halted, "timeframe": self.tf,
                   "jobs": [{k: j.get(k) for k in ("name", "strategy", "params", "symbols", "allocation_pct")} for j in self.jobs],
                   "config_changes": self.changes, "symbols": {}}
+        budget = self.budgets(equity)
+        status["sizing"] = {"mode": self.risk.get("sizing", "fixed"), "usd": {s: round(v, 2) for s, v in budget.items()}}
         for job in self.jobs:
             spec = STRATEGIES[job["strategy"]]
             for sym in job["symbols"]:
@@ -352,9 +380,9 @@ class Bot:
                     reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
                 if crypto and target_dir < 0:
                     target_dir = 0.0  # no crypto shorting on Alpaca
-                usd = min(equity * job["allocation_pct"] / 100, self.risk["max_position_usd"])
-                raw = usd / price * abs(target_dir)  # fractional targets (ensemble average) size down
-                target_qty = (round(raw, 4) if crypto else math.floor(raw)) * (1 if target_dir > 0 else -1 if target_dir < 0 else 0)
+                # dollars from autobot.sizing (fixed: min(allocation, max_position_usd)); fractional
+                # targets (ensemble average) size down; whole shares for stocks, 4-decimal crypto
+                target_qty = sizing.to_qty(budget.get(sym, 0.0), price, target_dir, crypto)
                 delta = round(target_qty - cur, 4)
                 orders = []
                 # crossing zero (long->short) must be two orders on Alpaca

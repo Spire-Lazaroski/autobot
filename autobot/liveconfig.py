@@ -48,6 +48,8 @@ def validate_live(live: Dict) -> List[str]:
         v = risk.get(k)
         if not isinstance(v, (int, float)) or v <= 0:
             errs.append(f"risk.{k} must be a positive number")
+    from .sizing import validate as validate_sizing
+    errs += validate_sizing(risk)
     seen: Dict[str, str] = {}
     names = set()
     for i, j in enumerate(live.get("jobs") or []):

@@ -21,6 +21,11 @@ live:
     max_daily_loss_pct: 2.0
     max_position_usd: 10000
     flatten_before_close_min: 5
+    sizing: fixed
+    gross_budget_pct: 90
+    bucket_max_pct:
+      crypto: 20
+    atr_days: 20
   jobs:
   - name: trend
     strategy: ema_cross

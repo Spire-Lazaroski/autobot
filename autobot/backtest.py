@@ -336,3 +336,49 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
         summary[key] = m
     return {"windows": pd.DataFrame(windows), "equity": pd.DataFrame(equity), "metrics": summary,
             "fixed_params": fixed, "combos": len(combos), "oos_start": oos_start}
+
+
+# ----------------------------------------------------------------- account-level (portfolio) backtest
+def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Series], risk: Dict,
+                       alloc_pct: Dict[str, float] | None = None, buckets: Dict[str, str] | None = None,
+                       costs: "Dict[str, CostModel] | CostModel" = CostModel(), capital: float = 100_000.0) -> Dict:
+    """The whole account, sized like the live bot.
+
+    Every New York day, each symbol's dollars come from sizing.budgets() (the function live.py
+    uses) with that day's starting equity and, for risk_balanced, ATR% from the days before.
+    Exposure = dollars / equity x the strategy's position, traded on the bar after its signal
+    (as run_backtest). Costs per unit of exposure change, per symbol. Shares are fractional here;
+    the live bot rounds stocks down to whole shares, so it can hold up to one share less per symbol.
+
+    Returns {"frame": equity / ret / gross exposure per bar, "exposure": per-symbol exposure,
+    "metrics": metrics() of the account}.
+    """
+    from . import sizing
+    syms = list(data)
+    alloc_pct = alloc_pct or {}
+    buckets = buckets or {}
+    cost = {s: (costs[s] if isinstance(costs, dict) else costs).per_turn for s in syms}
+    idx = pd.DatetimeIndex(sorted(set().union(*[df.index for df in data.values()])))
+    ret = pd.DataFrame({s: data[s].close.pct_change().reindex(idx).fillna(0.0) for s in syms}, index=idx)
+    pos = pd.DataFrame({s: signals[s].reindex(data[s].index).fillna(0).shift(1).fillna(0).reindex(idx).ffill().fillna(0.0)
+                        for s in syms}, index=idx)
+    st = sizing.settings(risk)
+    atr = sizing.atr_table(data, int(st["atr_days"])) if st["sizing"] == "risk_balanced" else {}
+    day = np.asarray(idx.tz_convert("America/New_York").date)
+    R, P, C = ret.to_numpy(), pos.to_numpy(), np.array([cost[s] for s in syms])
+    n, k = len(idx), len(syms)
+    out_r, out_eq, exp_all = np.zeros(n), np.zeros(n), np.zeros((n, k))
+    eq, prev = capital, np.zeros(k)
+    w, cur_day = np.zeros(k), None
+    for i in range(n):
+        if day[i] != cur_day:  # a new New York day: dollars per symbol from the day's starting equity
+            cur_day = day[i]
+            b = sizing.budgets(eq, syms, risk, atr.get(cur_day, {}), alloc_pct, buckets)
+            w = np.array([b[s] / eq if eq > 0 else 0.0 for s in syms])
+        exp = w * P[i]
+        r = float((exp * R[i]).sum() - (np.abs(exp - prev) * C).sum())
+        eq *= 1 + r
+        out_r[i], out_eq[i], exp_all[i] = r, eq, exp
+        prev = exp
+    frame = pd.DataFrame({"ret": out_r, "equity": out_eq / capital, "position": np.abs(exp_all).sum(axis=1)}, index=idx)
+    return {"frame": frame, "exposure": pd.DataFrame(exp_all, index=idx, columns=syms), "metrics": metrics(frame)}
