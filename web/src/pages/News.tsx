@@ -4,6 +4,7 @@ import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
 import { api, useJob, type Job, type Row } from "../lib/api";
 import { fmt, nyTime } from "../lib/format";
+import { NewsGuardStudy } from "./NewsGuardStudy";
 import { NewsImpact } from "./NewsImpact";
 
 interface Status {
@@ -71,6 +72,7 @@ export function News() {
       </Panel>
       <ScoresPanel symbols={st.data?.symbols ?? []} />
       <NewsImpact />
+      <NewsGuardStudy />
     </div>
   );
 }

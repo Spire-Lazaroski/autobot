@@ -114,3 +114,21 @@ def impact():
 @router.post("/api/news/impact")
 def run_impact(req: ImpactReq):
     return jobs.submit("impact", lambda progress: {"counts": event_study.run(req.scorer, progress)["counts"]}).public()
+
+
+# ----------------------------------------------------------------- news-guard study (step 5)
+from autobot import news_guard_study  # noqa: E402
+
+
+@router.get("/api/news/guard-study")
+def guard_study():
+    """The last saved news-guard study (data/news_guard_study.json), or 404 if it hasn't been run."""
+    from fastapi import HTTPException
+    if not news_guard_study.OUT.exists():
+        raise HTTPException(404, "No news-guard study yet. Run it from the News page.")
+    return json.loads(news_guard_study.OUT.read_text(encoding="utf-8"))
+
+
+@router.post("/api/news/guard-study")
+def run_guard_study():
+    return jobs.submit("guard-study", lambda progress: {"generated": news_guard_study.run(progress)["generated"]}).public()
