@@ -71,6 +71,31 @@ def reject(req: RejectReq):
     return recal_apply.reject(req.date)
 
 
+class RulesReq(BaseModel):
+    days: int = 60
+    trigger_pct: float = 1.5
+    giveback_pct: float = 50.0
+    source: str = "alpaca"   # or "demo"
+
+
+@router.post("/api/account-rules")
+def account_rules(req: RulesReq):
+    """Backtest the enabled jobs as one account: no rules / loss limit / loss limit + profit lock."""
+    import yaml
+
+    from autobot import account_rules as ar
+    from autobot.data import synthetic_bars
+    if not 5 <= req.days <= 365 or req.trigger_pct <= 0 or not 0 < req.giveback_pct < 100:
+        raise HTTPException(400, "days 5-365, trigger above 0, giveback between 0 and 100.")
+    cfg = yaml.safe_load(recalibrate.ROOT.joinpath("config.yaml").read_text(encoding="utf-8"))
+    fetch = (lambda s, tf, d: synthetic_bars(s, tf, d)) if req.source == "demo" else None
+
+    def work(progress):
+        progress(0.1, "backtesting the account three ways")
+        return ar.compare(cfg, req.days, req.trigger_pct, req.giveback_pct, fetch=fetch)
+    return jobs.submit("account-rules", work).public()
+
+
 @router.post("/api/recalibration/run")
 def run_now():
     """Run the recalibration now as of the last finished session (a background job). Proposal only."""

@@ -53,6 +53,16 @@ def validate(risk: Dict) -> List[str]:
     a = (risk or {}).get("atr_days", DEFAULTS["atr_days"])
     if not isinstance(a, int) or not 2 <= a <= 250:
         errs.append("risk.atr_days must be a whole number between 2 and 250")
+    pl = (risk or {}).get("profit_lock")
+    if pl is not None:
+        if not isinstance(pl, dict):
+            errs.append("risk.profit_lock must be a mapping")
+        else:
+            t, g = pl.get("trigger_pct"), pl.get("giveback_pct")
+            if not isinstance(t, (int, float)) or t <= 0:
+                errs.append("risk.profit_lock.trigger_pct must be a positive number")
+            if not isinstance(g, (int, float)) or not 0 < g < 100:
+                errs.append("risk.profit_lock.giveback_pct must be between 0 and 100")
     return errs
 
 

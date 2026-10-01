@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { AccountRules } from "../components/AccountRules";
 import { DetailView } from "../components/DetailView";
 import { GenerateReport } from "../components/GenerateReport";
 import { Plot } from "../components/Plot";
@@ -59,6 +60,8 @@ export function Lab() {
       <ErrorBox error={q.error} />
       {!req && <Empty>Pick strategies and press <b>Run backtest</b>. Buy-and-hold is the benchmark to beat.</Empty>}
       {res && req && <Results res={res} req={req} onOpen={(strategy, symbol) => setOpen({ strategy, symbol })} />}
+
+      <AccountRules />
 
       {open && req && (
         <DetailView run={req} strategy={open.strategy} params={req.strategies[open.strategy] ?? {}}

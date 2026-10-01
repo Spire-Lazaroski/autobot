@@ -26,6 +26,10 @@ live:
     bucket_max_pct:
       crypto: 20
     atr_days: 20
+    profit_lock:
+      enabled: false
+      trigger_pct: 1.5
+      giveback_pct: 50
   jobs:
   - name: trend
     strategy: ema_cross

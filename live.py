@@ -143,6 +143,7 @@ class Bot:
         self.day_start_equity = float(acct.last_equity)
         self.trading_day = self._today(self.tc.get_clock())
         self.halted = False
+        self.day_peak_pnl = None   # profit lock: the day's best P&L % once armed
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
 
@@ -286,12 +287,34 @@ class Bot:
         acct = self.tc.get_account()
         old, self.day_start_equity = self.day_start_equity, float(acct.last_equity)
         was_halted, self.halted = self.halted, False
+        self.day_peak_pnl = None
         log.warning("NEW DAY %s: daily-loss start %.2f -> %.2f%s", today, old, self.day_start_equity,
                     " (loss-limit halt lifted)" if was_halted else "")
         self._safe(self.rec.event, "new_day", f"New trading day {today}: the daily loss limit now counts from "
                                               f"${self.day_start_equity:,.2f}" + (", and yesterday's halt is lifted." if was_halted else "."))
         self.trading_day = today
         return True
+
+    def profit_lock_hit(self, pnl_pct: float) -> bool:
+        """risk.profit_lock {enabled, trigger_pct, giveback_pct}: once the day's P&L reaches
+        trigger_pct, track the day's peak; True when P&L falls below peak x (1 - giveback/100).
+        Shared by the main loop and the watchdog (the peak lives on the bot)."""
+        pl = self.risk.get("profit_lock") or {}
+        if not pl.get("enabled"):
+            return False
+        if self.day_peak_pnl is None and pnl_pct >= float(pl["trigger_pct"]):
+            self.day_peak_pnl = pnl_pct
+            log.info("PROFIT LOCK armed: day P&L %.2f%% reached %.2f%%", pnl_pct, float(pl["trigger_pct"]))
+        if self.day_peak_pnl is None:
+            return False
+        self.day_peak_pnl = max(self.day_peak_pnl, pnl_pct)
+        return pnl_pct < self.day_peak_pnl * (1 - float(pl["giveback_pct"]) / 100)
+
+    def _halt(self, kind: str, message: str, log_line: str):
+        self.flatten_all(log_line)
+        self._safe(self.rec.event, kind, message)
+        log.warning("Halted for the rest of the trading day (%s); the bot keeps running and resumes tomorrow.", kind)
+        self.halted = True
 
     def check_risk(self) -> bool:
         if self.halted:
@@ -300,11 +323,15 @@ class Bot:
         eq = float(acct.equity)
         dd = (eq / self.day_start_equity - 1) * 100
         if dd <= -abs(self.risk["max_daily_loss_pct"]):
-            self.flatten_all(f"daily loss {dd:.2f}% hit limit")
-            self._safe(self.rec.event, "risk", f"The daily loss limit was reached ({dd:.2f}% vs {self.risk['max_daily_loss_pct']}%); "
-                                                 "the bot sold everything and stopped for the day.")
-            log.warning("Halted for the rest of the trading day by the loss limit; the bot keeps running and resumes tomorrow.")
-            self.halted = True
+            self._halt("risk", f"The daily loss limit was reached ({dd:.2f}% vs {self.risk['max_daily_loss_pct']}%); "
+                               "the bot sold everything and stopped for the day.", f"daily loss {dd:.2f}% hit limit")
+        elif self.profit_lock_hit(dd):
+            pl = self.risk["profit_lock"]
+            self._halt("profit_lock", f"Profit lock: the day's gain reached {self.day_peak_pnl:.2f}% (lock starts at {pl['trigger_pct']}%) "
+                                      f"and fell back to {dd:.2f}%, giving back more than {pl['giveback_pct']}% of it; "
+                                      "the bot sold everything to keep the rest and stopped for the day.",
+                       f"profit lock: day P&L {dd:.2f}% fell below {self.day_peak_pnl * (1 - float(pl['giveback_pct']) / 100):.2f}% "
+                       f"(peak {self.day_peak_pnl:.2f}%)")
         return not self.halted
 
     def budgets(self, equity: float) -> dict:
@@ -346,6 +373,11 @@ class Bot:
                   "config_changes": self.changes, "symbols": {}}
         budget = self.budgets(equity)
         status["sizing"] = {"mode": self.risk.get("sizing", "fixed"), "usd": {s: round(v, 2) for s, v in budget.items()}}
+        pl = self.risk.get("profit_lock") or {}
+        status["profit_lock"] = {"enabled": bool(pl.get("enabled")), "armed": self.day_peak_pnl is not None,
+                                 "peak_pnl_%": None if self.day_peak_pnl is None else round(self.day_peak_pnl, 3),
+                                 "lock_below_%": None if self.day_peak_pnl is None else
+                                 round(self.day_peak_pnl * (1 - float(pl.get("giveback_pct", 50)) / 100), 3)}
         for job in self.jobs:
             spec = STRATEGIES[job["strategy"]]
             for sym in job["symbols"]:
@@ -443,6 +475,13 @@ class Bot:
             if dd <= -abs(self.risk["max_daily_loss_pct"]):
                 log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
                 state["wtc"].close_all_positions(cancel_orders=True)
+                self.halted = True
+            elif self.profit_lock_hit(dd):
+                log.critical("WATCHDOG: main loop stuck and the profit lock triggered (day P&L %.2f%%, peak %.2f%%); flattening",
+                             dd, self.day_peak_pnl)
+                state["wtc"].close_all_positions(cancel_orders=True)
+                self._safe(self.rec.event, "profit_lock", f"Profit lock (watchdog): the day's gain fell from {self.day_peak_pnl:.2f}% "
+                                                          f"to {dd:.2f}% while the bot was stuck; the watchdog sold everything.")
                 self.halted = True
         if idle >= self.stall_s:
             log.critical("WATCHDOG: main loop made no progress for %.0fs; exiting without trading. "

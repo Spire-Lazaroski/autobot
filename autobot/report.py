@@ -364,6 +364,10 @@ def went_well(ri, a, w: Words) -> List[str]:
         if n >= 3 and p > 0 and reg in plain.REGIMES:
             out.append(f"Trades started in {plain.regime_name(reg)} made {_money(p, True)} over {n} trades.")
             w.use("Regime")
+    for e in a["events"]:
+        if e.get("event") == "profit_lock":
+            out.append(f"{_ny(e['time']):%a %H:%M}: {e.get('message', 'Profit lock triggered.')}")
+            w.use("Profit lock")
     if not a["errors"] and ri.kind == "live" and a["decisions"]:
         out.append("No errors in the bot's decisions for this period.")
     if not out:

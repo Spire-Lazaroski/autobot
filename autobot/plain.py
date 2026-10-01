@@ -168,7 +168,9 @@ GLOSSARY: Dict[str, str] = {
     "Strategy switch": "The bot handing control from one strategy to another.",
     "Drawdown": "The drop from the highest account value to a later low.",
     "Win rate": "The share of trades that made money.",
-    "Daily loss limit": "If the account is down this much in a day, the bot sells everything and stops for the day.",
+    "Profit lock": ("Once the day's gain reaches a set level, the bot watches the day's best result; if the gain then falls back "
+                    "by more than a set share of it, the bot sells everything to keep the rest and stops for the day."),
+    "Daily loss limit":"If the account is down this much in a day, the bot sells everything and stops for the day.",
     "Flatten before close": "The bot sells stock positions a few minutes before the US market closes so nothing is held overnight.",
     "Backtest": "Replaying a strategy on past prices to see how it would have done.",
     "Demo data": "Made-up prices used to test the software. Results on it say nothing about real markets.",

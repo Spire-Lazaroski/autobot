@@ -341,7 +341,8 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
 # ----------------------------------------------------------------- account-level (portfolio) backtest
 def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Series], risk: Dict,
                        alloc_pct: Dict[str, float] | None = None, buckets: Dict[str, str] | None = None,
-                       costs: "Dict[str, CostModel] | CostModel" = CostModel(), capital: float = 100_000.0) -> Dict:
+                       costs: "Dict[str, CostModel] | CostModel" = CostModel(), capital: float = 100_000.0,
+                       account_rules: bool = False) -> Dict:
     """The whole account, sized like the live bot.
 
     Every New York day, each symbol's dollars come from sizing.budgets() (the function live.py
@@ -350,8 +351,14 @@ def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Seri
     (as run_backtest). Costs per unit of exposure change, per symbol. Shares are fractional here;
     the live bot rounds stocks down to whole shares, so it can hold up to one share less per symbol.
 
+    account_rules=True adds the live bot's account rules, checked at every bar's close against the
+    New York day's starting equity (crypto uses the same New York day): the daily loss limit
+    (risk.max_daily_loss_pct) and, if enabled, the profit lock (risk.profit_lock). Either one
+    flattens everything from the next bar (paying the cost) and halts until the next New York day.
+    The live bot lifts a halt at the next market open, so crypto may resume a few hours earlier here.
+
     Returns {"frame": equity / ret / gross exposure per bar, "exposure": per-symbol exposure,
-    "metrics": metrics() of the account}.
+    "metrics": metrics() of the account, "events": the halts}.
     """
     from . import sizing
     syms = list(data)
@@ -370,15 +377,34 @@ def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Seri
     out_r, out_eq, exp_all = np.zeros(n), np.zeros(n), np.zeros((n, k))
     eq, prev = capital, np.zeros(k)
     w, cur_day = np.zeros(k), None
+    limit = abs(float(risk.get("max_daily_loss_pct", 0) or 0)) if account_rules else 0.0
+    pl = (risk.get("profit_lock") or {}) if account_rules else {}
+    pl_on = bool(pl.get("enabled"))
+    start_eq, peak, halted, events = eq, None, False, []
     for i in range(n):
-        if day[i] != cur_day:  # a new New York day: dollars per symbol from the day's starting equity
+        if day[i] != cur_day:  # a new New York day: dollars from the day's starting equity; rules reset
             cur_day = day[i]
             b = sizing.budgets(eq, syms, risk, atr.get(cur_day, {}), alloc_pct, buckets)
             w = np.array([b[s] / eq if eq > 0 else 0.0 for s in syms])
-        exp = w * P[i]
+            start_eq, peak, halted = eq, None, False
+        exp = np.zeros(k) if halted else w * P[i]
         r = float((exp * R[i]).sum() - (np.abs(exp - prev) * C).sum())
         eq *= 1 + r
         out_r[i], out_eq[i], exp_all[i] = r, eq, exp
         prev = exp
+        if account_rules and not halted:  # checked at this bar's close; acts from the next bar
+            pnl = (eq / start_eq - 1) * 100
+            if limit and pnl <= -limit:
+                halted = True
+                events.append({"time": idx[i], "rule": "loss_limit", "pnl_%": pnl, "peak_%": None})
+            elif pl_on:
+                if peak is None and pnl >= float(pl["trigger_pct"]):
+                    peak = pnl
+                if peak is not None:
+                    peak = max(peak, pnl)
+                    if pnl < peak * (1 - float(pl["giveback_pct"]) / 100):
+                        halted = True
+                        events.append({"time": idx[i], "rule": "profit_lock", "pnl_%": pnl, "peak_%": peak})
     frame = pd.DataFrame({"ret": out_r, "equity": out_eq / capital, "position": np.abs(exp_all).sum(axis=1)}, index=idx)
-    return {"frame": frame, "exposure": pd.DataFrame(exp_all, index=idx, columns=syms), "metrics": metrics(frame)}
+    return {"frame": frame, "exposure": pd.DataFrame(exp_all, index=idx, columns=syms), "metrics": metrics(frame),
+            "events": events}
