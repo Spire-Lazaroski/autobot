@@ -466,6 +466,30 @@ class Bot:
         return EXIT_OK
 
 
+def wait_for_network(host: str = "paper-api.alpaca.markets", timeout_s: float = 120.0,
+                     resolve=None, sleep=time.sleep, clock=time.monotonic) -> bool:
+    """At log-on Windows may not be connected yet; wait (up to timeout_s) until the broker's
+    name resolves instead of crashing on the first request and using up a supervisor restart.
+    Returns False if the network is still down, and the caller starts anyway."""
+    import socket
+    resolve = resolve or (lambda h: socket.getaddrinfo(h, 443))
+    end, warned = clock() + timeout_s, False
+    while True:
+        try:
+            resolve(host)
+            if warned:
+                log.info("NETWORK %s reachable, starting", host)
+            return True
+        except OSError:
+            if clock() >= end:
+                log.warning("NETWORK %s still not reachable after %.0f s; starting anyway", host, timeout_s)
+                return False
+            if not warned:
+                log.info("NETWORK waiting for %s (the PC may still be connecting)", host)
+                warned = True
+            sleep(5)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
@@ -479,6 +503,7 @@ def main():
         sys.exit(EXIT_ALREADY_RUNNING)
     cfg_path = Path(a.config)
     cfg = yaml.safe_load(cfg_path.read_text())
+    wait_for_network()
     bot = Bot(cfg, cfg_path=cfg_path)
     if a.flatten:
         bot.flatten_all("--flatten")

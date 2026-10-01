@@ -189,3 +189,28 @@ def test_second_copy_exits_quietly(env, monkeypatch):
     with pytest.raises(SystemExit) as e:
         live.main()
     assert e.value.code == live.EXIT_ALREADY_RUNNING
+
+
+def test_waits_for_network_then_starts():
+    calls, slept = [], []
+
+    def resolve(h):
+        calls.append(h)
+        if len(calls) < 3:
+            raise OSError("getaddrinfo failed")
+
+    assert live.wait_for_network(resolve=resolve, sleep=slept.append, clock=lambda: 0.0)
+    assert len(calls) == 3 and slept == [5, 5]
+
+
+def test_network_wait_gives_up_after_timeout():
+    t = [0.0]
+
+    def sleep(s):
+        t[0] += s
+
+    def down(h):
+        raise OSError("no network")
+
+    assert not live.wait_for_network(resolve=down, sleep=sleep, clock=lambda: t[0], timeout_s=30)
+    assert t[0] == 30
