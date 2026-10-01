@@ -76,7 +76,14 @@ DEFAULTS = {
     },
     "exclude": ["connors_rsi2", "ibs_reversion", "news_guard"],   # daily-bar designs; news_guard showed no edge
     "exclude_families_crypto": ["intraday"],                       # they assume a session open/close
+    "include_exit": False,          # also try the trailing exit / re-entry layer (autobot.exits) per window
+    "exit_grid": {"trail_pct": [0.15, 0.25, 0.4, 0.6], "reentry": ["fresh_cross", "new_high", "both", "cooldown"]},
 }
+
+
+def exit_grid(r: Dict) -> List[Dict]:
+    g = r.get("exit_grid") or DEFAULTS["exit_grid"]
+    return [{"trail_pct": t, "reentry": m} for t in g["trail_pct"] for m in g["reentry"]]
 
 
 def settings(cfg: Optional[Dict] = None) -> Dict:
@@ -160,9 +167,17 @@ def windows(day: np.ndarray, start_day: date, train: int, test: int):
 
 
 def describe(spec: Optional[Dict]) -> str:
-    """Plain-English label for a job spec (single strategy, meta, or none)."""
+    """Plain-English label for a job spec (single strategy, meta, or none), plus its exit layer."""
     if not spec:
         return plain.RECAL_SHAPES["none"]
+    label = _describe_strategy(spec)
+    e = spec.get("exit")
+    if e:
+        label += plain.RECAL_SHAPES["exit"].format(trail=e.get("trail_pct"), reentry=str(e.get("reentry", "both")).replace("_", " "))
+    return label
+
+
+def _describe_strategy(spec: Dict) -> str:
     name, p = spec["strategy"], spec.get("params") or {}
     if name == "regime_switch":
         return plain.RECAL_SHAPES["regime_switch"].format(trend=plain.nick(p.get("trend_strategy")),
@@ -191,15 +206,30 @@ class SymbolStudy:
         start = as_of - timedelta(days=int(r["lookback_days"]) - 1)
         self.win = windows(self.day, start, int(r["train_days"]), int(r["test_days"]))
         self._bt: Dict[str, pd.DataFrame] = {}
+        self._sig: Dict[str, pd.Series] = {}
 
-    def bt(self, spec: Dict) -> pd.DataFrame:
-        k = _key(spec)
-        if k not in self._bt:
+    def with_exits(self, spec: Optional[Dict], ta: int, tb: int) -> Optional[Dict]:
+        """include_exit: the spec as is, or with the exit setting that scores best on these train
+        days (only train days decide)."""
+        if spec is None or not self.r.get("include_exit"):
+            return spec
+        options = [spec] + [{**spec, "exit": e} for e in exit_grid(self.r)]
+        return max(options, key=lambda s: self.wscore(s, ta, tb)["score"])
+
+    def signal(self, spec: Dict) -> pd.Series:
+        """The strategy's target as the live bot sees it: crypto long-only, stocks flat before the close."""
+        k = _key({"strategy": spec["strategy"], "params": spec.get("params") or {}})
+        if k not in self._sig:
             sig = get_signal(spec["strategy"], self.df, spec.get("params") or {}, False)
             if is_crypto(self.sym):
                 sig = sig.clip(lower=0)  # no crypto shorting on Alpaca
-            sig = flat_before_close(sig, self.df, self.flat_min)
-            self._bt[k] = run_backtest(self.df, sig, self.costs)
+            self._sig[k] = flat_before_close(sig, self.df, self.flat_min)
+        return self._sig[k]
+
+    def bt(self, spec: Dict) -> pd.DataFrame:
+        k = _key(spec)
+        if k not in self._bt:  # spec["exit"]: the optional trailing exit / re-entry layer, as live
+            self._bt[k] = run_backtest(self.df, self.signal(spec), self.costs, spec.get("exit"))
         return self._bt[k]
 
     def wscore(self, spec: Dict, a: int, b: int) -> Dict:
@@ -225,6 +255,16 @@ class SymbolStudy:
         m = metrics(bt)
         return {**q, "score": score(q, self.r["score_weights"]), "trades": m["trades"],
                 "win_rate_%": m["win_rate_%"], "days": days, "from": str(self.day[a0]), "to": str(self.day[self.win[-1][3] - 1])}
+
+    def oos_frame(self, picks: List[Optional[Dict]]) -> pd.DataFrame:
+        """The stitched test-day backtest frame (ret, position, ...) for one pick per window."""
+        a0 = self.win[0][2]
+        idx = self.df.index[a0:self.win[-1][3]]
+        pos = pd.Series(0.0, index=idx)
+        for (_, _, a, b), spec in zip(self.win, picks):
+            if spec is not None:
+                pos.iloc[a - a0:b - a0] = self.bt(spec).position.to_numpy()[a:b]
+        return _replay(self.df.loc[idx], pos, self.costs)
 
     def meta_specs(self, top: List[Dict]) -> List[Dict]:
         names = [t["strategy"] for t in top]
@@ -253,10 +293,10 @@ class SymbolStudy:
                 best[n] = (sc, s)
                 per_strategy[n].append(s)
             ranked = sorted(best.values(), key=lambda x: -x[0])
-            single.append(ranked[0][1])
+            single.append(self.with_exits(ranked[0][1], ta, tb))
             top = [s for _, s in ranked[: int(self.r["top_k"])]]
             metas = self.meta_specs(top)
-            meta.append(max(metas, key=lambda s: self.wscore(s, ta, tb)["score"]) if metas else None)
+            meta.append(self.with_exits(max(metas, key=lambda s: self.wscore(s, ta, tb)["score"]) if metas else None, ta, tb))
             if progress:
                 progress((wi + 1) / max(1, len(self.win)), f"{self.sym}: window {wi + 1}/{len(self.win)}")
         res = {"strategies": {n: {**self.oos(per_strategy[n]), "last_params": per_strategy[n][-1]["params"] if per_strategy[n] else None}
@@ -306,7 +346,10 @@ def load_state(path: Optional[Path] = None) -> Dict:
 
 
 def job_spec(job: Dict) -> Dict:
-    return {"strategy": job["strategy"], "params": job.get("params") or {}}
+    spec = {"strategy": job["strategy"], "params": job.get("params") or {}}
+    if job.get("exit"):
+        spec["exit"] = job["exit"]
+    return spec
 
 
 # ----------------------------------------------------------------- whole run
@@ -365,9 +408,12 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
         dec = decide(sym, res["incumbent"], ch, r, state.get(sym, {}), as_of)
         final = ch["spec"] if dec["change"] else inc_spec
         if final:
-            proposed.append({"name": AUTO_PREFIX + sym.replace("/", ""), "strategy": final["strategy"],
-                             "params": final.get("params") or {}, "symbols": [sym],
-                             "allocation_pct": r["allocation_pct"], "enabled": True})
+            job = {"name": AUTO_PREFIX + sym.replace("/", ""), "strategy": final["strategy"],
+                   "params": final.get("params") or {}, "symbols": [sym],
+                   "allocation_pct": r["allocation_pct"], "enabled": True}
+            if final.get("exit"):
+                job["exit"] = final["exit"]
+            proposed.append(job)
         if taking:  # the job moves from the hand-made job to auto_SYM even when the strategy stays the same
             dec = {**dec, "takeover": True, "reason": dec["reason"] + " " + plain.RECAL_TAKEOVER.format(job=inc_job["name"])}
         rows[sym] = {"symbol": sym, "asset_class": asset_class(sym), "costs_bps": st.costs.fee_bps + st.costs.slippage_bps,

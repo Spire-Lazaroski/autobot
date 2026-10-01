@@ -1,6 +1,6 @@
 # Operating procedure: Spire Analytics paper-trading bot
 
-Version generated 01 October 2026 21:38 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
+Version generated 01 October 2026 22:40 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
 
 ## 1. What the bot is, and what it isn't
 
@@ -32,9 +32,14 @@ The US market opens at 09:30 New York time, which is usually **15:30** in Skopje
 
 | Job | On? | Strategy | Symbols | Share of account per symbol |
 |---|---|---|---|---|
-| trend | on | ema_cross (follow the trend) | SPY, QQQ | 20% |
-| reversion | on | rsi_reversion (buy the dip) | AAPL | 15% |
+| trend | off | ema_cross (follow the trend) | SPY, QQQ | 20% |
+| reversion | off | rsi_reversion (buy the dip) | AAPL | 15% |
 | crypto_breakout | off | donchian_breakout (buy the breakout) | BTC/USD | 10% |
+| auto_TSLA | on | regime_switch (switch by market mood) | TSLA | 10% |
+| auto_USO | on | regime_switch (switch by market mood) | USO | 10% |
+| auto_AAPL | on | rsi_reversion (buy the dip) | AAPL | 10% |
+| auto_SPY | on | donchian_breakout (buy the breakout) | SPY | 10% |
+| auto_QQQ | on | regime_switch (switch by market mood) | QQQ | 10% |
 
 ![The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.](img/jobs_editor.png)
 *The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.*
@@ -55,7 +60,7 @@ The bot and the lab can start by themselves 2 minutes after you log on to Window
 
 ### Reading the trigger and peak lines
 
-- **Trigger** (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current strategy would change its mind at the next bar's close. Red 'sell < 762.70' means it would sell if a bar closes below 762.70; green 'buy > 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level.
+- **Trigger** (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current strategy would change its mind at the next bar's close. Red 'sell < 762.70' means it would sell if a bar closes below 762.70; green 'buy > 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level. For a job with an exit layer the line shows whichever is nearer: the strategy's level or the trailing-exit level (marked 'trail'), or, after a trailing exit, the price that allows a re-entry (marked 're-entry').
 - 'sells at the next close unless above X' means the change happens even if the price doesn't move (for example an old price drops out of a momentum look-back); only a close beyond X would prevent it.
 - '–' means no close within 5% of the last price would change the strategy's mind at the next bar.
 - **Peak since entry** (dotted line, and 'From peak' in Positions): the best price since the bot opened the position, and how much of it has been given back.
@@ -357,6 +362,20 @@ Every decision has a plain-English reason, shown on the Recalibrate page and in 
 - A crypto job changes only when the bot holds none of that coin; until then it shows as *waiting to apply*.
 - The new settings are checked first; if they fail, nothing is written. A copy of the old config.yaml is kept in data\recalibration\config_backups.
 - A symbol that leaves every job has its position closed by the bot.
+
+### Exit layer (trailing exit and re-entry)
+
+**Now: off for every job.** An optional layer on top of any job's strategy, switched on per job in config.yaml (an `exit:` block under the job). While the bot holds a position it remembers the best closing price since it bought; if a 5-minute bar closes more than *trail_pct* % below that, it sells, even if the strategy still wants to hold.
+
+- After such a sale it stays out until the re-entry rule allows a new buy, and never on the very next bar: **fresh_cross** the strategy has to go out and back in; **new_high** a bar closes above the price it sold from while the strategy still wants in; **both** whichever comes first; **cooldown** wait a number of bars, then follow the strategy.
+- *no_entry_last_min*: no new stock positions in the last N minutes before the close (positions already held are kept until the close).
+- The backtests, the Lab, the nightly check and the bot all use the same code for this, so the bot does exactly what was tested. Each sale or wait is explained in the decision log and the daily report, for example 'Sold: price 763.05 fell 0.29% from the 765.27 high since entry (trail 0.25%).'
+- Lab → *Exit rules* compares the jobs without the layer and with every setting on the last 90 days, including a walk-forward test on days the setting was not chosen on. Only switch it on if that walk-forward result beats 'none'.
+- The nightly check can also try exit settings for each symbol (`recalibration: include_exit: true`, off by default).
+
+To switch it on for a job, add under that job in config.yaml (the bot uses it from its next bar):
+
+`exit: {trail_pct: 0.25, reentry: both, cooldown_bars: 6, no_entry_last_min: 30}`
 
 ### Position size
 

@@ -68,3 +68,15 @@ def test_auto_section_follows_the_config():
 def test_sop_explains_the_trigger_and_peak_lines():
     md = build_sop.to_md(build_sop.build(build_sop.facts()))
     assert "### Reading the trigger and peak lines" in md and "sell < 762.70" in md and "never change an order" in md
+
+
+def test_sop_explains_the_exit_layer_and_its_state():
+    import copy
+    f = build_sop.facts()
+    md = build_sop.to_md(build_sop.build(f))
+    assert "### Exit layer (trailing exit and re-entry)" in md and "fresh_cross" in md and "walk-forward" in md
+    cfg = copy.deepcopy(f["cfg"])
+    cfg["live"]["jobs"][-1]["exit"] = {"trail_pct": 0.4, "reentry": "new_high"}
+    cfg["live"]["jobs"][-1]["enabled"] = True
+    md2 = build_sop.to_md(build_sop.build({**f, "cfg": cfg, "live": cfg["live"]}))
+    assert f"**Now: on for {cfg['live']['jobs'][-1]['name']} (0.4%, new high).**" in md2

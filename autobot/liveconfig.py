@@ -79,6 +79,8 @@ def validate_live(live: Dict) -> List[str]:
             get_signal(strat, _probe_bars(), params, bool(live.get("allow_short", False)))
         except Exception as e:  # noqa: BLE001
             errs.append(f"{name}: {strat} rejects these params: {e}")
+        from .exits import validate as validate_exit
+        errs += validate_exit(j.get("exit"), f"{name}: exit")
         if not j.get("enabled", True):
             continue
         for s in syms:

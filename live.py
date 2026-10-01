@@ -57,7 +57,9 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
-from autobot import sizing, trigger
+from autobot import exits, sizing, trigger
+from autobot.exits import exit_view_of
+from autobot.recalibrate import flat_before_close
 from autobot.decisions import Context, Recorder
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
 from autobot.strategies import STRATEGIES
@@ -401,6 +403,12 @@ class Bot:
                         price = float(df.close.iloc[-1])
                         if spec.explain:
                             active = ctx.active[-1]
+                        exit_view = None
+                        if exits.enabled(job.get("exit")):  # optional trailing exit / re-entry (same function as the backtest)
+                            hist = ctx.signal.clip(lower=0) if crypto else flat_before_close(ctx.signal, df, int(self.risk.get("flatten_before_close_min", 0)))
+                            st = exits.exit_states(hist, df, job["exit"], crypto).iloc[-1]
+                            target_dir = float(st["target"])
+                            exit_view = exit_view_of(st, job["exit"], price)
                     except Exception as e:  # noqa: BLE001
                         log.error("%s: data/signal error: %s", sym, e)
                         self._safe(self.rec.write, {"type": "decision", "job": job["name"], "symbol": sym,
@@ -413,6 +421,9 @@ class Bot:
                                     "the US market close so nothing is held overnight.")
                     else:
                         reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
+                        if exit_view and exit_view["text"]:  # the exit layer changed (or explains) the target
+                            reason += f" exit={exit_view['reason']}"
+                            override = exit_view["text"]
                     if crypto and target_dir < 0:
                         target_dir = 0.0  # no crypto shorting on Alpaca
                     # dollars from autobot.sizing (fixed: min(allocation, max_position_usd)); fractional
@@ -437,7 +448,9 @@ class Bot:
                                         bar_args=(job["name"], sym, ctx, cur, target_qty, action, abs(traded),
                                                   [str(o.id) for o in orders], fill, override)))
                     status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "price": price,
-                                              "signal": target_dir, "position": cur, "target": target_qty, "active": active}
+                                              "signal": target_dir, "position": cur, "target": target_qty, "active": active,
+                                              "exit": exit_view}
+                    pending[-1]["exit"] = exit_view
         finally:  # display-only extras, after every order of this bar has been sent (also when one failed)
             self._annotate(pending, status)
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
@@ -456,12 +469,14 @@ class Bot:
             if time.time() < deadline:
                 trig = self._safe(trigger.trigger_level, job["strategy"], p["df"], job.get("params") or {},
                                   bool(self.cfg.get("allow_short", False)), p["crypto"])
+                trig = self._safe(trigger.with_exit, trig, p.get("exit"), float(p["df"].close.iloc[-1])) or trig
                 peak = self._safe(lambda: trigger.peak_since(p["df"], trigger.entry_time(trades, sym, p["held_after"]), p["held_after"]))
             else:
                 status["symbols"][sym]["trigger_note"] = "not computed this bar (time budget)"
             status["symbols"][sym]["trigger"] = trig
             status["symbols"][sym]["peak"] = peak
-            self._safe(self.rec.bar, *p["bar_args"], extra={"time": p["at"], "trigger": trig, "peak_since_entry": peak})
+            self._safe(self.rec.bar, *p["bar_args"], extra={"time": p["at"], "trigger": trig, "peak_since_entry": peak,
+                                                            "exit_layer": p.get("exit")})
 
     def _trade_rows(self) -> list:
         f = LOGS / "trades.csv"

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { AccountRules } from "../components/AccountRules";
 import { DetailView } from "../components/DetailView";
+import { ExitRules } from "../components/ExitRules";
 import { GenerateReport } from "../components/GenerateReport";
 import { Plot } from "../components/Plot";
 import { SettingsBar } from "../components/SettingsBar";
@@ -62,6 +63,7 @@ export function Lab() {
       {res && req && <Results res={res} req={req} onOpen={(strategy, symbol) => setOpen({ strategy, symbol })} />}
 
       <AccountRules />
+      <ExitRules />
 
       {open && req && (
         <DetailView run={req} strategy={open.strategy} params={req.strategies[open.strategy] ?? {}}

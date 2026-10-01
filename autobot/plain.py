@@ -134,11 +134,45 @@ RECAL_REASONS: Dict[str, str] = {
     "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
     "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
 }
+EXIT_REASONS: Dict[str, str] = {
+    "trail_exit": "Sold: price {close} fell {pct}% from the {peak} high since entry (trail {trail}%).",
+    "trail_exit_short": "Bought back: price {close} rose {pct}% from the {peak} low since entry (trail {trail}%).",
+    "waiting": "Stayed out: waiting for {what}.",
+    "wait_fresh_cross": "a fresh crossover (the strategy has to go out and back in)",
+    "wait_new_high": "a close above {peak}",
+    "wait_both": "a fresh crossover or a close above {peak}",
+    "wait_cooldown": "the {n}-bar cooldown to end",
+    "late": "No new position in the last {n} minutes before the close.",
+    "reentry": "Back in after the trailing exit: {rule}.",
+    "rule_fresh_cross": "the strategy went out and back in",
+    "rule_new_high": "a bar closed beyond the level it had exited from",
+    "rule_both": "a fresh crossover or a new high came first",
+    "rule_cooldown": "the cooldown is over and the strategy still wants in",
+}
+
+EXIT_SOP: Dict[str, str] = {
+    "what": ("An optional layer on top of any job's strategy, switched on per job in config.yaml (an <code>exit:</code> block under the job). "
+             "While the bot holds a position it remembers the best closing price since it bought; if a 5-minute bar closes more than "
+             "<i>trail_pct</i> % below that, it sells, even if the strategy still wants to hold."),
+    "reentry": ("After such a sale it stays out until the re-entry rule allows a new buy, and never on the very next bar: "
+                "<b>fresh_cross</b> the strategy has to go out and back in; <b>new_high</b> a bar closes above the price it sold from "
+                "while the strategy still wants in; <b>both</b> whichever comes first; <b>cooldown</b> wait a number of bars, then follow the strategy."),
+    "late": "<i>no_entry_last_min</i>: no new stock positions in the last N minutes before the close (positions already held are kept until the close).",
+    "same": ("The backtests, the Lab, the nightly check and the bot all use the same code for this, so the bot does exactly what was tested. "
+             "Each sale or wait is explained in the decision log and the daily report, for example "
+             "'Sold: price 763.05 fell 0.29% from the 765.27 high since entry (trail 0.25%).'"),
+    "lab": ("Lab → <i>Exit rules</i> compares the jobs without the layer and with every setting on the last 90 days, including a walk-forward "
+            "test on days the setting was not chosen on. Only switch it on if that walk-forward result beats 'none'."),
+    "recal": "The nightly check can also try exit settings for each symbol (<code>recalibration: include_exit: true</code>, off by default).",
+}
+
 LIVE_VIEW: Dict[str, str] = {
     "trigger": ("<b>Trigger</b> (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current "
                 "strategy would change its mind at the next bar's close. Red 'sell &lt; 762.70' means it would sell if a bar closes below "
                 "762.70; green 'buy &gt; 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from "
-                "the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level."),
+                "the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level. "
+                "For a job with an exit layer the line shows whichever is nearer: the strategy's level or the trailing-exit level "
+                "(marked 'trail'), or, after a trailing exit, the price that allows a re-entry (marked 're-entry')."),
     "already_past": ("'sells at the next close unless above X' means the change happens even if the price doesn't move "
                      "(for example an old price drops out of a momentum look-back); only a close beyond X would prevent it."),
     "none": "'–' means no close within 5% of the last price would change the strategy's mind at the next bar.",
@@ -165,6 +199,7 @@ RECAL_SHAPES: Dict[str, str] = {
     "regime_switch": "switch by market mood: trending → {trend}, sideways → {range}, jumpy → stay out",
     "perf_rotation": "back the recent winner among {names}",
     "none": "no job",
+    "exit": ", with a {trail}% trailing exit (re-entry: {reentry})",
 }
 
 GLOSSARY: Dict[str, str] = {

@@ -157,3 +157,30 @@ def peak_since(df: pd.DataFrame, since: pd.Timestamp, qty: float) -> Optional[Di
         peak = float(part.low.min())
         gave = (last - peak) / peak * 100
     return {"peak": round(peak, 4), "gave_back_pct": round(max(gave, 0.0), 3), "since": since.isoformat()}
+
+
+def with_exit(trig: Optional[Dict], exit_view: Optional[Dict], last: float) -> Optional[Dict]:
+    """The chart line shows the NEAREST level that changes the position at the next close: the
+    strategy's own flip level, or the exit layer's trail level (while in a position) or its
+    new-high re-entry level (while waiting after a trail exit)."""
+    if not exit_view:
+        return trig
+    lvl = None
+    if exit_view.get("state") == "in" and exit_view.get("trail_level"):
+        tl = exit_view["trail_level"]
+        long = tl < last
+        lvl = {"current_signal": 1.0 if long else -1.0, "flip_to": 0.0, "trigger_price": tl,
+               "distance_pct": round((tl / last - 1) * 100, 3), "direction": "below" if long else "above",
+               "kind": "sell" if long else "buy", "already_past": False, "bars_if_flat": None, "last_close": last,
+               "source": "trail"}
+    elif exit_view.get("state") == "waiting" and exit_view.get("waiting_for") in ("new_high", "both") and exit_view.get("peak"):
+        pk = exit_view["peak"]
+        lvl = {"current_signal": 0.0, "flip_to": 1.0 if pk > last else -1.0, "trigger_price": pk,
+               "distance_pct": round((pk / last - 1) * 100, 3), "direction": "above" if pk > last else "below",
+               "kind": "buy" if pk > last else "sell", "already_past": False, "bars_if_flat": None, "last_close": last,
+               "source": "re-entry"}
+    if lvl is None:
+        return trig
+    if exit_view.get("state") == "waiting" or trig is None or trig.get("distance_pct") is None:
+        return lvl  # while waiting, the strategy's own flip doesn't trade; the re-entry level does
+    return lvl if abs(lvl["distance_pct"]) < abs(trig["distance_pct"]) else {**trig, "source": "strategy"}

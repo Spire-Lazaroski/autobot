@@ -96,6 +96,25 @@ def account_rules(req: RulesReq):
     return jobs.submit("account-rules", work).public()
 
 
+class ExitStudyReq(BaseModel):
+    days: int = 90
+    source: str = "alpaca"   # or "demo"
+
+
+@router.post("/api/exit-study")
+def exit_study(req: ExitStudyReq):
+    """The enabled jobs with no exit layer vs every trailing-exit setting, in-sample and walk-forward."""
+    import yaml
+
+    from autobot import exit_study as es
+    from autobot.data import synthetic_bars
+    if not 30 <= req.days <= 365:
+        raise HTTPException(400, "days must be 30-365.")
+    cfg = yaml.safe_load(recalibrate.ROOT.joinpath("config.yaml").read_text(encoding="utf-8"))
+    fetch = (lambda s, tf, d: synthetic_bars(s, tf, d)) if req.source == "demo" else None
+    return jobs.submit("exit-study", lambda progress: es.run(cfg, req.days, fetch=fetch, progress=progress)).public()
+
+
 @router.post("/api/recalibration/run")
 def run_now():
     """Run the recalibration now as of the last finished session (a background job). Proposal only."""

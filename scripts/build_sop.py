@@ -442,6 +442,14 @@ def auto_section(f: dict) -> list:
         "The new settings are checked first; if they fail, nothing is written. A copy of the old config.yaml is kept in data\\recalibration\\config_backups.",
         "A symbol that leaves every job has its position closed by the bot.",
     ])]
+    B += [("h3", "Exit layer (trailing exit and re-entry)")]
+    jobs_with = [f"{j['name']} ({j['exit'].get('trail_pct')}%, {str(j['exit'].get('reentry', 'both')).replace('_', ' ')})"
+                 for j in f["live"].get("jobs", []) if j.get("enabled", True) and j.get("exit") and j["exit"].get("enabled", True)]
+    B += [("p", "<b>Now: " + (f"on for {', '.join(jobs_with)}." if jobs_with else "off for every job.") + "</b> " + plain.EXIT_SOP["what"])]
+    B += [("ul", [plain.EXIT_SOP[k] for k in ("reentry", "late", "same", "lab")]
+           + [plain.EXIT_SOP["recal"] + (" It is <b>on</b> now." if r.get("include_exit") else "")])]
+    B += [("p", "To switch it on for a job, add under that job in config.yaml (the bot uses it from its next bar):")]
+    B += [("p", "<code>exit: {trail_pct: 0.25, reentry: both, cooldown_bars: 6, no_entry_last_min: 30}</code>")]
     B += [("h3", "Position size")]
     B += [("p", (f"<b>Now: fixed.</b> Each symbol gets its job's share of the account, at most ${sz['max_position_usd']:,.0f}."
                  if sz["sizing"] != "risk_balanced" else

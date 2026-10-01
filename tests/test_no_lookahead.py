@@ -62,3 +62,16 @@ def test_intraday_strategies_flat_overnight(intraday):
         sig = get_signal(name, intraday, allow_short=True)
         assert (sig[eod] == 0).all(), name
         assert (sig != 0).any(), f"{name} never trades on the test data"
+
+
+@pytest.mark.parametrize("name", list(STRATEGIES))
+def test_exit_layer_on_top_is_causal(name, intraday):
+    """The optional trailing exit / re-entry layer (autobot.exits) on every strategy: truncated
+    data must give the same earlier targets."""
+    from autobot.exits import apply_exit_layer
+    cfg = {"trail_pct": 0.25, "reentry": "both", "cooldown_bars": 3, "no_entry_last_min": 30}
+    full = apply_exit_layer(get_signal(name, intraday), intraday, cfg, crypto=False)
+    for cut in _cuts(len(intraday)):
+        part_df = intraday.iloc[: cut + 1]
+        part = apply_exit_layer(get_signal(name, part_df), part_df, cfg, crypto=False)
+        pd.testing.assert_series_equal(part, full.iloc[: cut + 1], check_names=False, obj=f"{name}+exit cut={cut}")

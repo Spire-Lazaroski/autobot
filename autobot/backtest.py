@@ -37,7 +37,13 @@ def bars_per_year(index: pd.DatetimeIndex) -> float:
     return 252 * max(1.0, 390 / step_min)  # regular session ~390 minutes
 
 
-def run_backtest(df: pd.DataFrame, position: pd.Series, costs: CostModel = CostModel()) -> pd.DataFrame:
+def run_backtest(df: pd.DataFrame, position: pd.Series, costs: CostModel = CostModel(),
+                 exit_cfg: Optional[Dict] = None) -> pd.DataFrame:
+    """exit_cfg: the optional trailing-exit / re-entry layer (autobot.exits), applied to the
+    target positions before they are traded on the next bar, exactly as the live bot does."""
+    if exit_cfg:
+        from .exits import apply_exit_layer
+        position = apply_exit_layer(position.reindex(df.index).fillna(0), df, exit_cfg)
     pos = position.reindex(df.index).fillna(0).shift(1).fillna(0)  # trade next bar
     ret = df.close.pct_change().fillna(0)
     turnover = pos.diff().abs().fillna(pos.abs())
@@ -342,7 +348,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
 def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Series], risk: Dict,
                        alloc_pct: Dict[str, float] | None = None, buckets: Dict[str, str] | None = None,
                        costs: "Dict[str, CostModel] | CostModel" = CostModel(), capital: float = 100_000.0,
-                       account_rules: bool = False) -> Dict:
+                       account_rules: bool = False, exits: Optional[Dict[str, Dict]] = None) -> Dict:
     """The whole account, sized like the live bot.
 
     Every New York day, each symbol's dollars come from sizing.budgets() (the function live.py
@@ -361,7 +367,10 @@ def portfolio_backtest(data: Dict[str, pd.DataFrame], signals: Dict[str, pd.Seri
     "metrics": metrics() of the account, "events": the halts}.
     """
     from . import sizing
+    from .exits import apply_exit_layer
     syms = list(data)
+    if exits:  # per-symbol trailing exit / re-entry layer, as the live bot applies it
+        signals = {s: apply_exit_layer(signals[s].reindex(data[s].index).fillna(0), data[s], exits.get(s)) for s in syms}
     alloc_pct = alloc_pct or {}
     buckets = buckets or {}
     cost = {s: (costs[s] if isinstance(costs, dict) else costs).per_turn for s in syms}

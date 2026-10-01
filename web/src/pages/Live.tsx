@@ -40,6 +40,7 @@ interface Snapshot {
 interface Trigger {
   current_signal: number; flip_to: number; trigger_price: number | null; distance_pct: number | null;
   direction: "above" | "below" | null; kind: "sell" | "buy"; already_past: boolean; bars_if_flat: number | null; last_close: number;
+  source?: "strategy" | "trail" | "re-entry";   // with an exit layer: which rule the nearest level comes from
 }
 interface Peak { peak: number; gave_back_pct: number; since: string }
 interface SymView {
@@ -55,7 +56,8 @@ export function triggerText(t: Trigger | null | undefined, note?: string): strin
   const p = fmt(t.trigger_price, 2), d = `${t.distance_pct! > 0 ? "+" : ""}${fmt(t.distance_pct, 2)}%`;
   if (t.already_past) return `${verb(t)} at the next close unless ${t.direction === "below" ? "above" : "below"} ${p} (${d})`;
   const flat = t.bars_if_flat ? `, ~${t.bars_if_flat} bar${t.bars_if_flat > 1 ? "s" : ""} if flat` : "";
-  return `${verb(t)} ${t.direction} ${p} (${d}${flat})`;
+  const why = t.source === "trail" ? ", trailing exit" : t.source === "re-entry" ? ", re-entry after a trailing exit" : "";
+  return `${verb(t)} ${t.direction} ${p} (${d}${flat}${why})`;
 }
 
 const ts = (s: string | number | null | undefined) => (s === null || s === undefined || s === "" ? "–" : nyTime(typeof s === "number" ? s : Date.parse(s) / 1000));
@@ -253,13 +255,14 @@ function LiveChart({ symbols, timeframe, views }: { symbols: string[]; timeframe
   const current = sym ?? symbols[0];
   const v = current ? viewOf(views, current) : undefined;
   const tp = v?.trigger?.trigger_price ?? null, tk = v?.trigger?.kind, td = v?.trigger?.direction, pk = v?.peak?.peak ?? null;
+  const tsrc = v?.trigger?.source;
   const priceLines: PriceMark[] = useMemo(() => {
     const out: PriceMark[] = [];
     if (tp !== null && tk) out.push({ price: tp, color: tk === "sell" ? C.loss : C.profit, style: "dashed",
-      title: `${tk} ${td === "below" ? "<" : ">"} ${fmt(tp, 2)}` });
+      title: `${tk} ${td === "below" ? "<" : ">"} ${fmt(tp, 2)}${tsrc === "trail" ? " (trail)" : tsrc === "re-entry" ? " (re-entry)" : ""}` });
     if (pk !== null) out.push({ price: pk, color: C.inkFaint, style: "dotted", title: `peak ${fmt(pk, 2)}` });
     return out;
-  }, [tp, tk, td, pk]);
+  }, [tp, tk, td, pk, tsrc]);
   const q = useQuery({
     queryKey: ["live-candles", current, timeframe],
     queryFn: () => api<{ candles: Candles; fills: { time: number; price: number; side: string; qty: number }[]; timeframe: string }>(
