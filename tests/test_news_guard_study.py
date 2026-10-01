@@ -14,7 +14,8 @@ def test_study_earnings_uses_published_then_detector(monkeypatch):
 
 
 def test_earnings_source_patches_and_restores(monkeypatch):
-    monkeypatch.setattr(ng, "earnings_sessions", lambda s: [date(2025, 1, 29)])
+    monkeypatch.setattr(ng, "detected_sessions", lambda s: [date(2025, 1, 29)])
+    monkeypatch.setattr(ng, "earnings_sessions", lambda s: [date(2020, 1, 1)])  # e.g. config-listed dates
     monkeypatch.setitem(st.PUBLISHED_EARNINGS, "XTEST", ["2025-01-30"])
     original = ng.earnings_sessions
     with st.earnings_source("published"):
@@ -27,7 +28,7 @@ def test_earnings_source_patches_and_restores(monkeypatch):
 def test_detector_check_classifies(monkeypatch):
     monkeypatch.setitem(st.PUBLISHED_EARNINGS, "XTEST", ["2025-01-30", "2025-04-23", "2025-07-24"])
     detected = [date(2024, 12, 1), date(2025, 1, 30), date(2025, 7, 23), date(2025, 9, 1)]
-    monkeypatch.setattr(ng, "earnings_sessions", lambda s: detected)
+    monkeypatch.setattr(ng, "detected_sessions", lambda s: detected)
     c = st.detector_check(["XTEST"])["XTEST"]
     assert c["exact"] == 1
     assert c["off_by_days"] == ["2025-07-24"]

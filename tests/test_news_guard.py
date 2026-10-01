@@ -74,3 +74,16 @@ def test_without_a_symbol_the_guard_is_the_base_strategy():
 def test_guard_cannot_wrap_itself(bars):
     with pytest.raises(ValueError):
         ng.news_guard(bars, base="news_guard")
+
+
+def test_listed_earnings_dates_replace_the_detectors(tmp_path, monkeypatch):
+    from datetime import date
+    # detector: a false date, a date one day off, and one after the listed ones (3 stories each)
+    t = ["2024-10-01 14:00", "2025-07-23 14:00", "2026-07-23 14:00"]
+    rows = pd.DataFrame({"t_info": pd.to_datetime([x for x in t for _ in range(3)], utc=True).tz_localize(None).tz_localize("America/New_York"),
+                         "category": "earnings", "relevance": "main", "story_type": "new_information"})
+    monkeypatch.setattr(ng, "stories", lambda symbol: rows)
+    (tmp_path / "config.yaml").write_text("news:\n  earnings_dates:\n    XTEST: ['2025-01-30', '2025-07-24']\n", encoding="utf-8")
+    monkeypatch.setattr(ng.news, "ROOT", tmp_path)
+    assert ng.earnings_sessions("XTEST") == [date(2025, 1, 30), date(2025, 7, 24), date(2026, 7, 23)]
+    assert ng.earnings_sessions("OTHER") == [date(2024, 10, 1), date(2025, 7, 23), date(2026, 7, 23)]  # nothing listed

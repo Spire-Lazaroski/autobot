@@ -84,10 +84,13 @@ def study_earnings(symbol: str, detected: List[date]) -> List[date]:
 
 @contextlib.contextmanager
 def earnings_source(source: str):
-    """Within the block, news_guard uses 'published' (study_earnings) or 'detected' dates."""
+    """Within the block, news_guard uses 'published' (study_earnings) or 'detected' dates
+    (the news detector alone, ignoring dates listed in config.yaml)."""
     original = ng.earnings_sessions
     if source == "published":
-        ng.earnings_sessions = lambda s: study_earnings(s, original(s))
+        ng.earnings_sessions = lambda s: study_earnings(s, ng.detected_sessions(s))
+    else:
+        ng.earnings_sessions = ng.detected_sessions
     try:
         yield
     finally:
@@ -101,7 +104,7 @@ def detector_check(symbols: List[str]) -> Dict[str, Dict]:
         pub = {date.fromisoformat(d) for d in PUBLISHED_EARNINGS.get(s, [])}
         if not pub:
             continue
-        det = {d for d in ng.earnings_sessions(s) if d < PUBLISHED_UNTIL}
+        det = {d for d in ng.detected_sessions(s) if d < PUBLISHED_UNTIL}
         lo = min(pub) - timedelta(days=30)
         det_in = {d for d in det if d >= lo}  # ignore dates before the news history
         exact = pub & det_in
@@ -110,7 +113,7 @@ def detector_check(symbols: List[str]) -> Dict[str, Dict]:
         false = {d for d in det_in - exact if not any(abs((p - d).days) <= 4 for p in pub)}
         out[s] = {"published": len(pub), "exact": len(exact), "off_by_days": sorted(str(p) for p in near),
                   "missed": sorted(str(p) for p in missed), "false": sorted(str(d) for d in false),
-                  "news_only": [str(d) for d in study_earnings(s, ng.earnings_sessions(s)) if d >= PUBLISHED_UNTIL]}
+                  "news_only": [str(d) for d in study_earnings(s, ng.detected_sessions(s)) if d >= PUBLISHED_UNTIL]}
     return out
 
 
@@ -246,7 +249,7 @@ def run(progress: Optional[Callable[[float, str], None]] = None, walk: bool = Tr
            "costs_bps": costs.fee_bps + costs.slippage_bps, "stand_aside_min": STAND_ASIDE_MIN,
            "materiality": MATERIALITY, "bases": BASES, "variants": VARIANTS,
            "earnings_check": detector_check(STOCKS),
-           "earnings_used": {s: [str(d) for d in study_earnings(s, ng.earnings_sessions(s))] for s in STOCKS},
+           "earnings_used": {s: [str(d) for d in study_earnings(s, ng.detected_sessions(s))] for s in STOCKS},
            "blocked": {g: {f">={m}": blocked_share(d, m) for m in (3, 4)} for g, d in groups.items()},
            "groups": {}}
     for k, (g, d) in enumerate(groups.items()):

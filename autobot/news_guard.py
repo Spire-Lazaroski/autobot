@@ -11,8 +11,9 @@ news_guard: wrap any strategy with two news rules found useful in the Phase 5 ev
 Causal: the decision at a bar's close uses only stories received up to that close.
 Earnings sessions come from the news history (days with >= 3 earnings/guidance stories on
 the symbol); companies announce these dates weeks ahead, so knowing them in advance is fair.
-Live, only past releases are known from news unless `news.earnings_dates` lists upcoming ones
-in config.yaml.
+Dates listed in config.yaml `news.earnings_dates` replace the detector's for that symbol up to
+the last listed date (the detector can miss a release or be a day off); after it, the detector's
+dates are used. Live, only past releases are known from news unless upcoming ones are listed.
 
 Registered as a strategy (family "news"), so the Lab, Search, Walk-forward, reports and the
 live bot use it unchanged. The bars must carry their symbol in df.attrs["symbol"].
@@ -76,9 +77,26 @@ def stories(symbol: str) -> pd.DataFrame:
 
 
 def earnings_sessions(symbol: str) -> List[date]:
-    """New York dates whose session reacts to an earnings release: days with >= 3
-    earnings/guidance stories on the symbol (consecutive days merged). A release after the
-    close counts for the next session. Plus any dates listed in config news.earnings_dates."""
+    """New York dates whose session reacts to an earnings release: the dates listed in config
+    news.earnings_dates, then the news detector's dates after the last listed one."""
+    out = detected_sessions(symbol)
+    listed: List[date] = []
+    try:
+        import yaml
+        cfg = yaml.safe_load((news.ROOT / "config.yaml").read_text(encoding="utf-8"))
+        for d in ((cfg.get("news") or {}).get("earnings_dates") or {}).get(symbol, []):
+            listed.append(date.fromisoformat(str(d)))
+    except (OSError, ValueError):
+        pass
+    if listed:  # listed (published) dates win: the detector only fills in after the last one
+        out = [d for d in out if d > max(listed)] + listed
+    return sorted(set(out))
+
+
+def detected_sessions(symbol: str) -> List[date]:
+    """Earnings sessions found from the news alone: days with >= 3 earnings/guidance stories on
+    the symbol (days within 4 of each other merged). A release after the close counts for the
+    next session."""
     df = stories(symbol)
     out: List[date] = []
     if not df.empty:
@@ -97,14 +115,7 @@ def earnings_sessions(symbol: str) -> List[date]:
                 else:
                     clusters.append([(d, n)])
             out = [max(c, key=lambda x: (x[1], x[0]))[0] for c in clusters]  # the busiest day is the release
-    try:
-        import yaml
-        cfg = yaml.safe_load((news.ROOT / "config.yaml").read_text(encoding="utf-8"))
-        for d in ((cfg.get("news") or {}).get("earnings_dates") or {}).get(symbol, []):
-            out.append(date.fromisoformat(str(d)))
-    except (OSError, ValueError):
-        pass
-    return sorted(set(out))
+    return out
 
 
 def guard_flags(df: pd.DataFrame, symbol: str, stand_aside_min: int, min_materiality: int,
