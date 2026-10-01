@@ -83,3 +83,46 @@ news:
     - '2025-10-23'
     - '2026-01-29'
     - '2026-04-23'
+universe:
+  every_days: 7
+  lookback_days: 20
+  hysteresis: 2
+  weights:
+    dollar_volume: 0.5
+    range_pct: 0.5
+  min_dollar_volume: 1000000
+  total:
+    min: 10
+    max: 15
+  buckets:
+    tech:
+      min: 5
+      max: 6
+      candidates:
+      - NVDA
+      - AAPL
+      - MSFT
+      - AMZN
+      - META
+      - TSLA
+      - AMD
+    index_etf:
+      min: 2
+      max: 2
+      candidates:
+      - QQQ
+      - SPY
+    commodity_etf:
+      min: 2
+      max: 3
+      candidates:
+      - USO
+      - GLD
+      - SLV
+    crypto:
+      min: 1
+      max: 2
+      min_dollar_volume: 0
+      candidates:
+      - BTC/USD
+      - ETH/USD

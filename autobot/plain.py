@@ -100,6 +100,24 @@ METHODS: Dict[str, Dict[str, str]] = {
                           explain="The bot asks every chosen strategy for its position and follows the majority; with 'average' it takes a partial position in proportion to the votes."),
 }
 
+# Universe screener (autobot/universe.py): one fixed sentence per outcome, filled from the numbers.
+UNIVERSE_REASONS: Dict[str, str] = {
+    "new": "Selected: ranked {rank} of {n} in {bucket}, inside the top {keep}.",
+    "kept": "Kept: ranked {rank} of {n}, still inside the top {keep}.",
+    "kept_hysteresis": ("Kept although ranked {rank} of {n}: a symbol already in the list is only dropped below rank {limit}, "
+                        "so small changes in the ranking don't swap symbols in and out."),
+    "dropped": "Dropped: ranked {rank} of {n}, below rank {limit}.",
+    "not_selected": "Not selected: ranked {rank} of {n}; the top {keep} places are taken.",
+    "floor": ("Left out: typical daily trading of ${dv} is below the ${floor} minimum. These figures come from the free IEX feed, "
+              "which sees only part of the market, so they are only useful for comparing symbols."),
+    "no_data": "Left out: only {days} days of prices were available (needs {need}).",
+}
+UNIVERSE_WARNINGS: Dict[str, str] = {
+    "bucket_short": "{bucket}: only {got} symbol(s) qualified, fewer than the minimum of {min}.",
+    "total_short": "The list has {got} symbols, fewer than the minimum of {min}.",
+    "total_long": "The list has {got} symbols, more than the maximum of {max}.",
+}
+
 GLOSSARY: Dict[str, str] = {
     "Paper trading": "Trading with pretend money in a practice account; no real money is at risk.",
     "Buy and hold": "Buying once and simply keeping it; the baseline every strategy is compared with.",
