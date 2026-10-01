@@ -1,11 +1,11 @@
 # Operating procedure: Spire Analytics paper-trading bot
 
-Version generated 01 October 2026 15:42 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
+Version generated 01 October 2026 18:45 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
 
 ## 1. What the bot is, and what it isn't
 
 - It trades a **paper account** at Alpaca: pretend money, real market prices. The code is hard-wired to paper trading; there is no switch to real money.
-- It follows rules you choose (the **jobs**): each job is one strategy on one or more symbols with a share of the account. It checks the market once per 5Min bar and sends market orders.
+- It follows **jobs**: each job is one strategy on one or more symbols with a share of the account. It checks the market once per 5Min bar and sends market orders. Every night it re-checks which strategy each symbol should use and changes the jobs itself when something is clearly better (section 7).
 - It protects itself: if the account is down 2.0% in a day it sells everything and stops for the day; no single symbol gets more than $10,000; stock positions are closed 5 minutes before the US close.
 - It writes down why it acted (logs/decisions.jsonl) and produces a plain-English report after every trading day.
 
@@ -314,22 +314,67 @@ Prices often move more around a company's quarterly results. The reports, and th
 2. Open config.yaml in E:\autobot with Notepad and add the date under the symbol, in the same format: `- 'YYYY-MM-DD'`.
 3. Save. Reports pick it up at the next run; the bot doesn't need a restart. Saving jobs in the lab keeps these dates.
 
-## 7. What to watch: daily checklist
+## 7. Automatic strategy selection
+
+Every night after the close the bot re-checks which strategy each symbol should trade. **It changes the jobs itself** (mode *apply*). Every symbol on the trading list is managed this way, including those that had hand-made jobs.
+
+### The trading list (universe)
+
+Every 7 days the bot ranks the candidates of each group on how much they trade and how much they move (the last 20 trading days):
+
+| Group | How many | Candidates |
+|---|---|---|
+| tech | 5-6 | NVDA, AAPL, MSFT, AMZN, META, TSLA, AMD |
+| index etf | 2 | QQQ, SPY |
+| commodity etf | 2-3 | USO, GLD, SLV |
+| crypto | 1-2 | BTC/USD, ETH/USD |
+
+A symbol already on the list stays until it drops more than 2 places below the cut, so the list doesn't change for small moves. The trading figures come from the free IEX feed, which sees only part of the market: they are only used to compare symbols with each other.
+
+### The nightly check (recalibration)
+
+1. For each symbol, every strategy and setting is tested on the last 90 days in turns: tuned on 20 days, then tried on the next 5 days it had not seen. Costs are included (2 bp a trade for stocks, 30 bp for crypto), and stocks are sold before the close, like the bot does.
+2. It also builds 'switch by market mood' and 'back the recent winner' combinations from the best 3 strategies.
+3. Each option gets a score from the test days only (Sharpe, return, deepest dip and trading). Doing nothing scores 0.
+4. A new strategy replaces the current one only if it scores at least 0.25 better, made 10+ trades, the current one has been in place 5+ days, and the symbol hasn't already changed 1 time in the last 7 days. A symbol where nothing beats doing nothing gets no job.
+
+Every decision has a plain-English reason, shown on the Recalibrate page and in the next daily report (*Strategy changes*).
+
+![The Recalibrate page: current and proposed strategy per symbol, the scores on unseen days, and the reason.](img/recal.png)
+*The Recalibrate page: current and proposed strategy per symbol, the scores on unseen days, and the reason.*
+
+### When changes take effect
+
+- Stock jobs change only while the market is closed (the bot holds no stocks overnight), so a change starts at the next open.
+- A crypto job changes only when the bot holds none of that coin; until then it shows as *waiting to apply*.
+- The new settings are checked first; if they fail, nothing is written. A copy of the old config.yaml is kept in data\recalibration\config_backups.
+- A symbol that leaves every job has its position closed by the bot.
+
+### Position size
+
+**Now: fixed.** Each symbol gets its job's share of the account, at most $10,000. The other mode is available in config.yaml (`risk: sizing`); compare it in the Lab first.
+
+### Profit lock
+
+**Off.** When switched on (`risk: profit_lock: enabled: true`), once the day's gain reaches 1.5%, a fall of more than 50% from the day's best makes the bot sell everything and stop for the day. The Lab page (*Account rules*) shows what it would have done on recent prices.
+
+## 8. What to watch: daily checklist
 
 Look at the Live page a few times a day and read the daily report after the close. 🟢 green = fine, 🟠 amber = keep an eye on it, 🔴 red = act now.
 
 | Check | Green | Amber | Red: what to do |
 |---|---|---|---|
 | Day P&L vs the daily loss limit | above -1% | -1% to -1.6% | below -1.6% or the bot halted: the limit (2.0%) will stop it; don't restart it the same day |
-| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 9) |
+| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 10) |
 | Number of trades vs a normal day | similar to the last 5 reports | twice as many or none at all | many times more: check the log and the jobs; stop the bot if unsure |
 | Errors in the bot log (Live page) | none | an occasional data error (the bot skips that bar) | errors every bar, or CRITICAL/WATCHDOG lines: see troubleshooting |
 | Last tick / heartbeat | last tick within one 5Min bar; beat under 10 s | last tick 1-3 bars old | heartbeat over 90 s, status 'unresponsive', or last tick more than 3 bars old: stop and restart |
 | Strategy switching (reports, Shifting jobs) | 0-4 switches a day per symbol | 5-8 a day | more than 8 a day: switching costs money; test a larger confirm_bars in the Lab |
 | A symbol stuck in a position | positions change when signals change | an intraday strategy still holding late in the day | a position held with no job on that symbol: close it on the Live page or the Alpaca website |
+| Nightly strategy check (Recalibrate page) | the proposal date is the last trading day; status applied (or nothing to change) | items *waiting to apply* for more than a day (a coin position that never closes) | *Last automatic run failed*: read the message; the bot keeps yesterday's jobs. Press Run now once the cause is fixed |
 | News collector (News page, top) | *news collector running*, last story received within the hour during market hours | nothing received for 1-2 hours while the market is open | *stopped*, or the daily report says it wasn't receiving stories live: double-click **start_news.bat** (trading isn't affected) |
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
@@ -346,14 +391,17 @@ Look at the Live page a few times a day and read the daily report after the clos
 | News page says *news collector stopped* | The 'autobot news' window was closed, or the PC slept | Double-click **start_news.bat**. It fills in the stories it missed, then collects live again. Trading is not affected. |
 | Report's news section says *No news database yet* | The news collector has never run on this PC | Double-click **start_news.bat** and leave it running; the first start downloads two years of stories (a few minutes). |
 | Report says a story was 'filled in afterwards' | The collector wasn't running live that day; it caught up later | Nothing to fix for that day; keep the 'autobot news' window open on trading days. |
+| A symbol from the trading list has no job | On the test days nothing beat doing nothing (or too few trades) | Nothing to fix: the reason is on the Recalibrate page. It is re-checked every night. |
+| You want to undo a strategy change | The nightly check switched a job you preferred | Copy the newest file from data\recalibration\config_backups over config.yaml (the bot uses it from its next bar), then set `recalibration: mode: propose` so it isn't changed again tonight without your Apply. |
 | Account result in a report looks far too big | The broker's history counted a deposit (it does this in a paper account's first days) | The report leaves out jumps over 10% in 5 minutes and says so in a note at the top; if there is no note, check the Alpaca website. |
 
-## 9. Weekly review
+## 10. Weekly review
 
 1. Reports page → **Last 7 days**. Read the headline, then the charts.
 2. Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.
 3. Compare with the last few weeks' reports; one bad week alone says little.
 4. Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, *Earnings dates*).
+5. Recalibrate page: how many strategy changes happened this week and why (the reasons are on the page and in the daily reports). Several changes on the same symbol week after week means no strategy works well there; consider leaving it out of the trading list.
 
 **When to change or switch off a strategy**
 

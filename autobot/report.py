@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from . import plain, report_news
+from . import plain, report_news, report_recal
 from .backtest import CostModel, round_trips, run_backtest
 from .decisions import backtest_decisions, mood_adj, read_jsonl
 from .strategies import STRATEGIES, get_signal
@@ -63,6 +63,7 @@ class ReportInput:
     open_positions: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
     news: Dict = field(default_factory=dict)  # report_news.collect(...); empty = no news section
+    recal: Dict = field(default_factory=dict)  # report_recal.collect(...); live reports only
 
 
 def _trade_dict(symbol, side, qty_text, entry_time, entry_price, exit_time, exit_price, pnl, pnl_pct,
@@ -210,7 +211,16 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
         source="Alpaca paper account (pretend money)", kind="live", is_demo=False, start_equity=start_equity, equity=eq,
         benchmark=bench, benchmark_symbol=bench_sym, bars={s: d for s, d in bars.items() if s in symbols or s == bench_sym},
         records=sorted(recs, key=lambda r: r.get("bar_time") or r["time"]), trades=trades,
-        limits=dict(cfg["live"].get("risk", {})), open_positions=open_pos, notes=notes, news=nd)
+        limits=dict(cfg["live"].get("risk", {})), open_positions=open_pos, notes=notes, news=nd,
+        recal=_recal_or_note(a, b, notes))
+
+
+def _recal_or_note(a, b, notes) -> Dict:
+    try:
+        return report_recal.collect(a, b)
+    except Exception as e:  # noqa: BLE001  the report still works without this section
+        notes.append(f"Strategy changes could not be read ({e}).")
+        return {}
 
 
 CASH_JUMP = 0.10  # one-bar change in account value above this share can't come from our trading
@@ -716,6 +726,15 @@ def render(ri: ReportInput) -> str:
     tl = timeline(ri, w)
     trades = [trade_sentence(t, w, ri.news) for t in ri.trades]
     news_html = news_section(ri, w)
+    recal_html = uni_html = ""
+    if ri.kind == "live" and ri.recal:
+        cl = report_recal.change_lines(ri.recal)
+        recal_html = (f"<h2>Strategy changes</h2><p class='muted'>{_esc(plain.REPORT_RECAL['intro'])}</p>"
+                      "<ul>" + "".join(f"<li>{_esc(x)}</li>" for x in cl) + "</ul>")
+        uni_html = ("<h2>Trading list (universe)</h2><ul>"
+                    + "".join(f"<li>{_esc(x)}</li>" for x in report_recal.universe_lines(ri.recal)) + "</ul>")
+        if ri.recal.get("changes"):
+            w.use("Recalibration")
     good, bad, watch = went_well(ri, a, w), went_badly(ri, a, w), watch_tomorrow(ri, a, w)
     strategies = sorted({r.get("strategy") for r in a["decisions"] if r.get("strategy")} |
                         {r.get("active") for r in a["decisions"] if r.get("active") in plain.STRATEGIES})
@@ -777,6 +796,7 @@ body{{margin:0}} .sp-doc svg text{{font-family:Inter,sans-serif}}
 <h2>Account value through the period</h2>
 <figure>{equity_chart(ri)}<figcaption>Percentage change from the start of the period. The dotted grey line is simply holding {_esc(ri.benchmark_symbol)} with the same money.</figcaption></figure>
 
+{recal_html}
 <h2>What happened, in order</h2>
 {"<ol class='timeline'>" + li(tl) + "</ol>" if tl else "<p class='muted'>No changes in market mood or strategy were recorded.</p>"}
 
@@ -786,6 +806,7 @@ body{{margin:0}} .sp-doc svg text{{font-family:Inter,sans-serif}}
 <h2>Prices, trades and market mood</h2>
 {price_charts or "<p class='muted'>No price data.</p>"}
 {news_html}
+{uni_html}
 
 <div class="grid" style="margin-top:24px">
   <div class="card ok"><h3>What went well</h3><ul>{li(good)}</ul></div>

@@ -54,8 +54,14 @@ console.log("wrote news_top");
 await page.addStyleTag({ content: ".sticky{position:static!important}" });  // the sticky header would cover full-page clips
 await panelTop("news_impact", "Market impact of news", 700);
 await panelTop("news_guard", "Does the news guard help?", 620);
+// 5. Recalibrate page (read-only: no button is pressed)
+await page.goto(`${BASE}/#/recal`);
+await page.waitForSelector("text=Recalibration proposal", { timeout: 60000 });
+await page.addStyleTag({ content: ".sticky{position:static!important}" });
+await page.waitForTimeout(1500);
+await panelTop("recal", "Recalibration proposal", 640);
 
-// 5. Stop dialog with a simulated running bot (nothing is sent)
+// 6. Stop dialog with a simulated running bot (nothing is sent)
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 760 } });
 const p2 = await ctx.newPage();
 const snap = { time: 0, bot: { running: true, unresponsive: false, pid: 1234, heartbeat_age_s: 1, process_alive: true, stop_requested: false },

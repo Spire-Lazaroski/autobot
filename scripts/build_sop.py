@@ -43,7 +43,16 @@ def facts() -> dict:
     risk = live["risk"]
     return dict(cfg=cfg, live=live, risk=risk, stall=float(live.get("stall_seconds", 300)),  # live.py's default
                 heartbeat_stale=HEARTBEAT_STALE_S, switch_limit=SWITCH_LIMIT,
-                flatten_min=int(risk.get("flatten_before_close_min", 0)), year=date.today().year, news=news_facts(cfg))
+                flatten_min=int(risk.get("flatten_before_close_min", 0)), year=date.today().year, news=news_facts(cfg),
+                auto=auto_facts(cfg))
+
+
+def auto_facts(cfg: dict) -> dict:
+    """Settings for section 7, from config.yaml through the modules' own settings()."""
+    from autobot import recalibrate, sizing, universe
+    r = recalibrate.settings(cfg)
+    return {"mode": r["mode"], "take_over": bool(r.get("take_over_hand_made")), "r": r, "u": universe.settings(cfg),
+            "sizing": sizing.settings(cfg["live"]["risk"]), "lock": cfg["live"]["risk"].get("profit_lock") or {}}
 
 
 def news_facts(cfg: dict) -> dict:
@@ -131,7 +140,9 @@ def build(f: dict) -> list:
     B += [("h2", "1. What the bot is, and what it isn't")]
     B += [("ul", [
         "It trades a <b>paper account</b> at Alpaca: pretend money, real market prices. The code is hard-wired to paper trading; there is no switch to real money.",
-        f"It follows rules you choose (the <b>jobs</b>): each job is one strategy on one or more symbols with a share of the account. It checks the market once per {tf} bar and sends market orders.",
+        f"It follows <b>jobs</b>: each job is one strategy on one or more symbols with a share of the account. It checks the market once per {tf} bar and sends market orders."
+        + (" Every night it re-checks which strategy each symbol should use and changes the jobs itself when something is clearly better (section 7)."
+           if f["auto"]["mode"] == "apply" else " A nightly check proposes better strategies; you decide on the Recalibrate page (section 7)."),
         f"It protects itself: if the account is down {R['max_daily_loss_pct']}% in a day it sells everything and stops for the day; no single symbol gets more than ${R['max_position_usd']:,}; stock positions are closed {fm} minutes before the US close.",
         "It writes down why it acted (logs/decisions.jsonl) and produces a plain-English report after every trading day.",
     ])]
@@ -226,7 +237,10 @@ def build(f: dict) -> list:
     B += news_section(f)
 
     # 7
-    B += [("h2", "7. What to watch: daily checklist")]
+    B += auto_section(f)
+
+    # 8
+    B += [("h2", "8. What to watch: daily checklist")]
     lim = R["max_daily_loss_pct"]
     B += [("p", "Look at the Live page a few times a day and read the daily report after the close. "
                 "<span class='dot green'></span>green = fine, <span class='dot amber'></span>amber = keep an eye on it, "
@@ -234,7 +248,7 @@ def build(f: dict) -> list:
     B += [("table", ["Check", "Green", "Amber", "Red: what to do"], [
         ["Day P&L vs the daily loss limit", f"above -{lim / 2:g}%", f"-{lim / 2:g}% to -{lim * 0.8:g}%",
          f"below -{lim * 0.8:g}% or the bot halted: the limit ({lim}%) will stop it; don't restart it the same day"],
-        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 9)"],
+        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 10)"],
         ["Number of trades vs a normal day", "similar to the last 5 reports", "twice as many or none at all",
          "many times more: check the log and the jobs; stop the bot if unsure"],
         ["Errors in the bot log (Live page)", "none", "an occasional data error (the bot skips that bar)",
@@ -245,13 +259,16 @@ def build(f: dict) -> list:
          f"more than {f['switch_limit']} a day: switching costs money; test a larger confirm_bars in the Lab"],
         ["A symbol stuck in a position", "positions change when signals change", "an intraday strategy still holding late in the day",
          "a position held with no job on that symbol: close it on the Live page or the Alpaca website"],
-        ["News collector (News page, top)", "<i>news collector running</i>, last story received within the hour during market hours",
+        ["Nightly strategy check (Recalibrate page)", "the proposal date is the last trading day; status applied (or nothing to change)",
+         "items <i>waiting to apply</i> for more than a day (a coin position that never closes)",
+         "<i>Last automatic run failed</i>: read the message; the bot keeps yesterday's jobs. Press Run now once the cause is fixed"],
+        ["News collector (News page, top)","<i>news collector running</i>, last story received within the hour during market hours",
          "nothing received for 1-2 hours while the market is open",
          "<i>stopped</i>, or the daily report says it wasn't receiving stories live: double-click <b>start_news.bat</b> (trading isn't affected)"],
     ])]
 
-    # 8
-    B += [("h2", "8. Troubleshooting")]
+    # 9
+    B += [("h2", "9. Troubleshooting")]
     B += [("table", ["Symptom", "Likely cause", "What to do"], [
         ["Header shows <b>API down</b>", "The 'autobot API' window was closed or crashed", "Run start_lab.bat again. The bot keeps running on its own; check it on the Live page."],
         ["Live page says <i>reconnecting…</i>", "The API is restarting or not running", "Wait 10 seconds; if it stays, run start_lab.bat."],
@@ -268,17 +285,24 @@ def build(f: dict) -> list:
          "Double-click <b>start_news.bat</b>. It fills in the stories it missed, then collects live again. Trading is not affected."],
         ["Report's news section says <i>No news database yet</i>", "The news collector has never run on this PC", "Double-click <b>start_news.bat</b> and leave it running; the first start downloads two years of stories (a few minutes)."],
         ["Report says a story was 'filled in afterwards'", "The collector wasn't running live that day; it caught up later", "Nothing to fix for that day; keep the 'autobot news' window open on trading days."],
-        ["Account result in a report looks far too big", "The broker's history counted a deposit (it does this in a paper account's first days)",
+        ["A symbol from the trading list has no job", "On the test days nothing beat doing nothing (or too few trades)",
+         "Nothing to fix: the reason is on the Recalibrate page. It is re-checked every night."],
+        ["You want to undo a strategy change", "The nightly check switched a job you preferred",
+         "Copy the newest file from data\\recalibration\\config_backups over config.yaml (the bot uses it from its next bar), then set "
+         "<code>recalibration: mode: propose</code> so it isn't changed again tonight without your Apply."],
+        ["Account result in a report looks far too big","The broker's history counted a deposit (it does this in a paper account's first days)",
          "The report leaves out jumps over 10% in 5 minutes and says so in a note at the top; if there is no note, check the Alpaca website."],
     ])]
 
-    # 9
-    B += [("h2", "9. Weekly review")]
+    # 10
+    B += [("h2", "10. Weekly review")]
     B += [("ol", [
         "Reports page → <b>Last 7 days</b>. Read the headline, then the charts.",
         "Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.",
         "Compare with the last few weeks' reports; one bad week alone says little.",
         "Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, <i>Earnings dates</i>).",
+        "Recalibrate page: how many strategy changes happened this week and why (the reasons are on the page and in the daily reports). "
+        "Several changes on the same symbol week after week means no strategy works well there; consider leaving it out of the trading list.",
     ])]
     B += [("p", "<b>When to change or switch off a strategy</b>")]
     B += [("ul", [
@@ -373,6 +397,62 @@ def news_section(f: dict) -> list:
         "Open config.yaml in E:\\autobot with Notepad and add the date under the symbol, in the same format: <code>- 'YYYY-MM-DD'</code>.",
         "Save. Reports pick it up at the next run; the bot doesn't need a restart. Saving jobs in the lab keeps these dates.",
     ])]
+    return B
+
+
+def auto_section(f: dict) -> list:
+    """Section 7: universe, nightly recalibration, applying, sizing and the profit lock."""
+    a = f["auto"]
+    r, u, sz, lock = a["r"], a["u"], a["sizing"], a["lock"]
+    B = [("h2", "7. Automatic strategy selection")]
+    B += [("p", "Every night after the close the bot re-checks which strategy each symbol should trade. "
+                + ("<b>It changes the jobs itself</b> (mode <i>apply</i>)" if a["mode"] == "apply"
+                   else "It only <b>proposes</b> changes (mode <i>propose</i>); nothing changes until you press Apply")
+                + (". Every symbol on the trading list is managed this way, including those that had hand-made jobs."
+                   if a["take_over"] else ". Symbols of your own hand-made jobs are left alone."))]
+    B += [("h3", "The trading list (universe)")]
+    B += [("p", f"Every {u['every_days']} days the bot ranks the candidates of each group on how much they trade and how much they move "
+                f"(the last {u['lookback_days']} trading days):")]
+    B += [("table", ["Group", "How many", "Candidates"],
+           [[n.replace("_", " "), f"{b['min']}-{b['max']}" if b["min"] != b["max"] else str(b["max"]), ", ".join(b["candidates"])]
+            for n, b in u["buckets"].items()])]
+    B += [("p", f"A symbol already on the list stays until it drops more than {u['hysteresis']} places below the cut, so the list doesn't change "
+                "for small moves. The trading figures come from the free IEX feed, which sees only part of the market: they are only used "
+                "to compare symbols with each other.")]
+    B += [("h3", "The nightly check (recalibration)")]
+    B += [("ol", [
+        f"For each symbol, every strategy and setting is tested on the last {r['lookback_days']} days in turns: tuned on {r['train_days']} days, "
+        f"then tried on the next {r['test_days']} days it had not seen. Costs are included ({r['costs']['stock']['fee_bps'] + r['costs']['stock']['slippage_bps']:g} bp a trade "
+        f"for stocks, {r['costs']['crypto']['fee_bps'] + r['costs']['crypto']['slippage_bps']:g} bp for crypto), and stocks are sold before the close, like the bot does.",
+        f"It also builds 'switch by market mood' and 'back the recent winner' combinations from the best {r['top_k']} strategies.",
+        "Each option gets a score from the test days only (Sharpe, return, deepest dip and trading). Doing nothing scores 0.",
+        f"A new strategy replaces the current one only if it scores at least {r['min_edge']} better, made {r['min_trades']}+ trades, "
+        f"the current one has been in place {r['min_hold_days']}+ days, and the symbol hasn't already changed "
+        f"{r['max_changes_per_week']} time{'s' if r['max_changes_per_week'] != 1 else ''} in the last 7 days. "
+        "A symbol where nothing beats doing nothing gets no job.",
+    ])]
+    B += [("p", "Every decision has a plain-English reason, shown on the Recalibrate page and in the next daily report (<i>Strategy changes</i>).")]
+    B += [("img", "img/recal.png", "The Recalibrate page: current and proposed strategy per symbol, the scores on unseen days, and the reason.")]
+    B += [("h3", "When changes take effect")]
+    B += [("ul", [
+        "Stock jobs change only while the market is closed (the bot holds no stocks overnight), so a change starts at the next open.",
+        "A crypto job changes only when the bot holds none of that coin; until then it shows as <i>waiting to apply</i>.",
+        "The new settings are checked first; if they fail, nothing is written. A copy of the old config.yaml is kept in data\\recalibration\\config_backups.",
+        "A symbol that leaves every job has its position closed by the bot.",
+    ])]
+    B += [("h3", "Position size")]
+    B += [("p", (f"<b>Now: fixed.</b> Each symbol gets its job's share of the account, at most ${sz['max_position_usd']:,.0f}."
+                 if sz["sizing"] != "risk_balanced" else
+                 f"<b>Now: risk-balanced.</b> {sz['gross_budget_pct']:g}% of the account is shared out so calmer symbols get more dollars "
+                 f"(based on the last {sz['atr_days']} days' daily range), at most ${sz['max_position_usd']:,.0f} per symbol"
+                 + "".join(f" and {v:g}% of the budget for {k}" for k, v in sz["bucket_max_pct"].items()) + ".")
+                + " The other mode is available in config.yaml (<code>risk: sizing</code>); compare it in the Lab first.")]
+    B += [("h3", "Profit lock")]
+    B += [("p", (f"<b>On:</b> once the day's gain reaches {lock.get('trigger_pct')}%, if it then falls back by more than {lock.get('giveback_pct')}% of the day's best, "
+                 "the bot sells everything and stops for the day (like the loss limit)." if lock.get("enabled") else
+                 f"<b>Off.</b> When switched on (<code>risk: profit_lock: enabled: true</code>), once the day's gain reaches {lock.get('trigger_pct', 1.5)}%, "
+                 f"a fall of more than {lock.get('giveback_pct', 50)}% from the day's best makes the bot sell everything and stop for the day.")
+                + " The Lab page (<i>Account rules</i>) shows what it would have done on recent prices.")]
     return B
 
 

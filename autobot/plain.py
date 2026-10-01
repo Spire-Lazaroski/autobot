@@ -134,7 +134,19 @@ RECAL_REASONS: Dict[str, str] = {
     "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
     "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
 }
-RECAL_TAKEOVER = "From now on the autobot manages this symbol: it moves from your job '{job}' to its own auto job."
+REPORT_RECAL: Dict[str, str] = {
+    "intro": ("Every night after the close the bot re-tests each symbol's strategy on recent prices (only on days the strategy "
+              "had not been tuned on) and, if something is clearly better, switches. These are the changes in effect for this period."),
+    "change": "{sym}: {old} → {new}. {reason}",
+    "applied_at": "Applied {when} ({by}).",
+    "pending": "Waiting to apply: {syms} (stocks change only while the market is closed, crypto only when the bot holds none).",
+    "none": "No strategy changes took effect in this period.",
+    "mode_propose": "Changes are only proposed (recalibration mode 'propose'): someone has to press Apply on the Recalibrate page.",
+    "universe": "Trading list of {date}: {n} symbols ({syms}).",
+    "universe_moves": "Added: {added}. Dropped: {dropped}.",
+    "universe_none": "No trading list (universe) has been made yet.",
+}
+RECAL_TAKEOVER ="From now on the autobot manages this symbol: it moves from your job '{job}' to its own auto job."
 RECAL_SHAPES: Dict[str, str] = {
     "single": "{nick} ({name}{params})",
     "regime_switch": "switch by market mood: trending → {trend}, sideways → {range}, jumpy → stay out",
@@ -168,6 +180,8 @@ GLOSSARY: Dict[str, str] = {
     "Strategy switch": "The bot handing control from one strategy to another.",
     "Drawdown": "The drop from the highest account value to a later low.",
     "Win rate": "The share of trades that made money.",
+    "Recalibration": ("The nightly check of which strategy each symbol should trade, tested only on days the strategy "
+                      "had not been tuned on; it switches only when the new choice is clearly better."),
     "Profit lock": ("Once the day's gain reaches a set level, the bot watches the day's best result; if the gain then falls back "
                     "by more than a set share of it, the bot sells everything to keep the rest and stops for the day."),
     "Daily loss limit":"If the account is down this much in a day, the bot sells everything and stops for the day.",
