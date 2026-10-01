@@ -40,7 +40,7 @@ live:
     - SPY
     - QQQ
     allocation_pct: 20
-    enabled: true
+    enabled: false
   - name: reversion
     strategy: rsi_reversion
     params:
@@ -50,7 +50,7 @@ live:
     symbols:
     - AAPL
     allocation_pct: 15
-    enabled: true
+    enabled: false
   - name: crypto_breakout
     strategy: donchian_breakout
     params:
@@ -60,6 +60,82 @@ live:
     - BTC/USD
     allocation_pct: 10
     enabled: false
+  - name: auto_TSLA
+    strategy: regime_switch
+    params:
+      trend_strategy: rsi_reversion
+      range_strategy: vwap_reversion
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        rsi_reversion:
+          period: 7
+          oversold: 30
+          overbought: 70
+          exit_level: 60
+        vwap_reversion:
+          band_pct: 0.5
+    symbols:
+    - TSLA
+    allocation_pct: 10
+    enabled: true
+  - name: auto_USO
+    strategy: regime_switch
+    params:
+      trend_strategy: momentum
+      range_strategy: intraday_momentum
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        momentum:
+          lookback: 10
+          threshold: 0.0
+        intraday_momentum:
+          signal_min: 30
+          hold_min: 60
+    symbols:
+    - USO
+    allocation_pct: 10
+    enabled: true
+  - name: auto_AAPL
+    strategy: rsi_reversion
+    params:
+      period: 7
+      oversold: 20
+      exit_level: 50
+    symbols:
+    - AAPL
+    allocation_pct: 10
+    enabled: true
+  - name: auto_SPY
+    strategy: donchian_breakout
+    params:
+      entry: 40
+      exit: 20
+    symbols:
+    - SPY
+    allocation_pct: 10
+    enabled: true
+  - name: auto_QQQ
+    strategy: regime_switch
+    params:
+      trend_strategy: noise_area
+      range_strategy: rsi_reversion
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        noise_area:
+          lookback: 14
+          band_mult: 1.2
+        rsi_reversion:
+          period: 14
+          oversold: 10
+          overbought: 70
+          exit_level: 60
+    symbols:
+    - QQQ
+    allocation_pct: 10
+    enabled: true
 news:
   symbols:
   - SPY
