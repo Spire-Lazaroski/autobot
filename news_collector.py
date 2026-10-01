@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from autobot import news
+from autobot.data import wait_for_network
 from autobot.liveconfig import pid_alive
 
 ROOT = Path(__file__).resolve().parent
@@ -131,7 +132,13 @@ def main():
     symbols = news.configured_symbols()
     if not a.backfill_only:
         threading.Thread(target=heartbeat_loop, daemon=True, name="heartbeat").start()
-    catch_up(symbols, a.days)
+    wait_for_network("data.alpaca.markets", log=log)  # at log-on the PC may still be connecting
+    try:
+        catch_up(symbols, a.days)
+    except Exception as e:  # noqa: BLE001  the stream still runs; the next start (or the poll) fills the gap
+        if a.backfill_only:
+            raise
+        log.error("backfill failed (%s); collecting live news anyway", e)
     if a.backfill_only:
         return
     threading.Thread(target=poll_loop, args=(symbols,), daemon=True, name="poll").start()

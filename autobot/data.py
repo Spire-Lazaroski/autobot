@@ -50,6 +50,34 @@ def with_timeout(client, timeout=HTTP_TIMEOUT):
     return client
 
 
+def wait_for_network(host: str = "paper-api.alpaca.markets", timeout_s: float = 120.0,
+                     resolve=None, sleep=None, clock=None, log=None) -> bool:
+    """At log-on Windows may not be connected yet; wait (up to timeout_s) until `host`
+    resolves instead of crashing on the first request. Returns False if the network is
+    still down, and the caller starts anyway."""
+    import logging
+    import socket
+    import time
+    resolve = resolve or (lambda h: socket.getaddrinfo(h, 443))
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    log = log or logging.getLogger("autobot")
+    end, warned = clock() + timeout_s, False
+    while True:
+        try:
+            resolve(host)
+            if warned:
+                log.info("NETWORK %s reachable, starting", host)
+            return True
+        except OSError:
+            if clock() >= end:
+                log.warning("NETWORK %s still not reachable after %.0f s; starting anyway", host, timeout_s)
+                return False
+            if not warned:
+                log.info("NETWORK waiting for %s (the PC may still be connecting)", host)
+                warned = True
+            sleep(5)
+
+
 def _tf(label: str):
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
     amt, unit = TIMEFRAMES[label]

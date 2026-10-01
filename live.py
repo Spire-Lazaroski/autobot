@@ -56,7 +56,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
+from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
 from autobot.decisions import Context, Recorder
 from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_days, write_lock
 from autobot.strategies import STRATEGIES
@@ -464,30 +464,6 @@ class Bot:
             self._stop_watch.set()
             release_lock()
         return EXIT_OK
-
-
-def wait_for_network(host: str = "paper-api.alpaca.markets", timeout_s: float = 120.0,
-                     resolve=None, sleep=time.sleep, clock=time.monotonic) -> bool:
-    """At log-on Windows may not be connected yet; wait (up to timeout_s) until the broker's
-    name resolves instead of crashing on the first request and using up a supervisor restart.
-    Returns False if the network is still down, and the caller starts anyway."""
-    import socket
-    resolve = resolve or (lambda h: socket.getaddrinfo(h, 443))
-    end, warned = clock() + timeout_s, False
-    while True:
-        try:
-            resolve(host)
-            if warned:
-                log.info("NETWORK %s reachable, starting", host)
-            return True
-        except OSError:
-            if clock() >= end:
-                log.warning("NETWORK %s still not reachable after %.0f s; starting anyway", host, timeout_s)
-                return False
-            if not warned:
-                log.info("NETWORK waiting for %s (the PC may still be connecting)", host)
-                warned = True
-            sleep(5)
 
 
 def main():
