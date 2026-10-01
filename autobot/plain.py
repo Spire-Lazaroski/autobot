@@ -118,6 +118,29 @@ UNIVERSE_WARNINGS: Dict[str, str] = {
     "total_long": "The list has {got} symbols, more than the maximum of {max}.",
 }
 
+# Nightly recalibration (autobot/recalibrate.py): one fixed sentence per decision.
+RECAL_REASONS: Dict[str, str] = {
+    "new_job": ("No job yet. {ch} scored {cs} on days it hadn't been tuned on, {d} more than doing nothing "
+                "(needs {edge}), with {n} trades. Proposed as a new job."),
+    "no_job_weak": "No job: the best option, {ch}, scored {cs} on days it hadn't been tuned on, not enough above doing nothing (needs {edge}).",
+    "replace": "Replace {inc} ({is}) with {ch} ({cs}): better by {d} on days neither had been tuned on, at least the {edge} required.",
+    "keep_edge": "Keep {inc}: {ch} scored {cs} against {is}, better by only {d} (needs {edge}).",
+    "keep_better": "Keep {inc}: it scored {is}, at least as well as the best alternative, {ch} ({cs}).",
+    "keep_same": "Keep {inc}: it is still the best choice ({is}).",
+    "keep_trades": "Keep {inc}: {ch} made only {n} trades on the test days (needs {min}), too few to trust.",
+    "no_job_trades": "No job: the best option, {ch}, made only {n} trades on the test days (needs {min}), too few to trust.",
+    "keep_hold": "Keep {inc}: it has been in place {days} days, less than the minimum of {min}.",
+    "keep_changes": "Keep {inc}: this symbol already changed {n} times in the last 7 days (maximum {max}).",
+    "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
+    "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
+}
+RECAL_SHAPES: Dict[str, str] = {
+    "single": "{nick} ({name}{params})",
+    "regime_switch": "switch by market mood: trending → {trend}, sideways → {range}, jumpy → stay out",
+    "perf_rotation": "back the recent winner among {names}",
+    "none": "no job",
+}
+
 GLOSSARY: Dict[str, str] = {
     "Paper trading": "Trading with pretend money in a practice account; no real money is at risk.",
     "Buy and hold": "Buying once and simply keeping it; the baseline every strategy is compared with.",

@@ -180,7 +180,10 @@ def run(today: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
             except Exception as e:  # noqa: BLE001
                 errors[s] = str(e)
     for s in syms:
-        meas[s] = measures(bars.get(s), int(u["lookback_days"]))
+        df = bars.get(s)
+        if df is not None and len(df):
+            df = df[np.asarray(df.index.tz_convert(NY).date) <= today]  # as of the run date (catch-up runs later)
+        meas[s] = measures(df, int(u["lookback_days"]))
     buckets = {name: rank_bucket(name, spec, meas, held, u) for name, spec in u["buckets"].items()}
     selected = [s for b in buckets.values() for s in b["selected"]]
     warnings = [b["warning"] for b in buckets.values() if b["warning"]]

@@ -159,6 +159,63 @@ def auto_tick(tc, now: Optional[datetime] = None) -> Optional[str]:
     return day.isoformat()
 
 
+# ----------------------------------------------------------------- nightly recalibration
+RECAL_DELAY = AUTO_DELAY + timedelta(minutes=5)  # after the daily report
+_recal: Dict[str, Any] = {"last_run": None, "last_date": None, "last_error": None, "running": False}
+
+
+def _recal_state_path():
+    from autobot import recalibrate
+    return recalibrate.OUT_DIR / ".auto.json"
+
+
+def _last_session(tc, now: datetime) -> Optional[date]:
+    """The latest New York trading day whose close + RECAL_DELAY has passed (Alpaca's calendar)."""
+    from alpaca.trading.requests import GetCalendarRequest
+    today = now.astimezone(NY).date()
+    cal = tc.get_calendar(GetCalendarRequest(start=today - timedelta(days=10), end=today))
+    best = None
+    for c in cal:
+        close = c.close if isinstance(c.close, datetime) else datetime.combine(c.date, c.close)
+        if close.tzinfo is None:
+            close = close.replace(tzinfo=NY)
+        if close.astimezone(timezone.utc) + RECAL_DELAY <= now:
+            d = c.date if isinstance(c.date, date) else close.astimezone(NY).date()
+            best = max(best, d) if best else d
+    return best
+
+
+def recal_tick(tc, now: Optional[datetime] = None, run=None, run_universe=None) -> Optional[str]:
+    """Run the universe screener (when due) and the recalibration once for the latest finished
+    session. Catches up once after the PC slept; never runs twice for the same date.
+    Proposals only: config.yaml is not touched here."""
+    from autobot import recalibrate, universe
+    now = now or datetime.now(timezone.utc)
+    day = _last_session(tc, now)
+    if day is None:
+        return None
+    path = _recal_state_path()
+    try:
+        last = json.loads(path.read_text()).get("last_date")
+    except (OSError, ValueError):
+        last = None
+    if last and last >= day.isoformat():
+        return None
+    _recal["running"] = True
+    try:
+        u = universe.settings()
+        uni = None
+        if universe.due(day, u):
+            uni = (run_universe or universe.run)(day)
+        res = (run or recalibrate.run)(as_of=day, universe_result=uni)
+    finally:
+        _recal["running"] = False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"last_date": day.isoformat(), "at": now.isoformat(), "changes": res.get("changes", [])}))
+    _recal.update(last_run=now.isoformat(), last_date=day.isoformat(), last_error=None)
+    return day.isoformat()
+
+
 def _loop():
     from alpaca.trading.client import TradingClient
 
@@ -171,6 +228,12 @@ def _loop():
             auto_tick(tc)
         except Exception as e:  # noqa: BLE001  keep the scheduler alive; show the error on the Reports page
             _auto["last_error"] = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC: {type(e).__name__}: {e}"
+        try:
+            if tc is not None and time.time() - _recal.get("failed_at", 0) > 3600:  # after a failure, retry hourly
+                recal_tick(tc)
+        except Exception as e:  # noqa: BLE001  a failed recalibration must not stop the report scheduler
+            _recal["failed_at"] = time.time()
+            _recal["last_error"] = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC: {type(e).__name__}: {e}"
         time.sleep(60)
 
 
