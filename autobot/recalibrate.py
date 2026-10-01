@@ -56,6 +56,7 @@ ETFS = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "TLT"}
 
 DEFAULTS = {
     "mode": "propose",
+    "take_over_hand_made": False,   # True: hand-made jobs' symbols are recalibrated too (their job is the incumbent)
     "lookback_days": 90,
     "warmup_days": 30,
     "train_days": 20,
@@ -319,11 +320,14 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
     out_dir = out_dir or OUT_DIR
     say = progress or (lambda f, m: None)
     jobs = cfg["live"].get("jobs") or []
-    hand = {s for j in jobs if j.get("enabled", True) and not j["name"].startswith(AUTO_PREFIX) for s in j["symbols"]}
+    hand_jobs = [j for j in jobs if j.get("enabled", True) and not j["name"].startswith(AUTO_PREFIX)]
+    hand_of = {s: j for j in hand_jobs for s in j["symbols"]}
+    take = bool(r.get("take_over_hand_made"))
     auto = {j["symbols"][0]: j for j in jobs if j["name"].startswith(AUTO_PREFIX) and j.get("symbols")}
     uni = universe_result or universe.latest(before=(as_of + timedelta(days=1)).isoformat())
     listed = list(symbols or (uni["selected"] if uni else []))
-    todo = [s for s in listed if s not in hand]
+    todo = [s for s in listed if take or s not in hand_of]
+    hand = set(hand_of) if not take else set()
     removed = [s for s in auto if s not in listed and not symbols]
     fetch = fetch or (lambda syms, tf, days: fetch_bars(syms, tf, days, rth_only=True))
     state = load_state(out_dir / "state.json")
@@ -333,6 +337,9 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
         base = i / max(1, len(todo))
         say(base, f"{sym}: loading prices")
         inc_job = auto.get(sym)
+        taking = take and inc_job is None and sym in hand_of   # a hand-made job hands this symbol over
+        if taking:
+            inc_job = hand_of[sym]
         inc_spec = job_spec(inc_job) if inc_job else None
         try:
             df = fetch([sym], r["timeframe"], int(r["lookback_days"]) + int(r["warmup_days"]) + 5).get(sym)
@@ -347,7 +354,7 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
                 "outcome": "no_data", "change": False,
                 "reason": plain.RECAL_REASONS["no_data"].format(sym=sym, days=n_days, need=need_days + 1)},
                 "incumbent": {"spec": inc_spec, "label": describe(inc_spec)}}
-            if inc_job:
+            if inc_job and not taking:   # a hand-made job just stays where it is
                 proposed.append(inc_job)
             continue
         st = SymbolStudy(sym, df, r, as_of)
@@ -361,9 +368,11 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
             proposed.append({"name": AUTO_PREFIX + sym.replace("/", ""), "strategy": final["strategy"],
                              "params": final.get("params") or {}, "symbols": [sym],
                              "allocation_pct": r["allocation_pct"], "enabled": True})
+        if taking:  # the job moves from the hand-made job to auto_SYM even when the strategy stays the same
+            dec = {**dec, "takeover": True, "reason": dec["reason"] + " " + plain.RECAL_TAKEOVER.format(job=inc_job["name"])}
         rows[sym] = {"symbol": sym, "asset_class": asset_class(sym), "costs_bps": st.costs.fee_bps + st.costs.slippage_bps,
                      "windows": res["windows"], "challenger_kind": ch_kind,
-                     "incumbent": {**res["incumbent"], "label": describe(inc_spec)},
+                     "incumbent": {**res["incumbent"], "label": describe(inc_spec) + (f" (your job '{inc_job['name']}')" if taking else "")},
                      "challenger": {**ch, "label": describe(ch["spec"])},
                      "single": {**res["single"], "label": describe(res["single"]["spec"])},
                      "meta": {**res["meta"], "label": describe(res["meta"]["spec"])},
@@ -377,10 +386,11 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
     res = {"date": as_of.isoformat(), "generated": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds"),
            "kind": "proposal", "mode": r["mode"], "timeframe": r["timeframe"],
            "universe_date": uni["date"] if uni else None, "hand_made_symbols": sorted(hand & set(listed)),
+           "take_over": take, "taken_over": sorted(s for s, v in rows.items() if v["decision"].get("takeover")),
            "settings": {k: r[k] for k in ("lookback_days", "train_days", "test_days", "top_k", "confirm_bars", "min_edge",
                                           "min_trades", "min_hold_days", "max_changes_per_week", "score_weights", "costs")},
            "symbols": rows, "proposed_jobs": proposed,
-           "changes": [s for s, v in rows.items() if v["decision"]["change"]]}
+           "changes": [s for s, v in rows.items() if v["decision"]["change"] or v["decision"].get("takeover")]}
     if write:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / f"{as_of.isoformat()}.json").write_text(json.dumps(res, indent=1, default=_json), encoding="utf-8")

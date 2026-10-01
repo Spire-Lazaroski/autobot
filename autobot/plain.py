@@ -134,6 +134,7 @@ RECAL_REASONS: Dict[str, str] = {
     "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
     "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
 }
+RECAL_TAKEOVER = "From now on the autobot manages this symbol: it moves from your job '{job}' to its own auto job."
 RECAL_SHAPES: Dict[str, str] = {
     "single": "{nick} ({name}{params})",
     "regime_switch": "switch by market mood: trending → {trend}, sideways → {range}, jumpy → stay out",

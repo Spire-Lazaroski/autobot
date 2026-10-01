@@ -9,7 +9,7 @@ interface Score { score?: number; sharpe?: number; "return_%"?: number; "max_dra
 interface Row {
   symbol: string; asset_class?: string; costs_bps?: number; windows?: number; challenger_kind?: string;
   incumbent: Score; challenger?: Score; proposed?: { label: string };
-  decision: { outcome: string; change: boolean; reason: string };
+  decision: { outcome: string; change: boolean; reason: string; takeover?: boolean };
 }
 interface Proposal {
   date: string; generated: string; mode: string; universe_date: string | null; hand_made_symbols: string[];
@@ -108,7 +108,7 @@ export function Recalibration() {
                     <tr key={r.symbol} className={`border-b border-line/60 align-top ${r.decision.change ? "bg-panel-2" : ""}`}>
                       <td className="py-1.5 px-2 font-semibold whitespace-nowrap">{r.symbol}<div className="text-[10.5px] text-muted font-normal">{r.asset_class} · {r.costs_bps ?? "–"} bp</div></td>
                       <td className="py-1.5 px-2 max-w-[22ch]">{r.incumbent.label}</td>
-                      <td className="py-1.5 px-2 max-w-[28ch]">{r.decision.change ? <b>{r.proposed?.label}</b> : <span className="text-muted">{c?.label ?? "–"}</span>}</td>
+                      <td className="py-1.5 px-2 max-w-[28ch]">{r.decision.change || r.decision.takeover ? <b>{r.proposed?.label}</b> : <span className="text-muted">{c?.label ?? "–"}</span>}</td>
                       <td className="py-1.5 px-2 text-right num whitespace-nowrap">{n2(r.incumbent.score)} → {n2(c?.score)}</td>
                       <td className="py-1.5 px-2 text-right num">{c ? `${n2(c["return_%"])}%` : "–"}</td>
                       <td className="py-1.5 px-2 text-right num">{n2(c?.sharpe)}</td>

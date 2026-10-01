@@ -127,3 +127,38 @@ def test_api_apply_needs_confirmation():
     client = TestClient(app)
     r = client.post("/api/recalibration/apply", json={})
     assert r.status_code == 400 and "confirm" in r.json()["detail"]
+
+
+def test_take_over_moves_symbols_out_of_the_hand_made_job_without_closing(env, tmp_path):  # noqa: F811
+    tc = FakeTC(positions={"SPY": 3, "AAPL": 5})
+    bot = live.Bot(yaml.safe_load(env.read_text()), tc=tc, cfg_path=env)
+    out = tmp_path / "recal"
+    out.mkdir()
+    spy = {**HAND, "name": "auto_SPY", "symbols": ["SPY"], "allocation_pct": 10}
+    aapl = {"name": "auto_AAPL", "strategy": "rsi_reversion", "params": {"period": 7}, "symbols": ["AAPL"], "allocation_pct": 10, "enabled": True}
+    prop = {"date": "2026-09-30", "take_over": True, "taken_over": ["SPY", "AAPL"], "changes": ["SPY", "AAPL"],
+            "proposed_jobs": [spy, aapl]}
+    r = ra.apply(prop, market_open=False, positions={}, now=NOW, cfg_path=env, out_dir=out)
+    assert r["applied"] == ["AAPL", "SPY"] and not r["skipped"] and not r["error"]
+    j = jobs_of(env)
+    assert j["trend"]["enabled"] is False and j["trend"]["symbols"] == ["SPY"]   # switched off, settings kept
+    assert j["rev"]["enabled"] is False and j["auto_SPY"]["symbols"] == ["SPY"] and j["auto_AAPL"]["symbols"] == ["AAPL"]
+    import os
+    import time
+    t = time.time() + 5
+    os.utime(env, (t, t))
+    bot.reload_config()
+    assert tc.closed == []                                     # same symbols still traded: nothing closed
+    assert sorted(x["name"] for x in bot.jobs) == ["auto_AAPL", "auto_SPY"]
+
+
+def test_partial_take_over_keeps_the_rest_of_the_hand_made_job(setup):
+    path, out, _ = setup
+    cfg = yaml.safe_load(path.read_text())
+    cfg["live"]["jobs"][0] = {**HAND, "symbols": ["SPY", "QQQ"]}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    spy = {**HAND, "name": "auto_SPY", "symbols": ["SPY"], "allocation_pct": 10}
+    prop = {"date": "2026-09-30", "take_over": True, "taken_over": ["SPY"], "changes": ["SPY"], "proposed_jobs": [spy]}
+    ra.apply(prop, market_open=False, positions={}, now=NOW, cfg_path=path, out_dir=out)
+    j = jobs_of(path)
+    assert j["trend"]["symbols"] == ["QQQ"] and j["trend"]["enabled"] is True and j["auto_SPY"]["symbols"] == ["SPY"]

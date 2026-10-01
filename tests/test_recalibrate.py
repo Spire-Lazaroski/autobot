@@ -134,3 +134,21 @@ def test_recal_runs_once_per_session_and_catches_up(tmp_path, monkeypatch):
     assert reports.recal_tick(tc, after + timedelta(hours=5), run=run) is None
     assert ran == [date(2026, 9, 29), date(2026, 9, 30)]
     assert json.loads((tmp_path / ".auto.json").read_text())["last_date"] == "2026-09-30"
+
+
+def test_take_over_makes_the_hand_made_job_the_incumbent(bars, tmp_path):
+    hand = {"name": "trend", "strategy": "ema_cross", "params": {"fast": 9, "slow": 21}, "symbols": ["XTEST", "SPY"],
+            "allocation_pct": 20, "enabled": True}
+    days = sorted(set(ny_dates(bars)))
+    res = rc.run(days[-1], cfg([hand], take_over_hand_made=True), fetch=lambda s, tf, d: {"XTEST": bars},
+                 symbols=["XTEST"], out_dir=tmp_path, write=False)
+    row = res["symbols"]["XTEST"]
+    assert res["take_over"] and res["taken_over"] == ["XTEST"] and "XTEST" in res["changes"]
+    assert row["incumbent"]["spec"] == {"strategy": "ema_cross", "params": {"fast": 9, "slow": 21}}
+    assert "your job 'trend'" in row["incumbent"]["label"] and "moves from your job 'trend'" in row["decision"]["reason"]
+    job = [j for j in res["proposed_jobs"] if j["symbols"] == ["XTEST"]][0]
+    assert job["name"] == "auto_XTEST"
+    if not row["decision"]["change"]:  # kept: the auto job carries the same settings as the hand-made one
+        assert (job["strategy"], job["params"]) == ("ema_cross", {"fast": 9, "slow": 21})
+    off = rc.run(days[-1], cfg([hand]), fetch=lambda s, tf, d: {"XTEST": bars}, symbols=["XTEST"], out_dir=tmp_path, write=False)
+    assert off["symbols"] == {} and off["hand_made_symbols"] == ["XTEST"]   # default: hand-made symbols left alone

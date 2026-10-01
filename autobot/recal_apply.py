@@ -69,9 +69,10 @@ def ready(sym: str, market_open: bool, positions: Dict[str, float]) -> Tuple[boo
     return (not market_open, "" if not market_open else "waiting for the US market to close")
 
 
-def build_live(live: Dict, targets: Dict[str, Optional[Dict]]) -> Dict:
-    """New live section: auto jobs for `targets` replaced (job dict) or removed (None); everything
-    else (hand-made jobs, other auto jobs, risk, timeframe) unchanged and in order."""
+def build_live(live: Dict, targets: Dict[str, Optional[Dict]], take_from_hand: frozenset = frozenset()) -> Dict:
+    """New live section: auto jobs for `targets` replaced (job dict) or removed (None); symbols in
+    `take_from_hand` leave their hand-made job (a hand-made job left with no symbol is switched
+    off, keeping its settings). Everything else (other jobs, risk, timeframe) unchanged, in order."""
     new = copy.deepcopy(live)
     jobs = []
     seen = set()
@@ -82,6 +83,9 @@ def build_live(live: Dict, targets: Dict[str, Optional[Dict]]) -> Dict:
             if targets[sym] is not None:
                 jobs.append(copy.deepcopy(targets[sym]))
             continue
+        if not j["name"].startswith(rc.AUTO_PREFIX) and j.get("enabled", True) and set(j["symbols"]) & take_from_hand:
+            left = [s for s in j["symbols"] if s not in take_from_hand]
+            j = {**j, "symbols": left} if left else {**j, "enabled": False}
         jobs.append(j)
     for sym, job in targets.items():
         if sym not in seen and job is not None:
@@ -119,8 +123,9 @@ def apply(proposal: Dict, market_open: bool, positions: Dict[str, float], now: O
     result = {"date": proposal["date"], "at": now.isoformat(), "by": by, "applied": [], "pending": [], "skipped": [],
               "error": None, "backup": None}
     go = {}
+    take = set(proposal.get("taken_over") or []) if proposal.get("take_over") else set()
     for sym, job in targets.items():
-        if sym in hand:
+        if sym in hand and sym not in take:
             result["skipped"].append({"symbol": sym, "why": "a hand-made job now trades this symbol"})
             continue
         ok, why = ready(sym, market_open, positions)
@@ -129,7 +134,7 @@ def apply(proposal: Dict, market_open: bool, positions: Dict[str, float], now: O
         else:
             result["pending"].append({"symbol": sym, "why": why})
     if go:
-        new = {**cfg, "live": build_live(cfg["live"], go)}
+        new = {**cfg, "live": build_live(cfg["live"], go, frozenset(take & set(go) & hand))}
         errs = validate_live(new["live"])
         if errs:
             result["error"] = "The new settings failed validation, nothing was written: " + "; ".join(errs)

@@ -84,7 +84,8 @@ news:
     - '2026-01-29'
     - '2026-04-23'
 recalibration:
-  mode: propose
+  mode: apply
+  take_over_hand_made: true
   lookback_days: 90
   warmup_days: 30
   train_days: 20
