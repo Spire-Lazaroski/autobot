@@ -1,6 +1,6 @@
 # Operating procedure: Spire Analytics paper-trading bot
 
-Version generated 01 October 2026 01:27 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
+Version generated 01 October 2026 15:42 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
 
 ## 1. What the bot is, and what it isn't
 
@@ -12,7 +12,7 @@ Version generated 01 October 2026 01:27 (Skopje) from the bot's code and config.
 **What it can't do**
 
 - It can't predict the market or guarantee a profit. Every strategy loses in some markets.
-- It doesn't read the news; it only sees prices.
+- It doesn't trade on the news: its strategies only see prices. A separate news collector saves stories so the daily report can show them (section 6).
 - It can't trade while the PC is off, asleep or offline, and it can't fix a broken internet connection.
 - Market orders fill at the best available price, which can differ from the last price it saw, especially at the open and in fast markets.
 - It never trades real money, and results on paper can be better than real trading would be.
@@ -261,21 +261,75 @@ The bot closes all stock positions 5 minutes before the US close (15:55 New York
 
 - The bot asks every chosen strategy for its position and follows the majority; with 'average' it takes a partial position in proportion to the votes.
 
-## 6. What to watch: daily checklist
+## 6. News and earnings
+
+A separate program, the **news collector**, saves every Alpaca/Benzinga news story about SPY, QQQ, AAPL, NVDA, TSLA to data/news.db. It starts with start_lab.bat (window *autobot news*) or on its own with **start_news.bat**. It never trades, and the bot trades the same whether it runs or not; it only feeds the news sections of the reports and the News page.
+
+### Checking it runs
+
+- News page, top line: a green dot and *news collector running*, with a beat a few seconds old.
+- *Last received* shows a recent New York time while the market is open (stories arrive every few minutes on a normal day).
+- The daily report warns under *Things to watch* if the collector wasn't receiving stories live that day.
+
+![The top of the News page: collector status and the story counts.](img/news_top.png)
+*The top of the News page: collector status and the story counts.*
+
+### What the reports show
+
+- **News on our symbols**: for each symbol, the number of material stories, up to 5 headlines, whether it was an earnings day, and the day's biggest 15-minute move with whether a story arrived in the hour before it. That is timing only: it does not mean the story caused the move.
+- **News near a trade**: when a material story arrived up to 60 minutes before a buy or sell, the trade's sentence names it and says it is context only.
+- Small diamonds above the price charts mark material stories.
+- **Things to watch** lists the earnings dates in the next 7 days that are listed in config.yaml.
+
+### What the scores mean
+
+Every story gets a **materiality** score from 1 (routine) to 5 (major) and a category (earnings, analyst rating, macro …). Reports show stories at materiality 3 or more for companies and 4 or more for index funds (SPY, QQQ), because general market news names the index funds all day. The scores come from fixed **keyword rules** (rules-v4), which are rough and sometimes misfile a story. Claude (prompt v4) scored only a sample; scoring more costs money and is started from the News page, which shows the cost first.
+
+### What we found
+
+- On days with news, prices moved **10-36% more than usual** by the close (stories on analyst ratings, guidance, the economy and other news).
+- Whether a story sounded good or bad **did not tell which way the price would go**: 0 of 12 measurements were beyond chance, no more than luck alone gives.
+- After a big 15-minute move, the price kept going by the close 49% of the time with news and 49% without: about a coin flip either way.
+- Pausing trading around news (the *step aside for news* strategy) **did not do better than the strategy alone** beyond chance in a backtest from 2024-09-23 to 2026-09-30, and going flat around index-fund news did slightly worse. No live job uses it.
+
+From the news studies on the News page (2024-09-23 to 2026-09-30); this list is rebuilt from their latest results each time this document is generated.
+
+![The event study on the News page: how prices moved after news, with 95% ranges.](img/news_impact.png)
+*The event study on the News page: how prices moved after news, with 95% ranges.*
+
+![The news-guard backtest: each variant against the strategy alone.](img/news_guard.png)
+*The news-guard backtest: each variant against the strategy alone.*
+
+### Earnings dates
+
+Prices often move more around a company's quarterly results. The reports, and the earnings pause in the *step aside for news* strategy, use the dates listed in config.yaml under `news: earnings_dates`; after the last listed date, dates found in the news fill in. The news alone can't be relied on to find them (it found 17 of 21 correctly in a check).
+
+| Symbol | Last listed date | Next listed date |
+|---|---|---|
+| AAPL | 2026-05-01 | **none: add it when announced** |
+| NVDA | 2026-05-21 | **none: add it when announced** |
+| TSLA | 2026-04-23 | **none: add it when announced** |
+
+1. When a company announces its next results date (its investor-relations page or the news), work out the session that reacts: the same day if results come before the open, the **next trading day** if they come after the close (most do).
+2. Open config.yaml in E:\autobot with Notepad and add the date under the symbol, in the same format: `- 'YYYY-MM-DD'`.
+3. Save. Reports pick it up at the next run; the bot doesn't need a restart. Saving jobs in the lab keeps these dates.
+
+## 7. What to watch: daily checklist
 
 Look at the Live page a few times a day and read the daily report after the close. 🟢 green = fine, 🟠 amber = keep an eye on it, 🔴 red = act now.
 
 | Check | Green | Amber | Red: what to do |
 |---|---|---|---|
 | Day P&L vs the daily loss limit | above -1% | -1% to -1.6% | below -1.6% or the bot halted: the limit (2.0%) will stop it; don't restart it the same day |
-| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 8) |
+| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 9) |
 | Number of trades vs a normal day | similar to the last 5 reports | twice as many or none at all | many times more: check the log and the jobs; stop the bot if unsure |
 | Errors in the bot log (Live page) | none | an occasional data error (the bot skips that bar) | errors every bar, or CRITICAL/WATCHDOG lines: see troubleshooting |
 | Last tick / heartbeat | last tick within one 5Min bar; beat under 10 s | last tick 1-3 bars old | heartbeat over 90 s, status 'unresponsive', or last tick more than 3 bars old: stop and restart |
 | Strategy switching (reports, Shifting jobs) | 0-4 switches a day per symbol | 5-8 a day | more than 8 a day: switching costs money; test a larger confirm_bars in the Lab |
 | A symbol stuck in a position | positions change when signals change | an intraday strategy still holding late in the day | a position held with no job on that symbol: close it on the Live page or the Alpaca website |
+| News collector (News page, top) | *news collector running*, last story received within the hour during market hours | nothing received for 1-2 hours while the market is open | *stopped*, or the daily report says it wasn't receiving stories live: double-click **start_news.bat** (trading isn't affected) |
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
@@ -289,12 +343,17 @@ Look at the Live page a few times a day and read the daily report after the clos
 | Report says *reason not recorded* | The trade happened while an older bot version without the decision log was running | Nothing to fix; new trades will have reasons. |
 | No daily report | The lab wasn't running 10 minutes after the close | Reports page → pick the date → Generate. |
 | 'data/signal error' lines in the log | Internet or Alpaca data problem | The bot skips those bars. If it lasts, check your connection and Alpaca's status page. |
+| News page says *news collector stopped* | The 'autobot news' window was closed, or the PC slept | Double-click **start_news.bat**. It fills in the stories it missed, then collects live again. Trading is not affected. |
+| Report's news section says *No news database yet* | The news collector has never run on this PC | Double-click **start_news.bat** and leave it running; the first start downloads two years of stories (a few minutes). |
+| Report says a story was 'filled in afterwards' | The collector wasn't running live that day; it caught up later | Nothing to fix for that day; keep the 'autobot news' window open on trading days. |
+| Account result in a report looks far too big | The broker's history counted a deposit (it does this in a paper account's first days) | The report leaves out jumps over 10% in 5 minutes and says so in a note at the top; if there is no note, check the Alpaca website. |
 
-## 8. Weekly review
+## 9. Weekly review
 
 1. Reports page → **Last 7 days**. Read the headline, then the charts.
 2. Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.
 3. Compare with the last few weeks' reports; one bad week alone says little.
+4. Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, *Earnings dates*).
 
 **When to change or switch off a strategy**
 

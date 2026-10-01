@@ -116,3 +116,7 @@ def test_collector_warning_counts_backfilled_stories(tmp_path, monkeypatch):
     news.collapse_events(db)
     lines = rn.watch_lines(rn.collect(["AAPL"], DAY_A, DAY_B, "live"))
     assert any("wasn't receiving stories live" in x and "(1 story was filled in afterwards)" in x for x in lines)
+
+
+def test_headline_html_codes_are_decoded():
+    assert rn._cut("Tesla Bears Retreat: &#39;Don&#39;t Bet Against Musk&#39; &amp; more") == "Tesla Bears Retreat: 'Don't Bet Against Musk' & more"

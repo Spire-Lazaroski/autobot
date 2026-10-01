@@ -147,7 +147,8 @@ def _ny(t) -> pd.Timestamp:
 
 
 def _cut(h: str, n: int = 110) -> str:
-    h = " ".join(str(h).split())
+    import html
+    h = " ".join(html.unescape(str(h)).split())  # the feed sends some headlines with HTML codes (&#39;)
     return h if len(h) <= n else h[: n - 1].rstrip() + "…"
 
 

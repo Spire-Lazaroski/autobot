@@ -43,7 +43,50 @@ def facts() -> dict:
     risk = live["risk"]
     return dict(cfg=cfg, live=live, risk=risk, stall=float(live.get("stall_seconds", 300)),  # live.py's default
                 heartbeat_stale=HEARTBEAT_STALE_S, switch_limit=SWITCH_LIMIT,
-                flatten_min=int(risk.get("flatten_before_close_min", 0)), year=date.today().year)
+                flatten_min=int(risk.get("flatten_before_close_min", 0)), year=date.today().year, news=news_facts(cfg))
+
+
+def news_facts(cfg: dict) -> dict:
+    """News findings for section 6, taken from the saved studies by fixed rules (a key is
+    missing when its study hasn't been run), plus the news settings in config.yaml."""
+    import json
+
+    from autobot import event_study, news_guard_study
+    from autobot import news_guard as ng
+    out = {"symbols": (cfg.get("news") or {}).get("symbols") or [],
+           "listed": {s: sorted(str(d) for d in v) for s, v in ((cfg.get("news") or {}).get("earnings_dates") or {}).items()},
+           "guard_jobs": [j["name"] for j in cfg["live"].get("jobs", []) if j.get("enabled", True) and j["strategy"] == "news_guard"]}
+    if event_study.OUT.exists():
+        es = json.loads(event_study.OUT.read_text(encoding="utf-8"))
+        bigger = [(g["group"], g["ratio"]["eod"]["mean"]) for g in es["volatility"]["by_category"]
+                  if not g["low"] and (g["ratio"].get("eod") or {}).get("lo") and g["ratio"]["eod"]["lo"] > 1]
+        if bigger:
+            out["bigger"] = dict(lo=round((min(m for _, m in bigger) - 1) * 100), hi=round((max(m for _, m in bigger) - 1) * 100),
+                                 groups=[g.replace("_", " ") for g, _ in bigger])
+        cells = [c for g in es["news"]["by_sentiment_signed"] for h, c in g["horizons"].items()
+                 if h in es["horizons"] and c.get("lo") is not None]
+        out["direction"] = dict(beyond=sum(1 for c in cells if c["lo"] > 0 or c["hi"] < 0), total=len(cells))
+        cvr = {r["group"]: r["continued_eod"] for r in es["spikes"]["continue_vs_revert"]}
+        out["spikes"] = dict(news=round(cvr.get("with news", 0)), no_news=round(cvr.get("no news", 0)))
+        out["event_period"] = es["period"]
+    if news_guard_study.OUT.exists():
+        gs = json.loads(news_guard_study.OUT.read_text(encoding="utf-8"))
+        better, worse = [], []
+        for g, gr in gs["groups"].items():
+            rows = [(base, r["variant"], r["vs_base"]) for base, c in gr["compare"].items() for r in c["summary"] if r["vs_base"]]
+            rows += [(base, "walk-forward", w["vs_base"]) for base, w in (gr.get("walk_forward") or {}).items()]
+            for base, v, d in rows:
+                if d["significant"]:
+                    (better if d["mean_bps"] > 0 else worse).append((g, base, v))
+        out["guard"] = dict(better=better, worse=worse, start=gs["start"], end=gs["end"])
+    try:
+        chk = news_guard_study.detector_check(news_guard_study.STOCKS)
+        out["detector"] = dict(exact=sum(c["exact"] for c in chk.values()), total=sum(c["published"] for c in chk.values()))
+    except Exception:  # noqa: BLE001  no news database
+        pass
+    today = date.today()
+    out["next"] = {s: next((str(d) for d in ng.earnings_sessions(s) if d > today), None) for s in out["listed"]}
+    return out
 
 
 def skopje_times(year: int, ny_hhmm: tuple) -> list:
@@ -95,7 +138,9 @@ def build(f: dict) -> list:
     B += [("p", "<b>What it can't do</b>")]
     B += [("ul", [
         "It can't predict the market or guarantee a profit. Every strategy loses in some markets.",
-        "It doesn't read the news; it only sees prices.",
+        ("It doesn't trade on the news: its strategies only see prices. A separate news collector saves stories so the daily report can show them (section 6)."
+         if not f["news"]["guard_jobs"] else
+         f"Only the job(s) {', '.join(f['news']['guard_jobs'])} use news (the 'step aside for news' strategy); every other job only sees prices (section 6)."),
         "It can't trade while the PC is off, asleep or offline, and it can't fix a broken internet connection.",
         "Market orders fill at the best available price, which can differ from the last price it saw, especially at the open and in fast markets.",
         "It never trades real money, and results on paper can be better than real trading would be.",
@@ -178,7 +223,10 @@ def build(f: dict) -> list:
     B += [("cards", [dict(title=v["name"], tag=k, lines=[v["explain"]]) for k, v in plain.METHODS.items()])]
 
     # 6
-    B += [("h2", "6. What to watch: daily checklist")]
+    B += news_section(f)
+
+    # 7
+    B += [("h2", "7. What to watch: daily checklist")]
     lim = R["max_daily_loss_pct"]
     B += [("p", "Look at the Live page a few times a day and read the daily report after the close. "
                 "<span class='dot green'></span>green = fine, <span class='dot amber'></span>amber = keep an eye on it, "
@@ -186,7 +234,7 @@ def build(f: dict) -> list:
     B += [("table", ["Check", "Green", "Amber", "Red: what to do"], [
         ["Day P&L vs the daily loss limit", f"above -{lim / 2:g}%", f"-{lim / 2:g}% to -{lim * 0.8:g}%",
          f"below -{lim * 0.8:g}% or the bot halted: the limit ({lim}%) will stop it; don't restart it the same day"],
-        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 8)"],
+        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 9)"],
         ["Number of trades vs a normal day", "similar to the last 5 reports", "twice as many or none at all",
          "many times more: check the log and the jobs; stop the bot if unsure"],
         ["Errors in the bot log (Live page)", "none", "an occasional data error (the bot skips that bar)",
@@ -197,10 +245,13 @@ def build(f: dict) -> list:
          f"more than {f['switch_limit']} a day: switching costs money; test a larger confirm_bars in the Lab"],
         ["A symbol stuck in a position", "positions change when signals change", "an intraday strategy still holding late in the day",
          "a position held with no job on that symbol: close it on the Live page or the Alpaca website"],
+        ["News collector (News page, top)", "<i>news collector running</i>, last story received within the hour during market hours",
+         "nothing received for 1-2 hours while the market is open",
+         "<i>stopped</i>, or the daily report says it wasn't receiving stories live: double-click <b>start_news.bat</b> (trading isn't affected)"],
     ])]
 
-    # 7
-    B += [("h2", "7. Troubleshooting")]
+    # 8
+    B += [("h2", "8. Troubleshooting")]
     B += [("table", ["Symptom", "Likely cause", "What to do"], [
         ["Header shows <b>API down</b>", "The 'autobot API' window was closed or crashed", "Run start_lab.bat again. The bot keeps running on its own; check it on the Live page."],
         ["Live page says <i>reconnecting…</i>", "The API is restarting or not running", "Wait 10 seconds; if it stays, run start_lab.bat."],
@@ -213,14 +264,21 @@ def build(f: dict) -> list:
         ["Report says <i>reason not recorded</i>", "The trade happened while an older bot version without the decision log was running", "Nothing to fix; new trades will have reasons."],
         ["No daily report", "The lab wasn't running 10 minutes after the close", "Reports page → pick the date → Generate."],
         ["'data/signal error' lines in the log", "Internet or Alpaca data problem", "The bot skips those bars. If it lasts, check your connection and Alpaca's status page."],
+        ["News page says <i>news collector stopped</i>", "The 'autobot news' window was closed, or the PC slept",
+         "Double-click <b>start_news.bat</b>. It fills in the stories it missed, then collects live again. Trading is not affected."],
+        ["Report's news section says <i>No news database yet</i>", "The news collector has never run on this PC", "Double-click <b>start_news.bat</b> and leave it running; the first start downloads two years of stories (a few minutes)."],
+        ["Report says a story was 'filled in afterwards'", "The collector wasn't running live that day; it caught up later", "Nothing to fix for that day; keep the 'autobot news' window open on trading days."],
+        ["Account result in a report looks far too big", "The broker's history counted a deposit (it does this in a paper account's first days)",
+         "The report leaves out jumps over 10% in 5 minutes and says so in a note at the top; if there is no note, check the Alpaca website."],
     ])]
 
-    # 8
-    B += [("h2", "8. Weekly review")]
+    # 9
+    B += [("h2", "9. Weekly review")]
     B += [("ol", [
         "Reports page → <b>Last 7 days</b>. Read the headline, then the charts.",
         "Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.",
         "Compare with the last few weeks' reports; one bad week alone says little.",
+        "Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, <i>Earnings dates</i>).",
     ])]
     B += [("p", "<b>When to change or switch off a strategy</b>")]
     B += [("ul", [
@@ -234,6 +292,87 @@ def build(f: dict) -> list:
 
     B += [("h2", "Keeping this document up to date")]
     B += [("p", "Run <code>python scripts/build_sop.py --shots</code> with the lab running. It re-reads the strategies, limits, jobs and times, takes fresh screenshots and rebuilds this document (Markdown, HTML and PDF).")]
+    return B
+
+
+def news_section(f: dict) -> list:
+    """Section 6: the news collector, what the scores mean, what the studies found, earnings dates."""
+    from autobot.news_score import PROMPT_VERSION, RULES_VERSION
+    from autobot.report_news import MATERIALITY, TRADE_WINDOW, UPCOMING_DAYS
+    n = f["news"]
+    win = int(TRADE_WINDOW.total_seconds() // 60)
+    B = [("h2", "6. News and earnings")]
+    B += [("p", f"A separate program, the <b>news collector</b>, saves every Alpaca/Benzinga news story about "
+                f"{', '.join(n['symbols']) or 'our symbols'} to data/news.db. It starts with start_lab.bat (window <i>autobot news</i>) "
+                "or on its own with <b>start_news.bat</b>. It never trades, and the bot trades the same whether it runs or not; "
+                "it only feeds the news sections of the reports and the News page.")]
+    B += [("h3", "Checking it runs")]
+    B += [("ul", [
+        "News page, top line: a green dot and <i>news collector running</i>, with a beat a few seconds old.",
+        "<i>Last received</i> shows a recent New York time while the market is open (stories arrive every few minutes on a normal day).",
+        "The daily report warns under <i>Things to watch</i> if the collector wasn't receiving stories live that day.",
+    ])]
+    B += [("img", "img/news_top.png", "The top of the News page: collector status and the story counts.")]
+    B += [("h3", "What the reports show")]
+    B += [("ul", [
+        f"<b>News on our symbols</b>: for each symbol, the number of material stories, up to 5 headlines, whether it was an earnings day, "
+        "and the day's biggest 15-minute move with whether a story arrived in the hour before it. That is timing only: it does not mean the story caused the move.",
+        f"<b>News near a trade</b>: when a material story arrived up to {win} minutes before a buy or sell, the trade's sentence names it and says it is context only.",
+        "Small diamonds above the price charts mark material stories.",
+        f"<b>Things to watch</b> lists the earnings dates in the next {UPCOMING_DAYS} days that are listed in config.yaml.",
+    ])]
+    B += [("h3", "What the scores mean")]
+    B += [("p", f"Every story gets a <b>materiality</b> score from 1 (routine) to 5 (major) and a category (earnings, analyst rating, macro …). "
+                f"Reports show stories at materiality {MATERIALITY['stock']} or more for companies and {MATERIALITY['etf']} or more for index funds "
+                "(SPY, QQQ), because general market news names the index funds all day. "
+                f"The scores come from fixed <b>keyword rules</b> ({RULES_VERSION}), which are rough and sometimes misfile a story. "
+                f"Claude (prompt {PROMPT_VERSION}) scored only a sample; scoring more costs money and is started from the News page, "
+                "which shows the cost first.")]
+    B += [("h3", "What we found")]
+    found = []
+    if "bigger" in n:
+        names = [{"other": "other news", "macro": "the economy"}.get(x, x + "s" if x.endswith("rating") else x) for x in n["bigger"]["groups"]]
+        found.append(f"On days with news, prices moved <b>{n['bigger']['lo']}-{n['bigger']['hi']}% more than usual</b> by the close "
+                     f"(stories on {', '.join(names[:-1]) + ' and ' + names[-1] if len(names) > 1 else names[0]}).")
+    if "direction" in n:
+        d = n["direction"]
+        found.append(("Whether a story sounded good or bad <b>did not tell which way the price would go</b>: "
+                      f"{d['beyond']} of {d['total']} measurements were beyond chance, no more than luck alone gives.")
+                     if d["beyond"] <= max(1, round(d["total"] * 0.05)) else
+                     f"Good or bad news was followed by a move in its direction beyond chance in {d['beyond']} of {d['total']} measurements; see the News page.")
+    if "spikes" in n:
+        found.append(f"After a big 15-minute move, the price kept going by the close {n['spikes']['news']}% of the time with news and "
+                     f"{n['spikes']['no_news']}% without: about a coin flip either way.")
+    if "guard" in n:
+        g = n["guard"]
+        if g["better"]:
+            found.append("Pausing trading around news (the <i>step aside for news</i> strategy) did better than the strategy alone beyond chance in: "
+                         + "; ".join(f"{grp} {base} {v.replace('_', ' ')}" for grp, base, v in g["better"]) + ". See the News page before using it.")
+        else:
+            found.append(f"Pausing trading around news (the <i>step aside for news</i> strategy) <b>did not do better than the strategy alone</b> "
+                         f"beyond chance in a backtest from {g['start']} to {g['end']}"
+                         + (", and going flat around index-fund news did slightly worse" if any(grp == "etfs" for grp, _, _ in g["worse"]) else "")
+                         + (". No live job uses it." if not n["guard_jobs"] else f". Jobs using it now: {', '.join(n['guard_jobs'])}."))
+    B += [("ul", found or ["The studies haven't been run yet (News page → Recompute)."])]
+    if "event_period" in n:
+        B += [("p", f"<span class='muted'>From the news studies on the News page ({n['event_period'][0]} to {n['event_period'][1]}); "
+                    "this list is rebuilt from their latest results each time this document is generated.</span>")]
+    B += [("img", "img/news_impact.png", "The event study on the News page: how prices moved after news, with 95% ranges.")]
+    B += [("img", "img/news_guard.png", "The news-guard backtest: each variant against the strategy alone.")]
+    B += [("h3", "Earnings dates")]
+    det = n.get("detector")
+    B += [("p", "Prices often move more around a company's quarterly results. The reports, and the earnings pause in the "
+                "<i>step aside for news</i> strategy, use the dates listed in config.yaml under <code>news: earnings_dates</code>; "
+                "after the last listed date, dates found in the news fill in. The news alone can't be relied on to find them"
+                + (f" (it found {det['exact']} of {det['total']} correctly in a check)" if det else "") + ".")]
+    B += [("table", ["Symbol", "Last listed date", "Next listed date"],
+           [[s, v[-1] if v else "–", n["next"].get(s) or "<b>none: add it when announced</b>"] for s, v in n["listed"].items()])]
+    B += [("ol", [
+        "When a company announces its next results date (its investor-relations page or the news), work out the session that reacts: "
+        "the same day if results come before the open, the <b>next trading day</b> if they come after the close (most do).",
+        "Open config.yaml in E:\\autobot with Notepad and add the date under the symbol, in the same format: <code>- 'YYYY-MM-DD'</code>.",
+        "Save. Reports pick it up at the next run; the bot doesn't need a restart. Saving jobs in the lab keeps these dates.",
+    ])]
     return B
 
 
