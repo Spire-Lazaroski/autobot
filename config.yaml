@@ -169,7 +169,7 @@ news:
     - '2026-01-29'
     - '2026-04-23'
 recalibration:
-  mode: apply
+  mode: propose
   take_over_hand_made: true
   lookback_days: 90
   warmup_days: 30
