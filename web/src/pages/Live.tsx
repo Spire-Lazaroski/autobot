@@ -173,7 +173,7 @@ export function Live() {
             </Panel>
           </div>
 
-          <LiveChart symbols={symbols} timeframe={st?.timeframe} views={st?.symbols} />
+          <LiveCharts symbols={symbols} positions={d.positions} timeframe={st?.timeframe} views={st?.symbols} />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             <Panel title="Orders (paper account, latest 50)">
@@ -250,10 +250,47 @@ function peakOf(views: Record<string, SymView> | undefined, symbol: string): Pea
   return viewOf(views, symbol)?.peak;
 }
 
-function LiveChart({ symbols, timeframe, views }: { symbols: string[]; timeframe?: string; views?: Record<string, SymView> }) {
+/** The job symbol for an Alpaca position (crypto comes back without the slash: BTCUSD -> BTC/USD). */
+function jobSymbol(symbols: string[], alpaca: string): string {
+  return symbols.find((s) => s.replace("/", "") === alpaca) ?? alpaca;
+}
+
+/** One chart per symbol the account holds right now (appears when the bot buys, goes when it sells),
+ *  then the switcher chart for any symbol, held symbols first. */
+function LiveCharts({ symbols, positions, timeframe, views }: {
+  symbols: string[]; positions: Row[]; timeframe?: string; views?: Record<string, SymView>;
+}) {
+  const held = useMemo(() => positions.map((p) => ({ sym: jobSymbol(symbols, p.symbol), pos: p })), [positions, symbols]);
+  const heldSet = new Set(held.map((h) => h.sym));
+  const ordered = [...held.map((h) => h.sym), ...symbols.filter((s) => !heldSet.has(s))];
   const [sym, setSym] = useState<string | null>(null);
-  const current = sym ?? symbols[0];
-  const v = current ? viewOf(views, current) : undefined;
+  const current = sym && ordered.includes(sym) ? sym : ordered[0];
+  return (
+    <>
+      {held.length > 0 && (
+        <div className={`grid grid-cols-1 ${held.length > 1 ? "xl:grid-cols-2" : ""} gap-3`}>
+          {held.map(({ sym: s, pos }) => (
+            <Panel key={s} title={<span>
+              <span className="num font-semibold">{s}</span>
+              <span className="text-muted font-normal"> · held {fmt(pos.qty, Number(pos.qty) % 1 ? 4 : 0)} @ {fmt(pos.avg_entry_price, 2)} · </span>
+              <span className={`num font-normal ${pnl(pos.unrealized_pl)}`}>{signed(pos.unrealized_pl)} ({signed(pos.unrealized_plpc, 2)}%)</span>
+            </span>}>
+              <SymbolChart symbol={s} timeframe={timeframe} view={viewOf(views, s)} height={held.length > 1 ? 300 : 360} />
+            </Panel>))}
+        </div>)}
+      <Panel title={`${held.length ? "All symbols" : "Live candles"} · markers = actual paper fills · refreshes every 30 s`}
+        right={<div className="flex gap-1 flex-wrap">{ordered.map((s) => (
+          <button key={s} onClick={() => setSym(s)} title={heldSet.has(s) ? "held now" : "not held"}
+            className={`chip border num ${s === current ? "tab-on" : "border-line-2 text-muted"}`}>{heldSet.has(s) && <span className="text-up mr-0.5">●</span>}{s}</button>
+        ))}</div>}>
+        {!current && <p className="text-muted text-[12px]">No symbols in jobs or positions.</p>}
+        {current && <SymbolChart symbol={current} timeframe={timeframe} view={viewOf(views, current)} height={420} />}
+      </Panel>
+    </>
+  );
+}
+
+function SymbolChart({ symbol, timeframe, view: v, height }: { symbol: string; timeframe?: string; view?: SymView; height: number }) {
   const tp = v?.trigger?.trigger_price ?? null, tk = v?.trigger?.kind, td = v?.trigger?.direction, pk = v?.peak?.peak ?? null;
   const tsrc = v?.trigger?.source;
   const priceLines: PriceMark[] = useMemo(() => {
@@ -264,10 +301,9 @@ function LiveChart({ symbols, timeframe, views }: { symbols: string[]; timeframe
     return out;
   }, [tp, tk, td, pk, tsrc]);
   const q = useQuery({
-    queryKey: ["live-candles", current, timeframe],
+    queryKey: ["live-candles", symbol, timeframe],
     queryFn: () => api<{ candles: Candles; fills: { time: number; price: number; side: string; qty: number }[]; timeframe: string }>(
-      `/live/candles?symbol=${encodeURIComponent(current)}${timeframe ? `&timeframe=${timeframe}` : ""}`),
-    enabled: !!current,
+      `/live/candles?symbol=${encodeURIComponent(symbol)}${timeframe ? `&timeframe=${timeframe}` : ""}`),
     refetchInterval: 30_000,
   });
   const fills: Fill[] = useMemo(() => (q.data?.fills ?? []).map((f) => ({
@@ -275,18 +311,13 @@ function LiveChart({ symbols, timeframe, views }: { symbols: string[]; timeframe
     label: `${f.side === "buy" ? "B" : "S"} ${f.qty}`,
   })), [q.data]);
   return (
-    <Panel title={`Live candles${q.data ? ` · ${q.data.timeframe}` : ""} · markers = actual paper fills · refreshes every 30 s`}
-      right={<div className="flex gap-1 flex-wrap">{symbols.map((s) => (
-        <button key={s} onClick={() => setSym(s)}
-          className={`chip border num ${s === current ? "tab-on" : "border-line-2 text-muted"}`}>{s}</button>
-      ))}</div>}>
-      {!current && <p className="text-muted text-[12px]">No symbols in jobs or positions.</p>}
+    <>
       {q.isLoading && <Spinner label="Loading bars…" />}
       <ErrorBox error={q.error} />
-      {q.data && <CandleChart candles={q.data.candles} fills={fills} priceLines={priceLines} height={420} />}
+      {q.data && <CandleChart candles={q.data.candles} fills={fills} priceLines={priceLines} height={height} />}
       {v && (v.trigger || v.peak) && <p className="text-[11.5px] text-muted mt-1">
-        Dashed line, judged at the next bar's close: the strategy {triggerText(v.trigger, v.trigger_note)}.
+        {q.data ? `${q.data.timeframe} bars. ` : ""}Dashed line, judged at the next bar's close: the strategy {triggerText(v.trigger, v.trigger_note)}.
         {v.peak && ` Dotted line: the best price since the bot opened the position; it has given back ${fmt(v.peak.gave_back_pct, 2)}%.`} Display only.</p>}
-    </Panel>
+    </>
   );
 }

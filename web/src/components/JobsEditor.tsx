@@ -28,7 +28,10 @@ interface Config {
 
 const TFS = ["1Min", "5Min", "15Min", "30Min", "1Hour", "1Day"];
 
-/** Edit config.yaml's live section. The running bot re-reads it at every bar. */
+const OPEN_KEY = "autobot.live.jobsOpen"; // per browser: is the editor unfolded
+
+/** Edit config.yaml's live section. The running bot re-reads it at every bar. Folded by default
+ *  (recalibration picks the jobs); folding only hides it, so unsaved edits are kept. */
 export function JobsEditor({ botRunning }: { botRunning: boolean }) {
   const strategies = useStrategies();
   const qc = useQueryClient();
@@ -38,6 +41,13 @@ export function JobsEditor({ botRunning }: { botRunning: boolean }) {
   const [err, setErr] = useState<unknown>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [symText, setSymText] = useState<Record<number, string | undefined>>({}); // raw text while typing
+  const [open, setOpenState] = useState<boolean>(() => {
+    try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; }
+  });
+  const setOpen = (v: boolean) => {
+    setOpenState(v);
+    try { localStorage.setItem(OPEN_KEY, v ? "1" : "0"); } catch { /* private window: just not remembered */ }
+  };
 
   useEffect(() => {
     if (cfgQ.data && !draft) setDraft(structuredClone(cfgQ.data.live));
@@ -67,13 +77,22 @@ export function JobsEditor({ botRunning }: { botRunning: boolean }) {
     }
   };
 
+  const on = draft.jobs.filter((j) => j.enabled);
+  const autoOn = on.filter((j) => j.name.startsWith("auto_")).length;
+  const summary = `${on.length} on (${autoOn} auto, ${on.length - autoOn} hand-made) · ${draft.jobs.length - on.length} off · ${draft.timeframe} bars`;
   return (
-    <Panel title="Jobs · config.yaml" right={
+    <Panel title={
+      <button className="flex items-center gap-2 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="text-muted w-3">{open ? "▾" : "▸"}</span>
+        <span>Jobs · config.yaml</span>
+        <span className="text-[11.5px] font-normal normal-case tracking-normal text-muted">{summary}</span>
+      </button>} right={
       <div className="flex items-center gap-2">
         {dirty && <span className="text-[11px] text-warn">unsaved changes</span>}
         {dirty && <button className="btn" onClick={() => { setDraft(structuredClone(cfgQ.data!.live)); setErr(null); }}>Discard</button>}
         <button className="btn btn-primary" onClick={save} disabled={!dirty || saving || dupes.size > 0}>{saving ? <Spinner /> : "💾"} Save</button>
       </div>}>
+      <div className={open ? "" : "hidden"}>
       <div className="flex flex-wrap items-end gap-3 mb-3">
         <label className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wider text-muted">Bar timeframe</span>
@@ -155,6 +174,7 @@ export function JobsEditor({ botRunning }: { botRunning: boolean }) {
       <p className="text-[11px] text-dim mt-2">
         The server checks the same rules as the bot before saving. A symbol removed from all enabled jobs gets its position closed at the bot's next bar.
       </p>
+      </div>
     </Panel>
   );
 }
