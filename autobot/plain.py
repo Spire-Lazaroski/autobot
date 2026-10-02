@@ -217,7 +217,12 @@ OVERNIGHT_POLICIES: Dict[str, str] = {
     "hold": "keep whatever the strategy holds overnight",
     "conditional": "keep the position overnight only if {conds}",
 }
-OVERNIGHT: Dict[str, str] = {
+OVERNIGHT_SHORT: Dict[str, str] = {
+    "signal_on": "strategy still in", "in_profit": "in profit", "in_profit_x": "in profit by more than {x}%",
+    "trend_regime": "trending mood", "not_friday": "not a Friday", "no_earnings": "no earnings next",
+    "no_bad_news": "no important bad news", "no_bad_news_m3": "no notable bad news",
+}
+OVERNIGHT: Dict = {
     "verdict_no": ("Out of sample, after costs, nothing beats selling everything before the close. The overnight rule picked on "
                    "earlier days differed from selling before the close by {mean} bps a day (95% range {lo} to {hi}), "
                    "which is within chance."),
@@ -225,11 +230,30 @@ OVERNIGHT: Dict[str, str] = {
                       "(95% range {lo} to {hi})."),
     "verdict_yes": ("Out of sample, after costs, the overnight rule picked on earlier days beat selling before the close by "
                     "{mean} bps a day (95% range {lo} to {hi})."),
+    "wf_compare": ("On the same test days: the picked rule {picked}%, always selling {n} minutes before the close {flat}%, "
+                   "always holding {hold}%, buy and hold {bh}%. The picked rule changed in {changes}% of the windows."),
     "best_fixed": "Best single rule on the test days: '{policy}', {diff} bps a day against selling before the close (95% range {lo} to {hi}){sig}.",
+    "best_fixed_chance": ", within chance (and it is the best of many, chosen afterwards)",
+    "costs_ranking_same": ("With normal costs at the open and in the last bar (1x instead of 2x) the top of the ranking on the test days "
+                           "stays the same: best '{best2}' (rank agreement {rho})."),
+    "costs_ranking_changes": ("With normal costs at the open and in the last bar (1x instead of 2x) the ranking on the test days changes: "
+                              "best '{best1}' instead of '{best2}' (rank agreement {rho})."),
+    "costs_ranking_minor": ("With normal costs at the open and in the last bar (1x instead of 2x) the best rule on the test days stays "
+                            "'{best2}', but the places just below it change (rank agreement {rho})."),
+    "costs_verdict_1x": "At 1x costs: {verdict}",
     "symbol": ("Holding {sym} overnight whenever its strategy ({nick}) still held it {verb} {diff}% over {period} compared with "
-               "selling before the close; {nights} nights held, {helped}% of them gained, worst night {worst}% ({date})."),
+               "selling before the close ({hold}% against {flat}%; buy and hold {bh}%); {nights} nights held, {helped}% of them "
+               "gained, worst night {worst}% ({date})."),
     "symbol_none": "{sym}: its strategy ({nick}) never held a position at the close, so the overnight rule makes no difference.",
     "earnings": "Holding {sym} through earnings ({n} nights) made {avg}% a night on average; worst {worst}%.",
+    "not_informative": "Not informative for {sym} (blocks more than 60% or fewer than 2% of the nights its strategy held): {conds}.",
+    "cost_note": ("{job} ({nick}) made {rt} round trips in {sessions} sessions ({per_day} a day) and paid {cost}% in costs over "
+                  "{period}: {avg} bps per unit traded on average against a normal {normal} bps, because fills at the open and "
+                  "in the last bar cost double. {forced}% of its round trips ended only because of the sell-before-close rule."),
+    "cost_recal": ("Recalibration's score for the current job: {s1} with its usual {c1} bps cost (its pick: {ch1}; it would {d1}), "
+                   "{s2} with the study's {c2} bps (its pick: {ch2}; it would {d2}). Nothing was changed."),
+    "recal_keep": "keep the current job",
+    "recal_change": "propose a change",
     "period": {"long": "{days} days", "90d": "the last 90 days"},
     "caveat": ("These are backtests on IEX prices with {slip}x the usual trading cost at the open and in the last bar. "
                "Only the walk-forward ('out of sample') figures are an honest test; the full-period figures show where the money came from."),

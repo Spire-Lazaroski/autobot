@@ -265,3 +265,65 @@ def test_policy_text_reads_plainly():
     assert t == ("keep the position overnight only if the strategy still wants the position, the position is in profit "
                  "and no earnings release before the next open")
     assert "materiality 4+" in ov.policy_text({"mode": "conditional", "flatten_min": 5, "require": ["no_bad_news"]}, o)
+
+
+def test_at_cost_changes_only_open_and_last_bar_fills():
+    df = bars(WEEK, [0, 0.01, -0.02, 0.005, 0.01, 0.03])
+    c = CostModel(0.0, 10.0)
+    two = ov.simulate(inputs(df, 1.0, costs=c, edge=2.0), P("flatten", 5))
+    one = ov.at_cost(two, 2.0, 1.0)
+    direct = ov.simulate(inputs(df, 1.0, costs=c, edge=1.0), P("flatten", 5))
+    np.testing.assert_allclose(one["frame"].ret.to_numpy(), direct["frame"].ret.to_numpy(), atol=1e-12)
+    np.testing.assert_array_equal(one["frame"].position.to_numpy(), two["frame"].position.to_numpy())
+    assert one["frame"].cost.sum() == pytest.approx(len(WEEK) * 2 * 10 / 1e4)
+
+
+def test_blocking_shares_and_informative_flags():
+    n = pd.DataFrame({c: [True] * 100 for c in ov.CONDITIONS + ["no_bad_news_m3"]})
+    n.loc[:69, "in_profit"] = False          # blocks 70%: too often
+    n.loc[:0, "no_earnings"] = False         # blocks 1%: too rarely
+    n.loc[:29, "trend_regime"] = False       # blocks 30%: informative
+    rows = {r["condition"]: r for r in ov._blocking(n)}
+    assert rows["in_profit"]["blocks_%"] == 70 and not rows["in_profit"]["informative"]
+    assert rows["no_earnings"]["blocks_%"] == 1 and not rows["no_earnings"]["informative"]
+    assert rows["trend_regime"]["informative"]
+    assert rows["signal_on"]["blocks_%"] == 0 and not rows["signal_on"]["informative"]
+
+
+def test_switch_count():
+    assert ov._switches(["a", "a", "b", "b", "a"]) == {"windows": 5, "changes": 2, "changes_%": 50.0}
+
+
+def test_cost_report_counts_forced_exits():
+    df = bars(WEEK, drift=[0.0005] * 6)
+    inp = inputs(df, 1.0, costs=CostModel(0, 2), edge=2.0)
+    pol = P("flatten", 5)
+    run = type("R", (), {})()
+    run.sym, run.job, run.inp = "AAA", {"name": "auto_AAA", "strategy": "ema_cross"}, inp
+    run.sims = {"main": {pol.name: ov.simulate(inp, pol)}}
+    c = ov.cost_report(run, pol, WEEK[0], WEEK[-1])
+    assert c["sessions"] == 6 and c["round_trips"] == 6 and c["round_trips_per_day"] == 1.0
+    # the strategy never wanted out; the last session has no next open in the data, so it isn't a night yet
+    assert c["forced_exits"] == 5 and c["forced_exits_%"] == pytest.approx(83.3)
+    assert c["avg_cost_bps"] == pytest.approx(3.0)                        # entries 1x, exits 2x: (2 + 4) / 2
+
+
+def test_run_adds_benchmark_costs_and_sensitivity():
+    cfg = {"live": {"timeframe": "5Min", "risk": {"flatten_before_close_min": 5}, "jobs": [
+        {"name": "auto_AAA", "strategy": "ema_cross", "params": {}, "symbols": ["AAA"], "enabled": True}]}}
+    data = {"AAA": _gapped("AAA")}
+    res = ov.run(cfg, 90, long=False, fetch=lambda s, tf, d: data[s], news=False, recal_symbols=("AAA",))
+    per = res["periods"]["90d"]
+    assert set(per["buy_hold"]["per_symbol"]) == {"AAA"}
+    p = next(x for x in per["policies"] if x["name"] == "flatten_5")["total"]
+    assert p["return_before_costs_%"] >= p["return_%"] and p["round_trips"] > 0
+    assert set(p["by_kind"]) == {"overnight", "weekend"}
+    wf = per["walk_forward"]
+    assert set(wf["compare"]) == {"picked", "flatten_5", "hold", "buy_hold"} and "changes_%" in wf["switches"]
+    assert {r["condition"] for r in per["blocking"]["total"]} >= set(ov.CONDITIONS)
+    cs = res["cost_sensitivity"]["90d"]
+    assert cs["ranking"]["test_days_return"]["best_1x"] in res["policy_text"]
+    c = res["costs"][0]
+    assert c["job"] == "auto_AAA" and set(c["recalibration"]) == {"usual", "study"}
+    assert c["recalibration"]["study"]["cost_bps"] == pytest.approx(c["avg_cost_bps"], abs=0.01)
+    assert any(line.startswith("auto_AAA") for line in res["summary"])

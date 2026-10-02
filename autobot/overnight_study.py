@@ -225,12 +225,14 @@ class Inputs:
 def simulate(inp: Inputs, policy: "Policy | Sequence[Policy]") -> Dict:
     """Replay the strategy with an end-of-day policy (one, or one per session for the
     walk-forward). Returns {"frame": per-bar ret / position / turnover / cost / overnight /
-    weekend / intraday / equity, "nights": one row per session's decision}."""
+    weekend / intraday / equity, edge_fill (a fill at the open or in the last bar), "nights": one
+    row per session's decision}."""
     n = len(inp.df)
     per_session = list(policy) if isinstance(policy, (list, tuple)) else [policy] * len(inp.sessions)
     T = inp.sig.copy()
     E = np.zeros(n)
     ret, cost, on, wk, turn = (np.zeros(n) for _ in range(5))
+    edge_fill = np.zeros(n, bool)
     c = inp.costs.per_turn
     prev, entry = 0.0, np.nan
     nights = []
@@ -246,6 +248,7 @@ def simulate(inp: Inputs, policy: "Policy | Sequence[Policy]") -> Dict:
                 g = inp.gap[i]
                 tv = abs(new - night)
                 k = tv * c * inp.edge_mult
+                edge_fill[i] = True
                 r = (1 + night * g) * (1 + new * inp.x_first[i]) - 1 - k
                 (wk if inp.weekend[i] else on)[i] = night * g
                 if new != 0 and (night == 0 or np.sign(new) != np.sign(night)):
@@ -260,6 +263,7 @@ def simulate(inp: Inputs, policy: "Policy | Sequence[Policy]") -> Dict:
                 tv = abs(new - prev)
                 edge = inp.mins_to_close[i - 1] <= inp.step_min + 1e-9  # filled in the session's last bar
                 k = tv * c * (inp.edge_mult if edge else 1.0)
+                edge_fill[i] = edge
                 r = new * inp.r_bar[i] - k
                 if new != 0 and (prev == 0 or np.sign(new) != np.sign(prev)):
                     entry = inp.c[i - 1]
@@ -275,7 +279,7 @@ def simulate(inp: Inputs, policy: "Policy | Sequence[Policy]") -> Dict:
         if pending is not None:  # the position actually carried is the last bar's (filled in at the open)
             pending["pos_night"] = float(E[b - 1])
     frame = pd.DataFrame({"ret": ret, "position": E, "turnover": turn, "cost": cost, "overnight": on,
-                          "weekend": wk}, index=inp.df.index)
+                          "weekend": wk, "edge_fill": edge_fill}, index=inp.df.index)
     frame["intraday"] = frame.ret + frame.cost - frame.overnight - frame.weekend
     frame["equity"] = (1 + frame.ret).cumprod()
     return {"frame": frame, "nights": pd.DataFrame(nights)}
@@ -370,14 +374,30 @@ def load_bars(sym: str, tf: str, days: int) -> pd.DataFrame:
     return fetch_bars([sym], tf, days, end=end, rth_only=True)[sym]
 
 
+def at_cost(sim: Dict, edge_mult: float, to_mult: float) -> Dict:
+    """The same simulation with fills at the open / in the last bar costing `to_mult` instead of
+    `edge_mult` x normal. Positions don't depend on costs, so only returns and costs change."""
+    if edge_mult == to_mult:
+        return sim
+    f = sim["frame"].copy()
+    new_cost = np.where(f.edge_fill, f.cost / edge_mult * to_mult, f.cost)
+    f["ret"] = f.ret + f.cost - new_cost
+    f["cost"] = new_cost
+    f["equity"] = (1 + f.ret).cumprod()
+    return {"frame": f, "nights": sim["nights"]}
+
+
 def _span(day: np.ndarray, d0: date, d1: date) -> Tuple[int, int]:
     return int(np.searchsorted(day, d0, side="left")), int(np.searchsorted(day, d1, side="right"))
 
 
-def _held(nights: pd.DataFrame, d0: date, d1: date) -> pd.DataFrame:
+_NIGHT_COLS = ["symbol", "date", "next_date", "kind", "result_%", "gap_%", "pos_night", "pos_at_decision"]
+
+
+def _held(nights: Optional[pd.DataFrame], d0: date, d1: date) -> pd.DataFrame:
     """Nights in [d0, d1] (by decision date) on which a position was carried."""
     if nights is None or nights.empty or "pos_night" not in nights:
-        return pd.DataFrame(columns=["symbol", "date", "next_date", "kind", "result_%", "gap_%", "pos_night"])
+        return pd.DataFrame(columns=_NIGHT_COLS)
     n = nights[(nights.date >= d0) & (nights.date <= d1) & nights["result_%"].notna()]
     return n[n.pos_night != 0]
 
@@ -386,32 +406,52 @@ def _mean_ret(rets: List[pd.Series]) -> pd.Series:
     return pd.concat(rets, axis=1, sort=True).fillna(0).mean(axis=1) if rets else pd.Series(dtype=float)
 
 
+def _ret_metrics(ret: pd.Series) -> Dict:
+    from .backtest import metrics
+    if ret.empty:
+        return {"total_return_%": 0.0, "sharpe": 0.0, "max_drawdown_%": 0.0}
+    return metrics(pd.DataFrame({"ret": ret, "equity": (1 + ret).cumprod(), "position": 1.0}, index=ret.index))
+
+
+def _night_stats(nights: pd.DataFrame) -> Dict:
+    if not len(nights):
+        return {"nights": 0, "helped_%": None, "avg_%": None, "worst_%": None, "worst_date": None, "sum_%": 0.0}
+    r = nights["result_%"].astype(float)
+    k = int(r.to_numpy().argmin())
+    return {"nights": int(len(r)), "helped_%": round(float((r > 0).mean() * 100), 1), "avg_%": round(float(r.mean()), 3),
+            "worst_%": round(float(r.min()), 2), "worst_date": str(nights["date"].to_numpy()[k]), "sum_%": round(float(r.sum()), 2)}
+
+
 def _stats(rets: List[pd.Series], parts: List[pd.DataFrame], nights: pd.DataFrame) -> Dict:
-    """Equal-weight account over symbols: metrics of the averaged returns; costs and the P&L
-    split as the average of the symbols' sums (% of the account); night statistics over every
-    held symbol-night (% of that position)."""
-    from .backtest import _trades, metrics
-    ret = _mean_ret(rets)
-    m = metrics(pd.DataFrame({"ret": ret, "equity": (1 + ret).cumprod(), "position": 1.0}, index=ret.index)) if len(ret) else {}
+    """Equal-weight account over symbols: metrics of the averaged returns (after and before
+    costs); round trips; costs and the P&L split as the average of the symbols' sums (% of the
+    account); night statistics over every held symbol-night (% of that position), also split
+    into overnight and weekend nights."""
+    from .backtest import _trades
+    m = _ret_metrics(_mean_ret(rets))
+    g = _ret_metrics(_mean_ret([p.ret + p.cost for p in parts]))
     k = max(1, len(parts))
-    out = {"return_%": float(m.get("total_return_%", 0.0)), "sharpe": float(m.get("sharpe", 0.0)),
-           "max_drawdown_%": float(m.get("max_drawdown_%", 0.0)),
-           "trades": int(sum(len(_trades(p)) for p in parts)),
+    ns = _night_stats(nights)
+    out = {"return_%": float(m["total_return_%"]), "return_before_costs_%": float(g["total_return_%"]),
+           "sharpe": float(m["sharpe"]), "max_drawdown_%": float(m["max_drawdown_%"]),
+           "round_trips": int(sum(len(_trades(p)) for p in parts)),
            "cost_%": round(sum(p.cost.sum() for p in parts) / k * 100, 2),
            "intraday_%": round(sum(p.intraday.sum() for p in parts) / k * 100, 2),
            "overnight_%": round(sum(p.overnight.sum() for p in parts) / k * 100, 2),
            "weekend_%": round(sum(p.weekend.sum() for p in parts) / k * 100, 2),
-           "nights": int(len(nights))}
-    if len(nights):
-        r = nights["result_%"].astype(float)
-        out.update({"helped_%": round(float((r > 0).mean() * 100), 1), "avg_night_%": round(float(r.mean()), 3),
-                    "worst_night_%": round(float(r.min()), 2), "worst_night_date": str(nights["date"].to_numpy()[r.to_numpy().argmin()]),
-                    "avg_gap_%": round(float(nights["gap_%"].abs().mean()), 3),
-                    "worst_gap_%": round(float(nights["gap_%"].abs().max()), 2)})
-    else:
-        out.update({"helped_%": None, "avg_night_%": None, "worst_night_%": None, "worst_night_date": None,
-                    "avg_gap_%": None, "worst_gap_%": None})
+           "nights": ns["nights"], "helped_%": ns["helped_%"], "avg_night_%": ns["avg_%"],
+           "worst_night_%": ns["worst_%"], "worst_night_date": ns["worst_date"],
+           "avg_gap_%": round(float(nights["gap_%"].abs().mean()), 3) if len(nights) else None,
+           "worst_gap_%": round(float(nights["gap_%"].abs().max()), 2) if len(nights) else None,
+           "by_kind": {kind: _night_stats(nights[nights.kind == kind]) if len(nights) else _night_stats(nights)
+                       for kind in ("overnight", "weekend")}}
     return out
+
+
+def _bh_stats(rets: List[pd.Series]) -> Dict:
+    """Buy and hold over the same bars (no costs): the benchmark row."""
+    m = _ret_metrics(_mean_ret(rets))
+    return {"return_%": float(m["total_return_%"]), "sharpe": float(m["sharpe"]), "max_drawdown_%": float(m["max_drawdown_%"])}
 
 
 def _daily_equity(rets: List[pd.Series]) -> List[List]:
@@ -444,6 +484,22 @@ def _worth(nights: pd.DataFrame, pols: List[Policy]) -> List[Dict]:
     return rows
 
 
+BLOCK_MAX_PCT, BLOCK_MIN_PCT = 60.0, 2.0
+
+
+def _blocking(nights: pd.DataFrame) -> List[Dict]:
+    """Per condition: the share of the strategy's held nights it would have sold (blocked).
+    Above 60% or below 2% it says little about which nights to keep: "not informative"."""
+    out = []
+    for c in CONDITIONS + ["no_bad_news_m3"]:
+        n = int(len(nights))
+        blocked = int((~nights[c].astype(bool)).sum()) if n and c in nights else 0
+        pct = round(blocked / n * 100, 1) if n else None
+        out.append({"condition": c, "nights": n, "blocked": blocked, "blocks_%": pct,
+                    "informative": bool(pct is not None and BLOCK_MIN_PCT <= pct <= BLOCK_MAX_PCT)})
+    return out
+
+
 def _worst5(nights: pd.DataFrame) -> List[Dict]:
     if nights.empty:
         return []
@@ -453,8 +509,14 @@ def _worst5(nights: pd.DataFrame) -> List[Dict]:
             for _, r in w.iterrows()]
 
 
+def _concat(frames: List[pd.DataFrame]) -> pd.DataFrame:
+    xs = [x for x in frames if len(x)]
+    return pd.concat(xs) if xs else _held(None, date.min, date.min)
+
+
 class SymbolRun:
-    """One symbol and its job's strategy: every policy simulated once on the whole history."""
+    """One symbol and its job's strategy: every policy simulated once on the whole history,
+    at the study's cost (edge_mult x at the open and in the last bar) and at 1x."""
 
     def __init__(self, sym: str, job: Dict, df: pd.DataFrame, r: Dict, opts: Dict, closes, pols: List[Policy],
                  news: bool = True):
@@ -463,11 +525,15 @@ class SymbolRun:
         self.sym, self.job, self.r, self.pols = sym, job, r, pols
         cal = calendar(df, closes)
         df = trim_to_calendar(df, cal)
+        self.df = df
         self.inp = build_inputs(sym, df, job["strategy"], job.get("params") or {}, rc.costs_for(sym, r), opts, cal, news=news)
-        self.sim = {p.name: simulate(self.inp, p) for p in pols}
-        for v in self.sim.values():
+        main = {p.name: simulate(self.inp, p) for p in pols}
+        for v in main.values():
             if len(v["nights"]):
                 v["nights"]["symbol"] = sym
+        em = self.inp.edge_mult
+        self.sims = {"main": main, "1x": {k: at_cost(v, em, 1.0) for k, v in main.items()}}
+        self.close_ret = df.close.pct_change().fillna(0.0)
         self.ppy = bars_per_year(df.index)
 
     def score_fn(self, f: pd.DataFrame, a: int, b: int) -> float:
@@ -475,47 +541,74 @@ class SymbolRun:
         q = rc.quick(f.ret.to_numpy()[a:b], f.position.to_numpy()[a:b], self.ppy, len(set(self.inp.day[a:b])))
         return rc.score(q, self.r["score_weights"])
 
-    def walk(self, d0: date, fallback: Policy) -> Optional[Dict]:
+    def walk(self, d0: date, fallback: Policy, level: str = "main") -> Optional[Dict]:
         """Recalibration's windows from d0 (train_days / test_days)."""
+        import copy
         from . import recalibrate as rc
         win = rc.windows(self.inp.day, d0, int(self.r["train_days"]), int(self.r["test_days"]))
         if not win:
             return None
-        frames = {name: v["frame"] for name, v in self.sim.items()}
-        wf = walk_forward(self.inp, self.pols, win, frames, self.score_fn, fallback)
+        inp = self.inp
+        if level == "1x":
+            inp = copy.copy(self.inp)
+            inp.edge_mult = 1.0
+        frames = {name: v["frame"] for name, v in self.sims[level].items()}
+        wf = walk_forward(inp, self.pols, win, frames, self.score_fn, fallback)
         if len(wf["result"]["nights"]):
             wf["result"]["nights"]["symbol"] = self.sym
         return {"a": win[0][2], "b": win[-1][3], **wf}
 
 
-def _period(runs: List[SymbolRun], d0s: Dict[str, date], d1: date, pols: List[Policy], base: Policy) -> Dict:
-    """Every policy over [d0, d1] (per symbol and in total), the walk-forward on its test days,
-    each fixed policy on the same test days, worst nights and the 'what was worth holding' table."""
+def _switches(choices: List[str]) -> Dict:
+    ch = sum(1 for x, y in zip(choices, choices[1:]) if x != y)
+    return {"windows": len(choices), "changes": ch, "changes_%": round(ch / max(1, len(choices) - 1) * 100, 1)}
+
+
+def _period(runs: List[SymbolRun], d0s: Dict[str, date], d1: date, pols: List[Policy], base: Policy,
+            hold: Policy, level: str = "main", lite: bool = False) -> Dict:
+    """Every policy over [d0, d1] (per symbol and in total) next to buy and hold, the
+    walk-forward on its test days (next to fixed flatten, fixed hold and buy and hold), each
+    fixed policy on the same test days, worst nights, blocking shares and the 'what was worth
+    holding' table. lite: only what the cost-sensitivity comparison needs."""
     from .exit_study import paired
-    out = {"from": str(min(d0s.values())), "to": str(d1), "policies": [], "test_days": [], "walk_forward": None,
-           "worst_nights": {}, "worth_holding": [], "worth_holding_by_symbol": {}, "equity": {}, "equity_test": {}}
+    out: Dict = {"from": str(min(d0s.values())), "to": str(d1), "policies": [], "test_days": [], "walk_forward": None}
+    if not lite:
+        out.update({"worst_nights": {}, "worst_nights_by_kind": {}, "worth_holding": [], "worth_holding_by_symbol": {},
+                    "blocking": {}, "equity": {}, "equity_test": {}})
+    bh_rets = {}
+    for run in runs:
+        a, b = _span(run.inp.day, d0s[run.sym], d1)
+        bh_rets[run.sym] = run.close_ret.iloc[a:b]
+    out["buy_hold"] = {"total": _bh_stats(list(bh_rets.values())), "per_symbol": {s: _bh_stats([r]) for s, r in bh_rets.items()}}
     for p in pols:
         rets, parts, nights, per_sym = [], [], [], {}
         for run in runs:
             a, b = _span(run.inp.day, d0s[run.sym], d1)
-            part = run.sim[p.name]["frame"].iloc[a:b]
-            n = _held(run.sim[p.name]["nights"], d0s[run.sym], d1)
+            sim = run.sims[level][p.name]
+            part = sim["frame"].iloc[a:b]
+            n = _held(sim["nights"], d0s[run.sym], d1)
             rets.append(part.ret)
             parts.append(part)
             nights.append(n)
             per_sym[run.sym] = _stats([part.ret], [part], n)
-        nn = pd.concat([x for x in nights if len(x)]) if any(len(x) for x in nights) else _held(None, d1, d1)
+        nn = _concat(nights)
         out["policies"].append({"name": p.name, "mode": p.mode, "flatten_min": p.flatten_min, "require": list(p.require),
                                 "total": _stats(rets, parts, nn), "per_symbol": per_sym})
+        if lite:
+            continue
         out["worst_nights"][p.name] = _worst5(nn)
+        out["worst_nights_by_kind"][p.name] = {k: _worst5(nn[nn.kind == k]) for k in ("overnight", "weekend")}
         out["equity"][p.name] = _daily_equity(rets)
-        if p.mode == "hold":
+        if p.name == hold.name:
             out["worth_holding"] = _worth(nn, pols)
             out["worth_holding_by_symbol"] = {run.sym: _worth(x, pols) for run, x in zip(runs, nights)}
-    wf_rets, wf_parts, wf_nights, choices, per_sym = [], [], [], [], {}
+            out["blocking"] = {"total": _blocking(nn), "per_symbol": {run.sym: _blocking(x) for run, x in zip(runs, nights)}}
+    if not lite:
+        out["equity"]["buy_hold"] = _daily_equity(list(bh_rets.values()))
+    wf_rets, wf_parts, wf_nights, choices, per_sym, bh_test = [], [], [], [], {}, []
     fixed: Dict[str, List[pd.DataFrame]] = {p.name: [] for p in pols}
     for run in runs:
-        w = run.walk(d0s[run.sym], base)
+        w = run.walk(d0s[run.sym], base, level)
         if w is None:
             continue
         a, b = w["a"], w["b"]
@@ -526,24 +619,118 @@ def _period(runs: List[SymbolRun], d0s: Dict[str, date], d1: date, pols: List[Po
         wf_parts.append(f)
         wf_nights.append(n)
         choices += w["choices"]
+        bh_test.append(run.close_ret.iloc[a:b])
         for p in pols:
-            fixed[p.name].append(run.sim[p.name]["frame"].iloc[a:b])
+            fixed[p.name].append(run.sims[level][p.name]["frame"].iloc[a:b])
+        base_f = run.sims[level][base.name]["frame"].iloc[a:b]
+        hold_f = run.sims[level][hold.name]["frame"].iloc[a:b]
+        hold_n = _held(run.sims[level][hold.name]["nights"], da, db)
         per_sym[run.sym] = {**_stats([f.ret], [f], n), "from": str(da), "to": str(db),
-                            "vs_flatten": paired(f.ret, run.sim[base.name]["frame"].iloc[a:b].ret),
-                            "choices": {str(k): int(v) for k, v in pd.Series(w["choices"]).value_counts().items()}}
+                            "vs_flatten": paired(f.ret, base_f.ret),
+                            "fixed_flatten": _stats([base_f.ret], [base_f], _held(None, da, da)),
+                            "fixed_hold": _stats([hold_f.ret], [hold_f], hold_n),
+                            "buy_hold": _bh_stats([run.close_ret.iloc[a:b]]),
+                            "choices": {str(k): int(v) for k, v in pd.Series(w["choices"]).value_counts().items()},
+                            "switches": _switches(w["choices"])}
     if wf_rets:
         base_all = _mean_ret([x.ret for x in fixed[base.name]])
-        nn = pd.concat([x for x in wf_nights if len(x)]) if any(len(x) for x in wf_nights) else _held(None, d1, d1)
+        nn = _concat(wf_nights)
+        hold_nights = _concat([_held(run.sims[level][hold.name]["nights"], run.inp.day[0], d1) for run in runs])
+        wf_from = min(v["from"] for v in per_sym.values())
+        hold_nights = hold_nights[hold_nights.date >= date.fromisoformat(wf_from)] if len(hold_nights) else hold_nights
+        sw = [v["switches"] for v in per_sym.values()]
         out["walk_forward"] = {**_stats(wf_rets, wf_parts, nn), "vs_flatten": paired(_mean_ret(wf_rets), base_all),
                                "choices": {str(k): int(v) for k, v in pd.Series(choices).value_counts().items()},
+                               "switches": {"windows": sum(x["windows"] for x in sw), "changes": sum(x["changes"] for x in sw),
+                                            "changes_%": round(sum(x["changes"] for x in sw)
+                                                               / max(1, sum(x["windows"] - 1 for x in sw)) * 100, 1)},
+                               "compare": {"picked": _stats(wf_rets, wf_parts, nn),
+                                           base.name: _stats([x.ret for x in fixed[base.name]], fixed[base.name], _held(None, d1, d1)),
+                                           hold.name: _stats([x.ret for x in fixed[hold.name]], fixed[hold.name], hold_nights),
+                                           "buy_hold": _bh_stats(bh_test)},
                                "per_symbol": per_sym, "worst_nights": _worst5(nn),
-                               "from": min(v["from"] for v in per_sym.values()), "to": max(v["to"] for v in per_sym.values())}
-        out["equity_test"]["walk_forward"] = _daily_equity(wf_rets)
+                               "from": wf_from, "to": max(v["to"] for v in per_sym.values())}
+        if not lite:
+            out["equity_test"]["walk_forward"] = _daily_equity(wf_rets)
+            out["equity_test"]["buy_hold"] = _daily_equity(bh_test)
         for p in pols:
             fr = fixed[p.name]
             out["test_days"].append({"name": p.name, **_stats([x.ret for x in fr], fr, _held(None, d1, d1)),
                                      "vs_flatten": None if p.name == base.name else paired(_mean_ret([x.ret for x in fr]), base_all)})
-            out["equity_test"][p.name] = _daily_equity([x.ret for x in fr])
+            if not lite:
+                out["equity_test"][p.name] = _daily_equity([x.ret for x in fr])
+        out["test_days_buy_hold"] = _bh_stats(bh_test)
+    return out
+
+
+def _ranking(main: Dict, alt: Dict) -> Dict:
+    """Do the policies rank the same with 1x and 2x costs at the open and close? Ranked on the
+    test days (out of sample) by return, and over the whole period by Sharpe."""
+    def order(rows, key):
+        return [r["name"] for r in sorted(rows, key=lambda r: -r[key])]
+    out = {}
+    for what, rows_m, rows_a, key in (("test_days_return", main["test_days"], alt["test_days"], "return_%"),
+                                      ("period_sharpe", [dict(name=p["name"], **p["total"]) for p in main["policies"]],
+                                       [dict(name=p["name"], **p["total"]) for p in alt["policies"]], "sharpe")):
+        if not rows_m or not rows_a:
+            continue
+        om, oa = order(rows_m, key), order(rows_a, key)
+        rm = pd.Series({n: i for i, n in enumerate(om)})
+        ra = pd.Series({n: i for i, n in enumerate(oa)}).reindex(rm.index)
+        rho = float(rm.corr(ra)) if len(rm) > 2 else 1.0  # Pearson on ranks = Spearman
+        out[what] = {"order_main": om, "order_1x": oa, "rank_corr": round(rho, 3),
+                     "best_main": om[0], "best_1x": oa[0], "top3_same": om[:3] == oa[:3], "changes": om[:3] != oa[:3]}
+    return out
+
+
+def cost_report(run: SymbolRun, base: Policy, d0: date, d1: date) -> Dict:
+    """Why a job pays what it pays: round trips per session, average cost per unit traded, and
+    how many round trips ended only because of the sell-before-close rule (the strategy still
+    wanted the position at the flatten time)."""
+    from .backtest import _trades
+    a, b = _span(run.inp.day, d0, d1)
+    sim = run.sims["main"][base.name]
+    f = sim["frame"].iloc[a:b]
+    sessions = len(set(run.inp.day[a:b]))
+    rt = int(len(_trades(f)))
+    n = sim["nights"]
+    forced = 0
+    if len(n):
+        n = n[(n.date >= d0) & (n.date <= d1)]
+        forced = int(((n.pos_at_decision != 0) & n.signal_on.astype(bool)).sum())
+    turn = float(f.turnover.sum())
+    return {"symbol": run.sym, "job": run.job["name"], "strategy": run.job["strategy"], "params": run.job.get("params") or {},
+            "sessions": sessions, "round_trips": rt, "round_trips_per_day": round(rt / max(1, sessions), 2),
+            "turnover_per_day": round(turn / max(1, sessions), 2), "cost_%": round(float(f.cost.sum()) * 100, 2),
+            "avg_cost_bps": round(float(f.cost.sum()) / turn * 1e4, 2) if turn else 0.0,
+            "normal_cost_bps": round(run.inp.costs.per_turn * 1e4, 2),
+            "forced_exits": forced, "forced_exits_%": round(forced / max(1, rt) * 100, 1)}
+
+
+def recal_check(sym: str, job: Dict, df: pd.DataFrame, r: Dict, as_of: date, cost_bps: float) -> Dict:
+    """Recalibration's own scoring (SymbolStudy, its usual 90-day windows) for this symbol, once
+    with its usual cost and once with `cost_bps` per unit traded (the study's average). Reports
+    whether the job's current strategy would still be the pick. Nothing is changed."""
+    from . import recalibrate as rc
+    out = {}
+    cut = df[np.asarray(df.index.tz_convert(NY).date) > as_of - timedelta(days=int(r["lookback_days"]) + int(r["warmup_days"]) + 5)]
+    inc = rc.job_spec(job)
+    for label, bps in (("usual", None), ("study", cost_bps)):
+        rr = {**r, "costs": {k: dict(v) for k, v in r["costs"].items()}}
+        if bps is not None:
+            rr["costs"][rc.asset_class(sym)] = {"fee_bps": 0.0, "slippage_bps": float(bps)}
+        st = rc.SymbolStudy(sym, cut, rr, as_of)
+        res = st.study(rc.eligible(sym, rr), inc)
+        ch = res["meta"] if res["meta"]["spec"] and res["meta"]["score"] > res["single"]["score"] else res["single"]
+        dec = rc.decide(sym, res["incumbent"], ch, rr, {}, as_of)
+        out[label] = {"cost_bps": round(st.costs.per_turn * 1e4, 2),
+                      "current": {"label": rc.describe(inc), "score": round(res["incumbent"]["score"], 3),
+                                  "return_%": round(res["incumbent"].get("return_%", 0.0), 2),
+                                  "sharpe": round(res["incumbent"].get("sharpe", 0.0), 2), "trades": res["incumbent"].get("trades", 0)},
+                      "challenger": {"label": rc.describe(ch["spec"]), "score": round(ch["score"], 3)},
+                      "same_strategy": bool(ch["spec"] and ch["spec"].get("strategy") == job["strategy"]
+                                            and (ch["spec"].get("params") or {}) == (job.get("params") or {})),
+                      "decision": dec["outcome"], "would_change": bool(dec["change"]), "reason": dec["reason"]}
     return out
 
 
@@ -554,15 +741,25 @@ def policy_text(p: Dict, opts: Dict) -> str:
         return plain.OVERNIGHT_POLICIES["flatten"].format(n=p["flatten_min"])
     if p["mode"] == "hold":
         return plain.OVERNIGHT_POLICIES["hold"]
-    conds = [plain.OVERNIGHT_CONDITIONS[c].format(x=opts["profit_x_pct"], m=opts["bad_news_materiality"],
-                                                  m3=opts["bad_news_alt_materiality"], h=opts["bad_news_hours"])
-             for c in p["require"]]
+    conds = [condition_text(c, opts) for c in p["require"]]
     text = conds[0] if len(conds) == 1 else ", ".join(conds[:-1]) + " and " + conds[-1]
     return plain.OVERNIGHT_POLICIES["conditional"].format(conds=text)
 
 
+def condition_text(c: str, opts: Dict) -> str:
+    from . import plain
+    return plain.OVERNIGHT_CONDITIONS[c].format(x=opts["profit_x_pct"], m=opts["bad_news_materiality"],
+                                                m3=opts["bad_news_alt_materiality"], h=opts["bad_news_hours"])
+
+
 def _bps(v: Dict) -> Dict[str, str]:
     return {"mean": f"{v['mean_bps']:+.1f}", "lo": f"{v['ci95_bps'][0]:+.1f}", "hi": f"{v['ci95_bps'][1]:+.1f}"}
+
+
+def _verdict(T: Dict, wf: Dict) -> str:
+    v = wf["vs_flatten"]
+    key = "verdict_yes" if v["significant"] and v["mean_bps"] > 0 else "verdict_worse" if v["significant"] else "verdict_no"
+    return T[key].format(**_bps(v))
 
 
 def summary(res: Dict) -> List[str]:
@@ -575,16 +772,26 @@ def summary(res: Dict) -> List[str]:
     period = T["period"][pkey].format(days=per.get("days", ""))
     wf = per.get("walk_forward")
     if wf:
-        v = wf["vs_flatten"]
-        key = "verdict_yes" if v["significant"] and v["mean_bps"] > 0 else "verdict_worse" if v["significant"] else "verdict_no"
-        lines.append(T[key].format(**_bps(v)))
+        lines.append(_verdict(T, wf))
+        c = wf["compare"]
+        lines.append(T["wf_compare"].format(picked=f"{c['picked']['return_%']:+.1f}", flat=f"{c[res['base_policy']]['return_%']:+.1f}",
+                                            hold=f"{c['hold']['return_%']:+.1f}", bh=f"{c['buy_hold']['return_%']:+.1f}",
+                                            changes=f"{wf['switches']['changes_%']:.0f}", n=res["base_policy"].split("_")[-1]))
         cands = [t for t in per["test_days"] if t["vs_flatten"]]
         if cands:
             b = max(cands, key=lambda t: t["vs_flatten"]["mean_bps"])
             v = b["vs_flatten"]
-            sig = "" if v["significant"] else ", within chance (and it is the best of many, chosen afterwards)"
+            sig = "" if v["significant"] else T["best_fixed_chance"]
             lines.append(T["best_fixed"].format(policy=res["policy_text"][b["name"]], diff=f"{v['mean_bps']:+.1f}",
                                                 lo=f"{v['ci95_bps'][0]:+.1f}", hi=f"{v['ci95_bps'][1]:+.1f}", sig=sig))
+    cs = res.get("cost_sensitivity", {}).get(pkey)
+    if cs and cs.get("ranking", {}).get("test_days_return"):
+        rk = cs["ranking"]["test_days_return"]
+        key = "costs_ranking_changes" if rk["best_main"] != rk["best_1x"] else "costs_ranking_minor" if rk["changes"] else "costs_ranking_same"
+        lines.append(T[key].format(
+            best2=res["policy_text"][rk["best_main"]], best1=res["policy_text"][rk["best_1x"]], rho=f"{rk['rank_corr']:.2f}"))
+        if cs.get("walk_forward"):
+            lines.append(T["costs_verdict_1x"].format(verdict=_verdict(T, cs["walk_forward"])))
     hold = next(p for p in per["policies"] if p["mode"] == "hold")
     flat = next(p for p in per["policies"] if p["name"] == res["base_policy"])
     for s in res["symbols"]:
@@ -596,12 +803,31 @@ def summary(res: Dict) -> List[str]:
             lines.append(T["symbol_none"].format(sym=sym, nick=nick))
             continue
         diff = h["return_%"] - f["return_%"]
+        bh = per["buy_hold"]["per_symbol"][sym]["return_%"]
         lines.append(T["symbol"].format(sym=sym, nick=nick, verb="added" if diff >= 0 else "lost", diff=f"{abs(diff):.1f}",
                                         period=period, nights=h["nights"], helped=f"{h['helped_%']:.0f}",
-                                        worst=f"{h['worst_night_%']:+.2f}", date=h["worst_night_date"]))
+                                        worst=f"{h['worst_night_%']:+.2f}", date=h["worst_night_date"],
+                                        flat=f"{f['return_%']:+.1f}", hold=f"{h['return_%']:+.1f}", bh=f"{bh:+.1f}"))
         e = next((r for r in per["worth_holding_by_symbol"].get(sym, []) if r["group"] == "no_earnings" and r["met"] is False), None)
         if e and e["nights"]:
             lines.append(T["earnings"].format(sym=sym, n=e["nights"], avg=f"{e['avg_%']:+.2f}", worst=f"{e['worst_%']:+.2f}"))
+        bl = [b for b in per.get("blocking", {}).get("per_symbol", {}).get(sym, []) if not b["informative"] and b["nights"]]
+        if bl:
+            lines.append(T["not_informative"].format(sym=sym, conds="; ".join(
+                f"{plain.OVERNIGHT_SHORT[b['condition']].format(x=res['settings']['profit_x_pct'])} ({b['blocks_%']:.0f}%)"
+                for b in bl)))
+    for c in res.get("costs", []):
+        lines.append(T["cost_note"].format(job=c["job"], nick=plain.nick(c["strategy"]), rt=c["round_trips"], sessions=c["sessions"],
+                                           per_day=f"{c['round_trips_per_day']:.2f}", cost=f"{c['cost_%']:.1f}", period=period,
+                                           avg=f"{c['avg_cost_bps']:.1f}", normal=f"{c['normal_cost_bps']:.1f}",
+                                           forced=f"{c['forced_exits_%']:.0f}"))
+        rc_ = c.get("recalibration")
+        if rc_:
+            u, st = rc_["usual"], rc_["study"]
+            lines.append(T["cost_recal"].format(
+                c1=f"{u['cost_bps']:.1f}", s1=f"{u['current']['score']:+.2f}", ch1=u["challenger"]["label"], d1=T["recal_" + ("change" if u["would_change"] else "keep")],
+                c2=f"{st['cost_bps']:.1f}", s2=f"{st['current']['score']:+.2f}", ch2=st["challenger"]["label"],
+                d2=T["recal_" + ("change" if st["would_change"] else "keep")]))
     lines.append(T["caveat"].format(slip=f"{res['settings']['edge_mult']:g}"))
     return lines
 
@@ -609,10 +835,11 @@ def summary(res: Dict) -> List[str]:
 def run(cfg: Dict, days: int = 90, long: bool = True, opts: Optional[Dict] = None,
         fetch: Optional[Callable[[str, str, int], pd.DataFrame]] = None, closes=None,
         as_of: Optional[date] = None, progress: Optional[Callable[[float, str], None]] = None,
-        news: bool = True) -> Dict:
+        news: bool = True, recal_symbols: Optional[Sequence[str]] = ("SPY",)) -> Dict:
     """The study for every enabled job's stock symbols (crypto is never flattened).
     fetch(sym, tf, days) -> bars (tests); default load_bars (the 740-day cache for the long
-    period). closes: the exchange calendar (default Alpaca's; None offline: guessed from bars)."""
+    period). closes: the exchange calendar (default Alpaca's; None offline: guessed from bars).
+    recal_symbols: symbols whose job is re-scored with recalibration at the study's costs."""
     from . import recalibrate as rc
     from .data import is_crypto
     say = progress or (lambda f, m: None)
@@ -629,6 +856,7 @@ def run(cfg: Dict, days: int = 90, long: bool = True, opts: Optional[Dict] = Non
     if all(p.name != f"flatten_{n_cfg}" for p in pols):
         pols.insert(0, Policy(f"flatten_{n_cfg}", "flatten", n_cfg))
     base = next(p for p in pols if p.name == f"flatten_{n_cfg}")
+    hold = next(p for p in pols if p.mode == "hold")
     load = fetch or load_bars
     want = LONG_DAYS if long else days + int(r["warmup_days"]) + 5
     data = {}
@@ -641,30 +869,47 @@ def run(cfg: Dict, days: int = 90, long: bool = True, opts: Optional[Dict] = Non
         closes = trading_calendar(start, end + timedelta(days=10))
     runs = []
     for k, (job, sym) in enumerate(pairs):
-        say(0.05 + 0.75 * k / len(pairs), f"{sym}: {len(pols)} overnight policies")
+        say(0.05 + 0.6 * k / len(pairs), f"{sym}: {len(pols)} overnight policies")
         df = data[sym]
         df = df[np.asarray(df.index.tz_convert(NY).date) <= end].copy()
         df.attrs["symbol"] = sym
         runs.append(SymbolRun(sym, job, df, r, o, closes, pols, news=news))
-    periods = {}
-    say(0.82, f"last {days} days and walk-forward")
-    short0 = end - timedelta(days=days - 1)
-    periods["90d"] = {**_period(runs, {x.sym: short0 for x in runs}, end, pols, base), "days": days}
+    starts = {"90d": {x.sym: end - timedelta(days=days - 1) for x in runs}}
     if long:
-        say(0.9, "whole period and walk-forward")
-        d0s = {x.sym: x.inp.day[0] + timedelta(days=int(r["warmup_days"])) for x in runs}
-        periods["long"] = {**_period(runs, d0s, end, pols, base), "days": (end - min(d0s.values())).days + 1}
+        starts["long"] = {x.sym: x.inp.day[0] + timedelta(days=int(r["warmup_days"])) for x in runs}
+    periods, sens = {}, {}
+    for i, (key, d0s) in enumerate(starts.items()):
+        say(0.67 + 0.12 * i, f"{key}: policies and walk-forward")
+        periods[key] = {**_period(runs, d0s, end, pols, base, hold), "days": (end - min(d0s.values())).days + 1}
+        if o["edge_mult"] != 1.0:
+            alt = _period(runs, d0s, end, pols, base, hold, level="1x", lite=True)
+            sens[key] = {"policies": [{"name": p["name"], **{k: p["total"][k] for k in ("return_%", "return_before_costs_%", "sharpe",
+                                                                                        "max_drawdown_%", "cost_%", "round_trips")}}
+                                      for p in alt["policies"]],
+                         "test_days": [{k: t[k] for k in ("name", "return_%", "sharpe", "cost_%", "vs_flatten")} for t in alt["test_days"]],
+                         "walk_forward": {k: alt["walk_forward"][k] for k in ("return_%", "sharpe", "vs_flatten", "switches")}
+                         if alt["walk_forward"] else None,
+                         "ranking": _ranking(periods[key], alt)}
+    pkey = "long" if long else "90d"
+    costs = []
+    for k, run in enumerate(runs):
+        c = cost_report(run, base, starts[pkey][run.sym], end)
+        if recal_symbols and run.sym in recal_symbols:
+            say(0.92, f"{run.sym}: recalibration score at the study's costs")
+            c["recalibration"] = recal_check(run.sym, run.job, run.df, r, end, c["avg_cost_bps"])
+        costs.append(c)
     res = {"as_of": str(end), "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "timeframe": tf, "flatten_min": n_cfg, "base_policy": base.name,
            "calendar": "alpaca" if closes else "guessed from the bars",
            "train_days": int(r["train_days"]), "test_days": int(r["test_days"]),
-           "settings": {k: o[k] for k in DEFAULTS},
+           "settings": {k: o[k] for k in DEFAULTS}, "block_limits_%": [BLOCK_MIN_PCT, BLOCK_MAX_PCT],
            "symbols": [{"symbol": s, "job": j["name"], "strategy": j["strategy"], "params": j.get("params") or {}} for j, s in pairs],
            "policy_text": {p.name: policy_text({"mode": p.mode, "flatten_min": p.flatten_min, "require": list(p.require)}, o)
                            for p in pols},
-           "periods": periods}
+           "condition_text": {c: condition_text(c, o) for c in CONDITIONS + ["no_bad_news_m3"]},
+           "periods": periods, "cost_sensitivity": sens, "costs": costs}
     res["summary"] = summary(res)
-    wf = (periods.get("long") or periods["90d"]).get("walk_forward")
+    wf = periods[pkey].get("walk_forward")
     res["beats_flatten_oos"] = bool(wf and wf["vs_flatten"]["significant"] and wf["vs_flatten"]["mean_bps"] > 0)
     say(1.0, "done")
     return res
