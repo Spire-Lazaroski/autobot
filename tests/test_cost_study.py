@@ -134,3 +134,26 @@ def test_summary_fills_every_template():
     text = " ".join(s["lines"] + [o["option"] + o["evidence"] for o in s["options"]])
     assert "{" not in text and "does not usefully predict" in text and "nothing beat it beyond chance" in text
     assert "1 job-weeks were kept" in text and "0.05" in text
+
+
+def test_replay_can_continue_from_an_earlier_period():
+    """Two periods run back to back with the carried state give exactly one long run."""
+    from autobot.data import synthetic_bars
+    df = synthetic_bars(["AAA"], "15Min", 160, seed=9)["AAA"]
+    r = {**rc.settings({"live": {"timeframe": "15Min", "risk": {"flatten_before_close_min": 5}, "jobs": []}}),
+         "lookback_days": 40, "exclude": rc.DEFAULTS["exclude"] + ["noise_area", "macd", "sma_cross", "momentum", "intraday_momentum"]}
+    days = sorted(set(df.index.tz_convert(NY).date))
+    fridays = [d for d in days[60:] if pd.Timestamp(d).weekday() == 4][:4]
+    whole = cs.replay_symbol("AAA", df, r, fridays)
+    carry = {}
+    split = cs.replay_symbol("AAA", df, r, fridays[:2], carry=carry) + cs.replay_symbol("AAA", df, r, fridays[2:], carry=carry)
+    keys = ("job", "decision", "next_%", "job_score", "next_cost_%", "buy_hold_day_next_%")
+    assert [{k: x[k] for k in keys} for x in split] == [{k: x[k] for k in keys} for x in whole]
+
+
+def test_daytime_returns_skip_the_overnight_gap():
+    df = bars5([date(2026, 9, 14), date(2026, 9, 15)])
+    df.loc[df.index[78], "open"] = df.close.iloc[77] * 1.05      # a 5% gap at day 2's open
+    d = cs.daytime_returns(df)
+    assert d[78] == pytest.approx(df.close.iloc[78] / df.open.iloc[78] - 1)
+    assert d[1] == pytest.approx(df.close.iloc[1] / df.close.iloc[0] - 1)

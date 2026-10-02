@@ -446,10 +446,20 @@ def cost_realism(symbols: Sequence[str], sessions: Sequence[date]) -> Dict:
 # ----------------------------------------------------------------- 2: recalibration replay
 def _next_week(st: rc.SymbolStudy, spec: Optional[Dict], a: int, b: int) -> Dict:
     if spec is None or b <= a:
-        return {"return_%": 0.0, "exposure": 0.0, "trades": 0}
+        return {"return_%": 0.0, "exposure": 0.0, "trades": 0, "cost_%": 0.0}
     bt = st.bt(spec).iloc[a:b]
     return {"return_%": float(((1 + bt.ret).prod() - 1) * 100), "exposure": float(bt.position.abs().mean()),
-            "trades": int(len(_trades(bt)))}
+            "trades": int(len(_trades(bt))), "cost_%": float((bt.turnover * st.costs.per_turn).sum() * 100)}
+
+
+def daytime_returns(df: pd.DataFrame) -> np.ndarray:
+    """Bar returns without the overnight moves: a session's first bar counts from its own open."""
+    c = df.close.to_numpy(float)
+    day = np.asarray(df.index.tz_convert(NY).date)
+    first = np.r_[True, day[1:] != day[:-1]]
+    prev = np.r_[np.nan, c[:-1]]
+    out = np.where(first, c / df.open.to_numpy(float) - 1, c / prev - 1)
+    return np.nan_to_num(out)
 
 
 def _spearman(x: Sequence[float], y: Sequence[float]) -> Optional[float]:
@@ -459,15 +469,18 @@ def _spearman(x: Sequence[float], y: Sequence[float]) -> Optional[float]:
     return float(s.x.rank().corr(s.y.rank()))
 
 
-def replay_symbol(sym: str, df: pd.DataFrame, r: Dict, fridays: List[date], progress=None) -> List[Dict]:
+def replay_symbol(sym: str, df: pd.DataFrame, r: Dict, fridays: List[date], progress=None,
+                  carry: Optional[Dict] = None) -> List[Dict]:
     """Recalibration as it would have run each Friday with data up to that day: its windows,
     challenger, champion/challenger rule and state (since / changes), starting with no job.
-    Every strategy's out-of-sample score and the pick are recorded with their next-week result."""
+    Every strategy's out-of-sample score and the pick are recorded with their next-week result.
+    carry: {"inc", "state"} to continue from (e.g. the end of an earlier period); updated in place."""
     st = rc.SymbolStudy(sym, df, r, fridays[-1])
     day = st.day
     names = rc.eligible(sym, r)
-    inc: Optional[Dict] = None
-    state: Dict = {}
+    inc: Optional[Dict] = (carry or {}).get("inc")
+    state: Dict = dict((carry or {}).get("state") or {})
+    day_ret = daytime_returns(df)
     rows = []
     for k, fri in enumerate(fridays):
         cut = int(np.searchsorted(day, fri, side="right"))
@@ -488,6 +501,7 @@ def replay_symbol(sym: str, df: pd.DataFrame, r: Dict, fridays: List[date], prog
         ch_next = _next_week(st, ch["spec"], cut, end)
         c0 = float(df.close.iloc[cut - 1])
         bh = float(df.close.iloc[end - 1] / c0 - 1) * 100
+        bh_day = float(np.prod(1 + day_ret[cut:end]) - 1) * 100
         strat = []
         for n in names:
             s = res["strategies"][n]
@@ -498,10 +512,13 @@ def replay_symbol(sym: str, df: pd.DataFrame, r: Dict, fridays: List[date], prog
         rows.append({"symbol": sym, "friday": fri.isoformat(), "decision": dec["outcome"], "changed": bool(dec["change"]),
                      "job": rc.describe(inc), "job_score": float(picked_score), "challenger": rc.describe(ch["spec"]),
                      "challenger_score": float(ch["score"]), "next_%": nxt["return_%"], "next_exposure": nxt["exposure"],
-                     "next_trades": nxt["trades"], "challenger_next_%": ch_next["return_%"], "buy_hold_next_%": bh,
-                     "matched_bh_next_%": bh * nxt["exposure"], "strategies": strat})
+                     "next_trades": nxt["trades"], "next_cost_%": nxt["cost_%"], "challenger_next_%": ch_next["return_%"],
+                     "buy_hold_next_%": bh, "matched_bh_next_%": bh * nxt["exposure"],
+                     "buy_hold_day_next_%": bh_day, "matched_bh_day_next_%": bh_day * nxt["exposure"], "strategies": strat})
         if progress:
             progress((k + 1) / len(fridays), f"{sym}: week {k + 1}/{len(fridays)}")
+    if carry is not None:
+        carry.update({"inc": inc, "state": state})
     return rows
 
 

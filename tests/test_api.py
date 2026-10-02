@@ -131,3 +131,7 @@ def test_overnight_study_job_on_demo_data():
     assert res["source"] == "demo" and "90d" in res["periods"] and res["summary"]
     assert client.post("/api/overnight-study", json={"days": 5}).status_code == 400
     assert client.get("/api/overnight-study").status_code == 200
+
+
+def test_recal_fix_study_endpoint():
+    assert client.get("/api/recal-fix-study").status_code == 200

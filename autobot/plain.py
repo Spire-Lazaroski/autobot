@@ -318,6 +318,30 @@ COST_OPTIONS = [
      "Matches the fills, but auto_SPY makes {spy_g} bps gross per round trip (95% range {spy_lo} to {spy_hi}), so it stays at about zero."),
 ]
 
+RECAL_FIX: Dict[str, str] = {
+    "design_only": "Design period only (decisions before {split}); the confirmation period has not been run yet, so no version can pass yet.",
+    "pass": "PASSES", "fail": "FAILS", "fail_incomplete": "not decided yet",
+    "period_design": "the design period", "period_confirm": "the confirmation period",
+    "why_a": "its picks were clearly worse than time-matched buy and hold in {period}",
+    "why_b": "it kept a job with a negative score for {n} weeks in a row in {period} (allowed: 2)",
+    "why_c": "with all switches off the results did not match today's exactly",
+    "all_met": "all three criteria met in both periods",
+    "version": ("{label}: {verdict} ({why}). In {period} the account would have made {picks}% against {matched}% for buy and hold "
+                "scaled to the same time in the market and {bh}% for plain buy and hold; a job in {job}% of symbol-weeks, weekly "
+                "difference to the time-matched benchmark {d}% (95% range {lo} to {hi}), {rt} round trips, {cost}% of the account in costs."),
+    "mostly_cash": ("{label} ends up with no job almost everywhere (a job in only {job}% of symbol-weeks): the account would have been "
+                    "mostly cash (on average {inv}% invested), with {rt} round trips and a result of {picks}%."),
+    "costs_same": "With 1 bp per side for SPY and QQQ instead of 2, no version's pass/fail changes.",
+    "costs_changed": "With 1 bp per side for SPY and QQQ instead of 2, the pass/fail changes for: {v}.",
+    "score": "Does the score predict the next week (rank correlation, 95% range; 0 = no link)? {items}.",
+    "tests": ("{n} comparisons were made (every version against every benchmark and per symbol, per period and cost level); "
+              "about {luck} would look clearly better by luck alone, and {wins} did."),
+    "c_ok": "With all switches off, the replay matched the earlier one exactly ({n} symbol-weeks compared).",
+    "c_bad": "With all switches off, {d} of {n} symbol-weeks differed from the earlier replay.",
+    "limits": ("Known limits: today's symbol list is used for the whole period (it flatters the results); IEX prices (free feed); "
+               "costs from recalibration's model, checked against only a few paper fills; weekly instead of nightly decisions."),
+}
+
 GLOSSARY: Dict[str, str] = {
     "Paper trading": "Trading with pretend money in a practice account; no real money is at risk.",
     "Buy and hold": "Buying once and simply keeping it; the baseline every strategy is compared with.",

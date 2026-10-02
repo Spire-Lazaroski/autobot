@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Confirm } from "../components/Confirm";
+import { RecalFixStudy } from "../components/RecalFixStudy";
 import { ErrorBox, Panel, Spinner } from "../components/ui";
 import { api, useJob, type Job } from "../lib/api";
 import { fmt } from "../lib/format";
@@ -138,6 +139,7 @@ export function Recalibration() {
             A symbol whose job is removed has its position closed by the bot.</p>
         </Confirm>
       )}
+      <RecalFixStudy />
     </div>
   );
 }

@@ -165,3 +165,12 @@ def overnight_latest():
     from autobot import overnight_study as ov
     res = ov.load()
     return {**res, "source": "alpaca"} if res else None
+
+
+@router.get("/api/recal-fix-study")
+def recal_fix_latest():
+    """The recalibration switch study (data/recal_fix_study.json), or null."""
+    import json
+
+    from autobot import recal_fix_study as rf
+    return json.loads(rf.OUT.read_text(encoding="utf-8")) if rf.OUT.exists() else None
