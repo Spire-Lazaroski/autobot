@@ -480,7 +480,7 @@ def replay_symbol(sym: str, df: pd.DataFrame, r: Dict, fridays: List[date], prog
         ch = res["meta"] if res["meta"]["spec"] and res["meta"]["score"] > res["single"]["score"] else res["single"]
         dec = rc.decide(sym, res["incumbent"], ch, r, state, fri)
         if dec["change"]:
-            inc = ch["spec"]
+            inc = None if dec["outcome"] == "drop" else ch["spec"]
             state = {"since": fri.isoformat(),
                      "changes": [d for d in state.get("changes", []) if (fri - date.fromisoformat(d)).days < 30] + [fri.isoformat()]}
         picked_score = ch["score"] if dec["change"] else res["incumbent"]["score"] if inc else 0.0

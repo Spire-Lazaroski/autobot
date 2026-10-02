@@ -26,6 +26,15 @@ For each symbol in the latest universe proposal (minus symbols owned by hand-mad
    it only with >= min_edge better score, >= min_trades OOS trades, the incumbent in place
    >= min_hold_days and fewer than max_changes_per_week changes in the last 7 days.
    Every decision carries a plain-English reason (plain.RECAL_REASONS).
+5. Optional switches, all off by default (today's behaviour):
+   - allow_drop: a job that scores below zero, with no alternative good enough to replace it,
+     is dropped ("no job"), under the same hold / changes-per-week brakes.
+   - benchmark: matched_buy_hold scores every strategy on its return above buying and holding
+     the symbol for the same share of the time (overnight moves included), so 0 = no better
+     than that; "no job" still scores 0.
+   - min_edge_per_trade: a candidate qualifies only if, on the window's train days, its average
+     gross result per round trip is at least N times its cost per round trip (false/0 = off,
+     true = 2, or a number N).
 
 Output: data/recalibration/{date}.json. Nothing here edits config.yaml (Phase 3 applies).
 Causal: run(as_of=D) only uses bars with a New York date <= D.
@@ -77,6 +86,9 @@ DEFAULTS = {
     "exclude": ["connors_rsi2", "ibs_reversion", "news_guard"],   # daily-bar designs; news_guard showed no edge
     "exclude_families_crypto": ["intraday"],                       # they assume a session open/close
     "include_exit": False,          # also try the trailing exit / re-entry layer (autobot.exits) per window
+    "allow_drop": False,            # drop a job scoring below zero when nothing good enough replaces it
+    "benchmark": "zero",            # zero | matched_buy_hold (score above time-matched buy and hold, overnight included)
+    "min_edge_per_trade": False,    # false/0 = off; true = 2x; a number N: candidates need gross per round trip >= N x its cost on train days
     "exit_grid": {"trail_pct": [0.15, 0.25, 0.4, 0.6], "reentry": ["fresh_cross", "new_high", "both", "cooldown"]},
 }
 
@@ -84,6 +96,37 @@ DEFAULTS = {
 def exit_grid(r: Dict) -> List[Dict]:
     g = r.get("exit_grid") or DEFAULTS["exit_grid"]
     return [{"trail_pct": t, "reentry": m} for t in g["trail_pct"] for m in g["reentry"]]
+
+
+BENCHMARKS = ("zero", "matched_buy_hold")
+
+
+def validate(r: Dict) -> List[str]:
+    """Problems with the optional recalibration switches (empty = fine)."""
+    errs = []
+    if r.get("benchmark", "zero") not in BENCHMARKS:
+        errs.append(f"recalibration.benchmark must be one of {list(BENCHMARKS)}")
+    if not isinstance(r.get("allow_drop", False), bool):
+        errs.append("recalibration.allow_drop must be true or false")
+    try:
+        if edge_multiple(r) < 0:
+            errs.append("recalibration.min_edge_per_trade must be false, true or a number of 0 or more")
+    except (TypeError, ValueError):
+        errs.append("recalibration.min_edge_per_trade must be false, true or a number")
+    return errs
+
+
+DEFAULT_EDGE_MULTIPLE = 2.0
+
+
+def edge_multiple(r: Dict) -> float:
+    """min_edge_per_trade as a multiple: false / 0 / missing = off (0), true = 2, a number = itself."""
+    v = r.get("min_edge_per_trade", False)
+    if v is True:
+        return DEFAULT_EDGE_MULTIPLE
+    if v is False or v is None:
+        return 0.0
+    return float(v)
 
 
 def settings(cfg: Optional[Dict] = None) -> Dict:
@@ -207,6 +250,36 @@ class SymbolStudy:
         self.win = windows(self.day, start, int(r["train_days"]), int(r["test_days"]))
         self._bt: Dict[str, pd.DataFrame] = {}
         self._sig: Dict[str, pd.Series] = {}
+        self._ok: Dict = {}
+        # the symbol's own bar returns (overnight gaps included): the matched buy-and-hold benchmark
+        self.asset_ret = df.close.pct_change().fillna(0.0).to_numpy()
+        self.matched = r.get("benchmark", "zero") == "matched_buy_hold"
+        self.edge_k = edge_multiple(r)
+
+    def _q(self, ret: np.ndarray, pos: np.ndarray, a: int, b: int) -> Dict:
+        """quick() on the strategy's returns, or with benchmark=matched_buy_hold on its returns
+        above buy and hold scaled to its average time in the market over the same bars."""
+        days = len(set(self.day[a:b]))
+        if not self.matched:
+            return quick(ret, pos, self.ppy, days)
+        e = float(np.abs(pos).mean()) if len(pos) else 0.0
+        q = quick(ret - e * self.asset_ret[a:b], pos, self.ppy, days)
+        q["own_return_%"] = float((np.prod(1 + ret) - 1) * 100) if len(ret) else 0.0
+        q["matched_bh_%"] = float((np.prod(1 + e * self.asset_ret[a:b]) - 1) * 100) if len(ret) else 0.0
+        return q
+
+    def qualifies(self, spec: Optional[Dict], a: int, b: int) -> bool:
+        """min_edge_per_trade: on bars a:b (train days) the gross result per round trip is at
+        least k times its cost; with no trades there is no edge to show. Always True when off."""
+        if spec is None or self.edge_k <= 0:
+            return True
+        key = (_key(spec), a, b)
+        if key not in self._ok:
+            bt = self.bt(spec).iloc[a:b]
+            cost = float((bt.turnover * self.costs.per_turn).sum())
+            gross = float((bt.ret + bt.turnover * self.costs.per_turn).sum())
+            self._ok[key] = cost > 0 and gross >= self.edge_k * cost
+        return self._ok[key]
 
     def with_exits(self, spec: Optional[Dict], ta: int, tb: int) -> Optional[Dict]:
         """include_exit: the spec as is, or with the exit setting that scores best on these train
@@ -234,8 +307,7 @@ class SymbolStudy:
 
     def wscore(self, spec: Dict, a: int, b: int) -> Dict:
         bt = self.bt(spec)
-        days = len(set(self.day[a:b]))
-        q = quick(bt.ret.to_numpy()[a:b], bt.position.to_numpy()[a:b], self.ppy, days)
+        q = self._q(bt.ret.to_numpy()[a:b], bt.position.to_numpy()[a:b], a, b)
         return {**q, "score": score(q, self.r["score_weights"])}
 
     def oos(self, picks: List[Dict]) -> Dict:
@@ -251,7 +323,7 @@ class SymbolStudy:
                 pos.iloc[a - a0:b - a0] = self.bt(spec).position.to_numpy()[a:b]
         bt = _replay(self.df.loc[idx], pos, self.costs)
         days = len(set(self.day[a0:self.win[-1][3]]))
-        q = quick(bt.ret.to_numpy(), bt.position.to_numpy(), self.ppy, days)
+        q = self._q(bt.ret.to_numpy(), bt.position.to_numpy(), a0, self.win[-1][3])
         m = metrics(bt)
         return {**q, "score": score(q, self.r["score_weights"]), "trades": m["trades"],
                 "win_rate_%": m["win_rate_%"], "days": days, "from": str(self.day[a0]), "to": str(self.day[self.win[-1][3] - 1])}
@@ -288,21 +360,25 @@ class SymbolStudy:
         for wi, (ta, tb, _, _) in enumerate(self.win):
             best = {}
             for n, specs in combos.items():
-                scored = [(self.wscore(s, ta, tb)["score"], s) for s in specs]
+                scored = [(self.wscore(s, ta, tb)["score"], s) for s in specs if self.qualifies(s, ta, tb)]
+                if not scored:  # min_edge_per_trade: no setting of this strategy shows enough edge per trade
+                    per_strategy[n].append(None)
+                    continue
                 sc, s = max(scored, key=lambda x: x[0])
                 best[n] = (sc, s)
                 per_strategy[n].append(s)
             ranked = sorted(best.values(), key=lambda x: -x[0])
-            single.append(self.with_exits(ranked[0][1], ta, tb))
+            single.append(self.with_exits(ranked[0][1], ta, tb) if ranked else None)
             top = [s for _, s in ranked[: int(self.r["top_k"])]]
-            metas = self.meta_specs(top)
+            metas = [m for m in self.meta_specs(top) if self.qualifies(m, ta, tb)]
             meta.append(self.with_exits(max(metas, key=lambda s: self.wscore(s, ta, tb)["score"]) if metas else None, ta, tb))
             if progress:
                 progress((wi + 1) / max(1, len(self.win)), f"{self.sym}: window {wi + 1}/{len(self.win)}")
-        res = {"strategies": {n: {**self.oos(per_strategy[n]), "last_params": per_strategy[n][-1]["params"] if per_strategy[n] else None}
+        res = {"strategies": {n: {**self.oos(per_strategy[n]),
+                                  "last_params": per_strategy[n][-1]["params"] if per_strategy[n] and per_strategy[n][-1] else None}
                               for n in names},
                "single": {**self.oos(single), "spec": single[-1] if single else None,
-                          "picks": [s["strategy"] for s in single]},
+                          "picks": [s["strategy"] if s else None for s in single]},
                "meta": {**self.oos(meta), "spec": meta[-1] if meta else None}}
         res["incumbent"] = ({**self.oos([incumbent] * len(self.win)), "spec": incumbent} if incumbent
                             else {"score": 0.0, "trades": 0, "sharpe": 0.0, "return_%": 0.0, "max_drawdown_%": 0.0, "spec": None})
@@ -319,6 +395,23 @@ def decide(sym: str, inc: Dict, ch: Dict, r: Dict, hist: Dict, today: date) -> D
 
     def out(outcome, change, **extra):
         return {"outcome": outcome, "change": change, "reason": plain.RECAL_REASONS[outcome].format(**{**f, **extra})}
+
+    def brakes():
+        """min_hold_days (an existing job) and max_changes_per_week; None when a change may go ahead."""
+        if inc["spec"]:
+            since = hist.get("since")
+            if since and (today - date.fromisoformat(since)).days < r["min_hold_days"]:
+                return out("keep_hold", False, days=(today - date.fromisoformat(since)).days, min=r["min_hold_days"])
+        recent = [d for d in hist.get("changes", []) if (today - date.fromisoformat(d)).days < 7]
+        if len(recent) >= r["max_changes_per_week"]:
+            return out("keep_changes", False, n=len(recent), max=r["max_changes_per_week"])
+        return None
+    # allow_drop: a job scoring below zero (doing nothing scores 0) goes unless a challenger is good
+    # enough to replace it (its own bar: min_edge above zero, enough trades)
+    replaceable = (ch["spec"] is not None and ch["trades"] >= r["min_trades"] and ch["score"] >= r["min_edge"]
+                   and not (inc["spec"] and _key(inc["spec"]) == _key(ch["spec"])))
+    if r.get("allow_drop") and inc["spec"] and inc["score"] < 0 and not replaceable:
+        return brakes() or out("drop", True)
     if inc["spec"] and ch["spec"] and _key(inc["spec"]) == _key(ch["spec"]):
         return out("keep_same", False)
     if ch["trades"] < r["min_trades"]:
@@ -328,14 +421,7 @@ def decide(sym: str, inc: Dict, ch: Dict, r: Dict, hist: Dict, today: date) -> D
         if not inc["spec"]:
             return out("no_job_weak", False)
         return out("keep_better" if edge <= 0 else "keep_edge", False)
-    if inc["spec"]:
-        since = hist.get("since")
-        if since and (today - date.fromisoformat(since)).days < r["min_hold_days"]:
-            return out("keep_hold", False, days=(today - date.fromisoformat(since)).days, min=r["min_hold_days"])
-    recent = [d for d in hist.get("changes", []) if (today - date.fromisoformat(d)).days < 7]
-    if len(recent) >= r["max_changes_per_week"]:
-        return out("keep_changes", False, n=len(recent), max=r["max_changes_per_week"])
-    return out("replace" if inc["spec"] else "new_job", True)
+    return brakes() or out("replace" if inc["spec"] else "new_job", True)
 
 
 def load_state(path: Optional[Path] = None) -> Dict:
@@ -359,6 +445,9 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
     if cfg is None:
         cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     r = settings(cfg)
+    errs = validate(r)
+    if errs:
+        raise ValueError("; ".join(errs))
     as_of = as_of or pd.Timestamp.now(tz=NY).date()
     out_dir = out_dir or OUT_DIR
     say = progress or (lambda f, m: None)
@@ -406,7 +495,7 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
         ch = res["meta"] if res["meta"]["spec"] and res["meta"]["score"] > res["single"]["score"] else res["single"]
         ch_kind = "meta" if ch is res["meta"] else "single"
         dec = decide(sym, res["incumbent"], ch, r, state.get(sym, {}), as_of)
-        final = ch["spec"] if dec["change"] else inc_spec
+        final = None if dec["outcome"] == "drop" else ch["spec"] if dec["change"] else inc_spec
         if final:
             job = {"name": AUTO_PREFIX + sym.replace("/", ""), "strategy": final["strategy"],
                    "params": final.get("params") or {}, "symbols": [sym],
@@ -434,7 +523,8 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
            "universe_date": uni["date"] if uni else None, "hand_made_symbols": sorted(hand & set(listed)),
            "take_over": take, "taken_over": sorted(s for s, v in rows.items() if v["decision"].get("takeover")),
            "settings": {k: r[k] for k in ("lookback_days", "train_days", "test_days", "top_k", "confirm_bars", "min_edge",
-                                          "min_trades", "min_hold_days", "max_changes_per_week", "score_weights", "costs")},
+                                          "min_trades", "min_hold_days", "max_changes_per_week", "score_weights", "costs",
+                                          "allow_drop", "benchmark", "min_edge_per_trade")},
            "symbols": rows, "proposed_jobs": proposed,
            "changes": [s for s, v in rows.items() if v["decision"]["change"] or v["decision"].get("takeover")]}
     if write:

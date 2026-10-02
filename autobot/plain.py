@@ -132,6 +132,8 @@ RECAL_REASONS: Dict[str, str] = {
     "keep_hold": "Keep {inc}: it has been in place {days} days, less than the minimum of {min}.",
     "keep_changes": "Keep {inc}: this symbol already changed {n} times in the last 7 days (maximum {max}).",
     "remove": "Remove {inc}: {sym} is no longer in the trading list; its position will be closed.",
+    "drop": ("Drop {inc}: it scored {is} on days it hadn't been tuned on, below doing nothing (0), and no alternative was good "
+             "enough to replace it (best: {ch}, {cs}). The symbol gets no job; any position is closed."),
     "no_data": "No decision: not enough price history for {sym} ({days} days, needs {need}). Nothing changes.",
 }
 EXIT_REASONS: Dict[str, str] = {

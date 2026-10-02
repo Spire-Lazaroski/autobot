@@ -29,6 +29,7 @@ const OUTCOME: Record<string, [string, string]> = {
   new_job: ["new job", "chip-up"], replace: ["replace", "chip-up"], remove: ["remove", "chip-down"],
   keep_same: ["keep", ""], keep_edge: ["keep", ""], keep_better: ["keep", ""], keep_trades: ["keep", ""],
   keep_hold: ["keep (too soon)", ""], keep_changes: ["keep (changed this week)", ""],
+  drop: ["drop (worse than nothing)", "chip-warn"],
   no_job_weak: ["no job", ""], no_job_trades: ["no job", ""], no_data: ["no data", "chip-warn"],
 };
 const STATUS: Record<string, string> = { applied: "chip-up", pending: "chip-warn", rejected: "", error: "chip-down" };
