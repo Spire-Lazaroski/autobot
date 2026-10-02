@@ -118,3 +118,16 @@ def test_start_refused_while_running(monkeypatch):
     monkeypatch.setattr(L.subprocess, "Popen", lambda *a, **k: called.append(a))
     r = client.post("/api/live/start")
     assert r.status_code == 409 and not called
+
+
+def test_overnight_study_job_on_demo_data():
+    r = client.post("/api/overnight-study", json={"days": 60, "long": False, "source": "demo"})
+    assert r.status_code == 200, r.text
+    job = _wait(r.json())
+    if job["status"] == "error" and "No enabled stock jobs" in job["error"]:
+        return  # config.yaml without stock jobs: nothing to study
+    assert job["status"] == "done", job
+    res = job["result"]
+    assert res["source"] == "demo" and "90d" in res["periods"] and res["summary"]
+    assert client.post("/api/overnight-study", json={"days": 5}).status_code == 400
+    assert client.get("/api/overnight-study").status_code == 200

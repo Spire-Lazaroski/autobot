@@ -127,3 +127,41 @@ def run_now():
         res = recalibrate.run(as_of=day, progress=progress)
         return {"date": res["date"], "changes": res["changes"]}
     return jobs.submit("recalibration", work).public()
+
+
+class OvernightReq(BaseModel):
+    days: int = 90
+    long: bool = True        # also the 740-day period (cached 5-minute bars)
+    source: str = "alpaca"   # or "demo" (synthetic bars, nothing saved)
+
+
+@router.post("/api/overnight-study")
+def overnight_study(req: OvernightReq):
+    """Sell before the close vs hold overnight for the enabled jobs (background job). Alpaca runs
+    are saved to data/overnight_study.json; demo runs only return their result."""
+    import yaml
+
+    from autobot import overnight_study as ov
+    from autobot.data import synthetic_bars
+    if not 30 <= req.days <= 365:
+        raise HTTPException(400, "days must be 30-365.")
+    cfg = yaml.safe_load(recalibrate.ROOT.joinpath("config.yaml").read_text(encoding="utf-8"))
+    demo = req.source == "demo"
+
+    def work(progress):
+        if demo:
+            fetch = lambda s, tf, d: synthetic_bars([s], tf, min(d, 200))[s]  # noqa: E731
+            res = ov.run(cfg, req.days, long=req.long, fetch=fetch, news=False, recal_symbols=None, progress=progress)
+        else:
+            res = ov.run(cfg, req.days, long=req.long, progress=progress)
+            ov.save(res)
+        return ov._clean({**res, "source": req.source})
+    return jobs.submit("overnight-study", work).public()
+
+
+@router.get("/api/overnight-study")
+def overnight_latest():
+    """The last saved overnight study, or null."""
+    from autobot import overnight_study as ov
+    res = ov.load()
+    return {**res, "source": "alpaca"} if res else None

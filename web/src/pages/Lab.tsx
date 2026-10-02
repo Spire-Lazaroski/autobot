@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AccountRules } from "../components/AccountRules";
 import { DetailView } from "../components/DetailView";
 import { ExitRules } from "../components/ExitRules";
+import { OvernightStudy } from "../components/OvernightStudy";
 import { GenerateReport } from "../components/GenerateReport";
 import { Plot } from "../components/Plot";
 import { SettingsBar } from "../components/SettingsBar";
@@ -64,6 +65,7 @@ export function Lab() {
 
       <AccountRules />
       <ExitRules />
+      <OvernightStudy />
 
       {open && req && (
         <DetailView run={req} strategy={open.strategy} params={req.strategies[open.strategy] ?? {}}
