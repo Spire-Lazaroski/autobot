@@ -259,6 +259,63 @@ OVERNIGHT: Dict = {
                "Only the walk-forward ('out of sample') figures are an honest test; the full-period figures show where the money came from."),
 }
 
+COST_STUDY: Dict[str, str] = {
+    "score_no": ("Recalibration's score does not usefully predict the following week. Replayed every Friday for {weeks} weeks on "
+                 "{syms} symbols with only the data it would have had, the rank correlation between each strategy's score and its "
+                 "next week was {rho} (95% range {lo} to {hi}; 1 would be perfect, 0 no link at all); the top fifth of scores "
+                 "averaged {top}% the next week, the bottom fifth {bottom}%."),
+    "score_yes": ("Recalibration's score predicts the following week a little: rank correlation {rho} (95% range {lo} to {hi})."),
+    "picks": ("Its picks made {mean}% a week on average ({sum}% summed over {n} symbol-weeks) against {bh}% for buy and hold scaled "
+              "to the same time in the market; they beat that benchmark in {beat}% of the weeks (difference {d}% a week, 95% range "
+              "{dlo} to {dhi})."),
+    "no_job_gap": ("Once a symbol has a job, recalibration never goes back to 'no job': it only compares the job with other "
+                   "strategies. In the replay every symbol had a job within {weeks_first} weeks, and {neg} job-weeks were kept "
+                   "although the job's own score had fallen below zero."),
+    "edge": ("Before costs the strategies earn almost nothing per trade on intraday bars: the typical round trip made {g5} bps on "
+             "5-minute bars and paid {c5} bps in costs ({cp5} of {n5} combinations clearly above zero before costs, about {fp} "
+             "expected by luck across all {ntot} tests)."),
+    "jobs": "The five live jobs make between {gmin} and {gmax} bps per round trip before costs and pay {cmin} to {cmax} bps; none is clearly above zero.",
+    "slower": ("Slower bars trade less, so they lose less: the typical combination ended {n5}% (5-minute), {n15}% (15-minute), "
+               "{n60}% (hourly) and {nd}% (daily, over a shorter period because of a 200-day filter) after costs. Per trade the gross grows ({g5}, {g15}, {g60} and {gd} bps) "
+               "but so does the cost, because a larger share of fills fall at the open or the close."),
+    "close": ("Selling before the close and buying back next morning makes up {lo}-{hi}% of the jobs' costs ({spy}% for SPY). "
+              "Even with all of that cost removed (an upper bound) {neg} of {n} jobs would still have lost money."),
+    "fills": ("The paper fills are close to the quoted middle price in quiet hours (median {mid} bps from it over {n} fills; SPY and "
+              "QQQ within about 1 bp), so 2 bps per side is on the high side for the big ETFs. IEX quotes for single stocks and USO "
+              "are too thin to measure their real spreads (they show {tsla} bps for TSLA at midday, far above the market's real spread), "
+              "and fills at the open can't be judged against a quote from IEX alone."),
+    "walk_none": ("With an honest walk-forward, {beat} of {tests} strategy x symbol x timeframe tests beat buy and hold scaled to the "
+                  "same time in the market after costs; about {fp} would be expected by luck, so nothing beat it beyond chance. "
+                  "Recalibration's own 'best of all strategies' pick beat it in none of the {nsingle} symbol x timeframe tests "
+                  "and was clearly worse in {worse}."),
+    "walk_some": ("With an honest walk-forward, {beat} of {tests} tests beat buy and hold scaled to the same time in the market after "
+                  "costs, more than the {fp} expected by luck."),
+    "recommend": ("Recommendation: treat the current strategies and recalibration as having no proven edge. The cost question is "
+                  "secondary: before costs they earn about nothing, so cheaper trading only makes them lose less. Keep the bot on paper "
+                  "as a research tool; don't add more strategies or symbols until the selection step can show it predicts anything."),
+    "caveats": ("Caveats: IEX prices and quotes (free feed); today's symbol list for the whole 2 years (flatters the results); "
+                "recalibration's next-week results use its own 2 bps cost model; daily-bar strategies were tested holding overnight, "
+                "which the live bot doesn't do today."),
+}
+COST_OPTIONS = [
+    ("Let recalibration choose 'no job' (and buy and hold) as challengers, and drop a job whose score falls below zero",
+     "{neg} job-weeks were kept with a negative score; every symbol got a job within {weeks_first} weeks and kept one."),
+    ("Score against buy and hold scaled to the same time in the market instead of against zero",
+     "Picks averaged {mean}% a week against {bh}% for that benchmark; a strategy that can't beat it isn't worth the costs."),
+    ("Raise min_edge",
+     "Weak: the score doesn't predict the next week (rank correlation {rho}), so a higher bar only changes jobs less often."),
+    ("A minimum edge per trade (gross per round trip at least 2x its cost, measured on train days)",
+     "Only {cp5} of {n5} 5-minute combinations are clearly above zero before costs (about as many as luck gives); this filter would leave most symbols with no job, "
+     "which the evidence supports."),
+    ("Penalise turnover more in the score (turnover weight {tw} today)",
+     "Costs are {c5} bps per round trip against {g5} bps gross; it reduces the damage but doesn't create an edge."),
+    ("Move to slower bars (hourly or daily)",
+     "Losses shrink with fewer trades ({n5r}% on 5-minute bars to {ndr}% on daily for the typical combination), but no timeframe beat time-matched buy and hold "
+     "in the walk-forward; daily would also need the close rule changed."),
+    ("Lower the cost assumption for SPY and QQQ (about 0.5-1 bp per side)",
+     "Matches the fills, but auto_SPY makes {spy_g} bps gross per round trip (95% range {spy_lo} to {spy_hi}), so it stays at about zero."),
+]
+
 GLOSSARY: Dict[str, str] = {
     "Paper trading": "Trading with pretend money in a practice account; no real money is at risk.",
     "Buy and hold": "Buying once and simply keeping it; the baseline every strategy is compared with.",

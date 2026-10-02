@@ -108,3 +108,29 @@ def test_replay_is_causal():
     assert [x["job"] for x in part] == [x["job"] for x in full[:2]]
     assert [x["challenger_score"] for x in part] == pytest.approx([x["challenger_score"] for x in full[:2]])
     assert [x["next_%"] for x in part] == pytest.approx([x["next_%"] for x in full[:2]])
+
+
+def test_summary_fills_every_template():
+    """Step 7 on a small made-up result: every line and option is filled in (no '{' left), and
+    'nothing beat it beyond chance' is said when the hits are within luck."""
+    rows = [{"symbol": "AAA", "friday": f"2026-01-{d:02d}", "decision": dec, "job_score": sc, "strategies": []}
+            for d, dec, sc in ((2, "new_job", 1.0), (9, "keep_better", -0.5), (16, "keep_same", 0.2))]
+    res = {
+        "replay": {"rows": rows, "fridays": 3, "symbols": ["AAA"], "from": "2026-01-02",
+                   "picks": {"mean_next_%": -0.2, "sum_next_%": -0.6, "symbol_weeks": 3, "mean_matched_bh_next_%": 0.1,
+                             "when_trading": {"beat_matched_bh_%": 33.3}, "vs_matched_bh_mean_%": -0.3, "vs_matched_bh_ci95": [-0.5, -0.1]},
+                   "score_predicts": {"within_symbol_week": {"mean_rank_corr": 0.02, "ci95": [-0.01, 0.05], "n": 3},
+                                      "by_score_fifth": [{"mean_next_%": -0.1}, {"mean_next_%": -0.3}]}},
+        "edges": {"by_timeframe": {tf: {"combos": 10, "clearly_positive": 0, "median_gross_bps": 1.0, "median_cost_bps": 4.0,
+                                        "total_net_%_median": -10.0} for tf in ("5Min", "15Min", "1Hour", "1Day")},
+                  "expected_false_positives": 1.0,
+                  "jobs": [{"symbol": "SPY", "gross_bps": 2.0, "gross_lo": -3.0, "gross_hi": 7.0, "cost_bps": 4.8, "clearly_positive": False}]},
+        "close_rule": [{"symbol": "SPY", "forced_%_of_cost": 42.0, "net_without_forced_costs_%": -3.0}],
+        "cost_realism": {"fills": {"summary": {"vs_mid_bps": {"median": 0.1, "n": 10}}}, "spreads": {"TSLA": {"midday": {"half_spread_bps": 12.0}}}},
+        "walk_forward": {"rows": [{"strategy": "recalibration_single", "significant": False, "vs_matched_bps": -1.0}],
+                         "tests": 40, "beat_matched": [], "expected_false_positives": 1.0},
+    }
+    s = cs.summary(res)
+    text = " ".join(s["lines"] + [o["option"] + o["evidence"] for o in s["options"]])
+    assert "{" not in text and "does not usefully predict" in text and "nothing beat it beyond chance" in text
+    assert "1 job-weeks were kept" in text and "0.05" in text

@@ -652,6 +652,93 @@ def walk(data: Data, cfg: Dict, timeframes: Sequence[str] = TIMEFRAMES, progress
     return out
 
 
+# ----------------------------------------------------------------- 7: summary
+def _f(v, d=2, sign=False) -> str:
+    return "–" if v is None else (f"{v:+.{d}f}" if sign else f"{v:.{d}f}")
+
+
+def summary(res: Dict, cfg: Optional[Dict] = None) -> Dict:
+    """Step 7: plain-English findings and the options with their evidence (plain.COST_STUDY /
+    COST_OPTIONS), filled with the study's numbers only."""
+    from . import plain
+    T = plain.COST_STUDY
+    lines: List[str] = []
+    v: Dict[str, str] = {}
+    rp = res.get("replay") or {}
+    if rp.get("rows"):
+        sp = rp["score_predicts"]
+        w = sp["within_symbol_week"]
+        fifths = sp.get("by_score_fifth") or []
+        if w["ci95"][0] is not None and w["ci95"][0] > 0.1:
+            lines.append(T["score_yes"].format(rho=_f(w["mean_rank_corr"], 3), lo=_f(w["ci95"][0], 3), hi=_f(w["ci95"][1], 3)))
+        else:
+            lines.append(T["score_no"].format(weeks=rp["fridays"], syms=len(rp["symbols"]), rho=_f(w["mean_rank_corr"], 3),
+                                              lo=_f(w["ci95"][0], 3), hi=_f(w["ci95"][1], 3),
+                                              top=_f(fifths[-1]["mean_next_%"], 2, True) if fifths else "–",
+                                              bottom=_f(fifths[0]["mean_next_%"], 2, True) if fifths else "–"))
+        pk = rp["picks"]
+        lines.append(T["picks"].format(mean=_f(pk["mean_next_%"], 2, True), sum=_f(pk["sum_next_%"], 0, True), n=pk["symbol_weeks"],
+                                       bh=_f(pk["mean_matched_bh_next_%"], 2, True), beat=_f(pk["when_trading"]["beat_matched_bh_%"], 0),
+                                       d=_f(pk["vs_matched_bh_mean_%"], 2, True), dlo=_f(pk["vs_matched_bh_ci95"][0], 2, True),
+                                       dhi=_f(pk["vs_matched_bh_ci95"][1], 2, True)))
+        df = pd.DataFrame([{k: x[k] for k in ("symbol", "friday", "decision", "job_score")} for x in rp["rows"]])
+        kept = df[df.decision.isin(["keep_better", "keep_edge", "keep_trades", "keep_same"])]
+        first = df[df.decision == "new_job"].groupby("symbol").friday.min()
+        start = pd.Timestamp(rp["from"])
+        v.update(neg=str(int((kept.job_score < 0).sum())),
+                 weeks_first=str(int(max(((pd.to_datetime(first) - start).dt.days // 7 + 1).max(), 1))) if len(first) else "–",
+                 mean=_f(pk["mean_next_%"], 2, True), bh=_f(pk["mean_matched_bh_next_%"], 2, True), rho=_f(w["mean_rank_corr"], 3))
+        lines.append(T["no_job_gap"].format(neg=v["neg"], weeks_first=v["weeks_first"]))
+    e = res.get("edges") or {}
+    if e.get("by_timeframe"):
+        bt = e["by_timeframe"]
+        b5, b15, b60, bd = (bt.get(k, {}) for k in ("5Min", "15Min", "1Hour", "1Day"))
+        ntot = sum(x.get("combos", 0) for x in bt.values())
+        v.update(g5=_f(b5.get("median_gross_bps"), 1), c5=_f(b5.get("median_cost_bps"), 1), cp5=str(b5.get("clearly_positive", 0)),
+                 n5=str(b5.get("combos", 0)), n5r=_f(b5.get("total_net_%_median"), 1, True), ndr=_f(bd.get("total_net_%_median"), 1, True))
+        lines.append(T["edge"].format(g5=v["g5"], c5=v["c5"], cp5=v["cp5"], n5=v["n5"], fp=_f(e["expected_false_positives"], 0), ntot=ntot))
+        jobs = e.get("jobs") or []
+        if jobs:
+            g = [j["gross_bps"] for j in jobs if j["gross_bps"] is not None]
+            c = [j["cost_bps"] for j in jobs if j["cost_bps"] is not None]
+            line = T["jobs"].format(gmin=_f(min(g), 1, True), gmax=_f(max(g), 1, True), cmin=_f(min(c), 1), cmax=_f(max(c), 1))
+            if any(j["clearly_positive"] for j in jobs):
+                line = line.replace("; none is clearly above zero.", ".")
+            lines.append(line)
+            spy = next((j for j in jobs if j["symbol"] == "SPY"), None)
+            if spy:
+                v.update(spy_g=_f(spy["gross_bps"], 1, True), spy_lo=_f(spy["gross_lo"], 1, True), spy_hi=_f(spy["gross_hi"], 1, True))
+        lines.append(T["slower"].format(n5=_f(b5.get("total_net_%_median"), 1, True), n15=_f(b15.get("total_net_%_median"), 1, True),
+                                        n60=_f(b60.get("total_net_%_median"), 1, True), nd=_f(bd.get("total_net_%_median"), 1, True),
+                                        g5=_f(b5.get("median_gross_bps"), 1), g15=_f(b15.get("median_gross_bps"), 1),
+                                        g60=_f(b60.get("median_gross_bps"), 1), gd=_f(bd.get("median_gross_bps"), 0)))
+    cr = res.get("close_rule") or []
+    if cr:
+        shares = [x["forced_%_of_cost"] for x in cr]
+        spy = next((x for x in cr if x["symbol"] == "SPY"), None)
+        lines.append(T["close"].format(lo=_f(min(shares), 0), hi=_f(max(shares), 0), spy=_f(spy["forced_%_of_cost"], 0) if spy else "–",
+                                       neg=sum(x["net_without_forced_costs_%"] < 0 for x in cr), n=len(cr)))
+    c = res.get("cost_realism") or {}
+    if c.get("fills"):
+        fs = c["fills"]["summary"].get("vs_mid_bps", {})
+        tsla = ((c.get("spreads") or {}).get("TSLA") or {}).get("midday", {}).get("half_spread_bps")
+        lines.append(T["fills"].format(mid=_f(fs.get("median"), 1, True), n=fs.get("n", 0), tsla=_f(tsla * 2 if tsla else None, 0)))
+    w6 = res.get("walk_forward") or {}
+    if w6.get("rows"):
+        single = [x for x in w6["rows"] if x["strategy"] == "recalibration_single"]
+        key = "walk_some" if len(w6["beat_matched"]) > 2 * w6["expected_false_positives"] else "walk_none"
+        lines.append(T[key].format(beat=len(w6["beat_matched"]), tests=w6["tests"], fp=_f(w6["expected_false_positives"], 0),
+                                   nsingle=len(single), worse=sum(x["significant"] and x["vs_matched_bps"] < 0 for x in single)))
+    lines.append(T["recommend"])
+    lines.append(T["caveats"])
+    r = rc.settings(cfg) if cfg else {"score_weights": rc.DEFAULTS["score_weights"]}
+    v["tw"] = str(r["score_weights"]["turnover"])
+    keys = ("neg", "weeks_first", "mean", "bh", "rho", "cp5", "n5", "n5r", "ndr", "tw", "c5", "g5", "spy_g", "spy_lo", "spy_hi")
+    fill = {**{k: "–" for k in keys}, **v}
+    opts = [{"option": title.format(**fill), "evidence": evidence.format(**fill)} for title, evidence in plain.COST_OPTIONS]
+    return {"lines": lines, "options": opts}
+
+
 # ----------------------------------------------------------------- run / save
 def _clean(o):
     return ov._clean(o)
@@ -694,6 +781,8 @@ def run(cfg: Dict, steps: Sequence[str] = STEPS, symbols: Optional[Sequence[str]
             raise ValueError(f"unknown step {s}")
         res["generated"][s] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         save(_clean(res), path)  # after every step, so a long run keeps what it has
+    res["summary"] = summary(res, cfg)
+    save(_clean(res), path)
     return res
 
 
@@ -705,8 +794,17 @@ def main():
     ap = argparse.ArgumentParser(description="Cost study (diagnosis only).")
     ap.add_argument("--steps", default=",".join(STEPS))
     ap.add_argument("--symbols", default="")
+    ap.add_argument("--summary", action="store_true", help="only rewrite the summary of the saved study")
     a = ap.parse_args()
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    if a.summary:
+        res = load()
+        res["summary"] = summary(res, cfg)
+        save(_clean(res))
+        print("\n".join(res["summary"]["lines"]))
+        for o in res["summary"]["options"]:
+            print(f"- {o['option']}: {o['evidence']}")
+        return
     run(cfg, [s for s in a.steps.split(",") if s], symbols=[s for s in a.symbols.split(",") if s] or None,
         progress=lambda f, m: print(f"{f:5.1%} {m}", flush=True))
     print("saved", OUT)
