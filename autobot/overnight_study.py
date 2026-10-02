@@ -189,7 +189,7 @@ class Inputs:
         if not len(k):
             return None
         i = a + int(k[0])
-        if m[k[0]] >= self.step_min - 1e-9:
+        if m[k[0]] > 1e-9:  # it ends before the close, so its order can still be filled (resampled hourly bars: 15:30)
             return i
         return i - 1 if i - 1 >= a else None
 
