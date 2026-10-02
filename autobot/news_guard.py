@@ -39,13 +39,14 @@ EARNINGS_MIN_STORIES = 3
 
 def _story_rows(symbol: str) -> pd.DataFrame:
     """Scored stories on the symbol (main or secondary subject): receive time, materiality,
-    category, story type, headline. Claude's newest prompt where scored, else keyword rules."""
+    category, story type, sentiment, headline. Claude's newest prompt where scored, else keyword rules."""
     from . import news_score as ns
     ns.ensure_schema()
     q = f"""
       SELECT e.id, e.created_at, e.received_at, e.headline,
              COALESCE(c.materiality, r.materiality) materiality, COALESCE(c.category, r.category) category,
-             COALESCE(c.story_type, r.story_type) story_type, COALESCE(c.relevance, r.relevance) relevance
+             COALESCE(c.story_type, r.story_type) story_type, COALESCE(c.relevance, r.relevance) relevance,
+             COALESCE(c.sentiment, r.sentiment) sentiment
       FROM events e JOIN item_symbols i ON i.item_id = e.first_item_id AND i.symbol = ?
       LEFT JOIN scores c ON c.event_id=e.id AND c.symbol=? AND c.scorer='claude' AND c.version=?
       LEFT JOIN scores r ON r.event_id=e.id AND r.symbol=? AND r.scorer='rules' AND r.version=?
