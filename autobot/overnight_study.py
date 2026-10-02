@@ -30,9 +30,12 @@ received up to that close. tests/test_no_lookahead.py checks it on truncated dat
 """
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Dict, List, Optional, Sequence, Tuple
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -41,6 +44,9 @@ from . import indicators as ind
 from .backtest import CostModel
 
 NY = "America/New_York"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "data" / "overnight_study.json"
+LONG_DAYS = 740
 
 # condition -> plain description (reports and the Lab use plain.OVERNIGHT_CONDITIONS)
 CONDITIONS = ["signal_on", "in_profit", "in_profit_x", "trend_regime", "not_friday", "no_earnings", "no_bad_news"]
@@ -50,7 +56,8 @@ DEFAULTS = {
     "edge_mult": 2.0,          # cost multiplier for fills at the open and in the last bar
     "profit_x_pct": 0.5,       # in_profit_x: unrealised gain above this %
     "bad_news_hours": 24,      # no_bad_news: look back this many hours from the decision
-    "bad_news_materiality": 3,  # ... at stories of at least this materiality (1-5)
+    "bad_news_materiality": 4,  # ... at stories of at least this materiality (1-5)
+    "bad_news_alt_materiality": 3,  # reported alongside as no_bad_news_m3
     "bad_news_sentiment": 0.0,  # ... with sentiment below this (-1..+1)
 }
 
@@ -80,6 +87,7 @@ def policies(flatten_min: int = 5, flatten_mins: Sequence[int] = (5, 15, 30)) ->
         "if_all_fridays_ok": ("signal_on", "in_profit", "trend_regime", "no_earnings", "no_bad_news"),
     }
     out += [Policy(k, "conditional", flatten_min, v) for k, v in combos.items()]
+    out.append(Policy("if_no_bad_news_m3", "conditional", flatten_min, ("no_bad_news_m3",)))
     return out
 
 
@@ -140,6 +148,7 @@ class Inputs:
     bad_news_t: np.ndarray = field(default_factory=lambda: np.zeros(0, "int64"))  # ns UTC, sorted
     bad_news_hours: float = 24.0
     profit_x_pct: float = 0.5
+    bad_news_alt: Dict[str, np.ndarray] = field(default_factory=dict)  # extra flags no_bad_news_<key>
 
     def __post_init__(self):
         df = self.df
@@ -171,11 +180,18 @@ class Inputs:
         """The first bar of [a, b) that ends within flatten_min of the close but at least one bar
         before it (an order decided at the last bar's close can't be filled before the close, so
         e.g. 15-minute bars with N = 5 decide at 15:45). Clock-based, so causal. None if the
-        session has no such bar (missing data): then nothing is decided and the strategy alone
-        holds or not."""
+        session's bars stop before the flatten time (missing data): then nothing is decided and
+        the strategy alone holds or not. If the bars inside that window are missing (thin IEX
+        data) but a last bar follows, the live bot still acts on the clock with what it knows,
+        so the decision falls on the bar before."""
         m = self.mins_to_close[a:b]
-        k = np.flatnonzero((m <= max(flatten_min, self.step_min) + 1e-9) & (m >= self.step_min - 1e-9))
-        return a + int(k[0]) if len(k) else None
+        k = np.flatnonzero(m <= max(flatten_min, self.step_min) + 1e-9)
+        if not len(k):
+            return None
+        i = a + int(k[0])
+        if m[k[0]] >= self.step_min - 1e-9:
+            return i
+        return i - 1 if i - 1 >= a else None
 
     def next_session(self, d: date) -> date:
         nxt = self.cal.next.get(d) if d in self.cal.index else None
@@ -196,8 +212,13 @@ class Inputs:
             "not_friday": pd.Timestamp(d).weekday() != 4,
             "no_earnings": self.next_session(d) not in self.earnings,
             "no_bad_news": bool(hi <= lo),
+            **{f"no_bad_news_{k}": self._quiet(v, t) for k, v in self.bad_news_alt.items()},
             "_pnl_%": float(pnl),
         }
+
+    def _quiet(self, times: np.ndarray, t: int) -> bool:
+        lo = np.searchsorted(times, t - int(self.bad_news_hours * 3.6e12), side="right")
+        return bool(np.searchsorted(times, t, side="right") <= lo)
 
 
 # ----------------------------------------------------------------- simulation
@@ -295,7 +316,9 @@ def build_inputs(symbol: str, df: pd.DataFrame, strategy: str, params: Dict, cos
                   earnings=frozenset(earnings_sessions(symbol)) if news else frozenset(),
                   bad_news_t=bad_news_times(symbol, int(o["bad_news_materiality"]), float(o["bad_news_sentiment"]))
                   if news else np.zeros(0, "int64"),
-                  bad_news_hours=float(o["bad_news_hours"]), profit_x_pct=float(o["profit_x_pct"]))
+                  bad_news_hours=float(o["bad_news_hours"]), profit_x_pct=float(o["profit_x_pct"]),
+                  bad_news_alt={"m3": bad_news_times(symbol, int(o["bad_news_alt_materiality"]), float(o["bad_news_sentiment"]))
+                                if news else np.zeros(0, "int64")})
 
 
 # ----------------------------------------------------------------- walk-forward
@@ -319,3 +342,376 @@ def walk_forward(inp: Inputs, pols: List[Policy], win: List[Tuple[int, int, int,
         for s in range(session_index(inp, a), session_index(inp, b - 1) + 1):
             per[s] = best
     return {"result": simulate(inp, per), "choices": choices}
+
+
+# ----------------------------------------------------------------- the study
+def trading_calendar(start: date, end: date) -> Optional[Dict[date, pd.Timestamp]]:
+    """Session closes from Alpaca's trading calendar (half days included), or None offline."""
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetCalendarRequest
+        from .data import _keys, with_timeout
+        k, sec = _keys()
+        tc = with_timeout(TradingClient(k, sec, paper=True))
+        return {c.date: pd.Timestamp(c.close) for c in tc.get_calendar(GetCalendarRequest(start=start, end=end))}
+    except Exception:  # noqa: BLE001  no keys / no network: calendar() falls back to the bars
+        return None
+
+
+def load_bars(sym: str, tf: str, days: int) -> pd.DataFrame:
+    """Regular-hours bars for the last `days`: the newest cached download of that length if
+    there is one (the 740-day 5-minute caches), else a fresh (free IEX) download."""
+    from .data import CACHE_DIR, fetch_bars
+    files = sorted(CACHE_DIR.glob(f"{sym.replace('/', '-')}_{tf}_{days}d_*.csv.gz"))
+    end = None
+    if files:
+        stamp = files[-1].name.split("_")[-1].split(".")[0]
+        end = datetime.strptime(stamp, "%Y%m%d").replace(hour=12, tzinfo=timezone.utc)
+    return fetch_bars([sym], tf, days, end=end, rth_only=True)[sym]
+
+
+def _span(day: np.ndarray, d0: date, d1: date) -> Tuple[int, int]:
+    return int(np.searchsorted(day, d0, side="left")), int(np.searchsorted(day, d1, side="right"))
+
+
+def _held(nights: pd.DataFrame, d0: date, d1: date) -> pd.DataFrame:
+    """Nights in [d0, d1] (by decision date) on which a position was carried."""
+    if nights is None or nights.empty or "pos_night" not in nights:
+        return pd.DataFrame(columns=["symbol", "date", "next_date", "kind", "result_%", "gap_%", "pos_night"])
+    n = nights[(nights.date >= d0) & (nights.date <= d1) & nights["result_%"].notna()]
+    return n[n.pos_night != 0]
+
+
+def _mean_ret(rets: List[pd.Series]) -> pd.Series:
+    return pd.concat(rets, axis=1, sort=True).fillna(0).mean(axis=1) if rets else pd.Series(dtype=float)
+
+
+def _stats(rets: List[pd.Series], parts: List[pd.DataFrame], nights: pd.DataFrame) -> Dict:
+    """Equal-weight account over symbols: metrics of the averaged returns; costs and the P&L
+    split as the average of the symbols' sums (% of the account); night statistics over every
+    held symbol-night (% of that position)."""
+    from .backtest import _trades, metrics
+    ret = _mean_ret(rets)
+    m = metrics(pd.DataFrame({"ret": ret, "equity": (1 + ret).cumprod(), "position": 1.0}, index=ret.index)) if len(ret) else {}
+    k = max(1, len(parts))
+    out = {"return_%": float(m.get("total_return_%", 0.0)), "sharpe": float(m.get("sharpe", 0.0)),
+           "max_drawdown_%": float(m.get("max_drawdown_%", 0.0)),
+           "trades": int(sum(len(_trades(p)) for p in parts)),
+           "cost_%": round(sum(p.cost.sum() for p in parts) / k * 100, 2),
+           "intraday_%": round(sum(p.intraday.sum() for p in parts) / k * 100, 2),
+           "overnight_%": round(sum(p.overnight.sum() for p in parts) / k * 100, 2),
+           "weekend_%": round(sum(p.weekend.sum() for p in parts) / k * 100, 2),
+           "nights": int(len(nights))}
+    if len(nights):
+        r = nights["result_%"].astype(float)
+        out.update({"helped_%": round(float((r > 0).mean() * 100), 1), "avg_night_%": round(float(r.mean()), 3),
+                    "worst_night_%": round(float(r.min()), 2), "worst_night_date": str(nights["date"].to_numpy()[r.to_numpy().argmin()]),
+                    "avg_gap_%": round(float(nights["gap_%"].abs().mean()), 3),
+                    "worst_gap_%": round(float(nights["gap_%"].abs().max()), 2)})
+    else:
+        out.update({"helped_%": None, "avg_night_%": None, "worst_night_%": None, "worst_night_date": None,
+                    "avg_gap_%": None, "worst_gap_%": None})
+    return out
+
+
+def _daily_equity(rets: List[pd.Series]) -> List[List]:
+    """The equal-weight account's equity at each New York day's last bar, for charts."""
+    ret = _mean_ret(rets)
+    if ret.empty:
+        return []
+    eq = (1 + ret).cumprod()
+    d = eq.groupby(np.asarray(eq.index.tz_convert(NY).date)).last()
+    return [[str(k), round(float(v), 5)] for k, v in d.items()]
+
+
+def _worth(nights: pd.DataFrame, pols: List[Policy]) -> List[Dict]:
+    """Nights the strategy held at the close (the 'hold' policy), grouped by each condition and
+    each combination, met or not: how many, average next-open result, share that gained, worst."""
+    rows = []
+    if nights.empty:
+        return rows
+    groups = [(c, (c,)) for c in CONDITIONS + ["no_bad_news_m3"] if c in nights]
+    groups += [(p.name, p.require) for p in pols if p.mode == "conditional" and len(p.require) > 1]
+    for name, req in groups:
+        ok = np.logical_and.reduce([nights[c].astype(bool).to_numpy() for c in req])
+        for val in (True, False):
+            g = nights[ok == val]["result_%"].astype(float)
+            rows.append({"group": name, "conditions": list(req), "met": val, "nights": int(len(g)),
+                         "avg_%": round(float(g.mean()), 3) if len(g) else None,
+                         "gained_%": round(float((g > 0).mean() * 100), 1) if len(g) else None,
+                         "worst_%": round(float(g.min()), 2) if len(g) else None,
+                         "sum_%": round(float(g.sum()), 2)})
+    return rows
+
+
+def _worst5(nights: pd.DataFrame) -> List[Dict]:
+    if nights.empty:
+        return []
+    w = nights.sort_values("result_%").head(5)
+    return [{"symbol": r["symbol"], "date": str(r["date"]), "next_date": str(r["next_date"]), "kind": r["kind"],
+             "position": float(r["pos_night"]), "gap_%": round(float(r["gap_%"]), 2), "result_%": round(float(r["result_%"]), 2)}
+            for _, r in w.iterrows()]
+
+
+class SymbolRun:
+    """One symbol and its job's strategy: every policy simulated once on the whole history."""
+
+    def __init__(self, sym: str, job: Dict, df: pd.DataFrame, r: Dict, opts: Dict, closes, pols: List[Policy],
+                 news: bool = True):
+        from . import recalibrate as rc
+        from .backtest import bars_per_year
+        self.sym, self.job, self.r, self.pols = sym, job, r, pols
+        cal = calendar(df, closes)
+        df = trim_to_calendar(df, cal)
+        self.inp = build_inputs(sym, df, job["strategy"], job.get("params") or {}, rc.costs_for(sym, r), opts, cal, news=news)
+        self.sim = {p.name: simulate(self.inp, p) for p in pols}
+        for v in self.sim.values():
+            if len(v["nights"]):
+                v["nights"]["symbol"] = sym
+        self.ppy = bars_per_year(df.index)
+
+    def score_fn(self, f: pd.DataFrame, a: int, b: int) -> float:
+        from . import recalibrate as rc
+        q = rc.quick(f.ret.to_numpy()[a:b], f.position.to_numpy()[a:b], self.ppy, len(set(self.inp.day[a:b])))
+        return rc.score(q, self.r["score_weights"])
+
+    def walk(self, d0: date, fallback: Policy) -> Optional[Dict]:
+        """Recalibration's windows from d0 (train_days / test_days)."""
+        from . import recalibrate as rc
+        win = rc.windows(self.inp.day, d0, int(self.r["train_days"]), int(self.r["test_days"]))
+        if not win:
+            return None
+        frames = {name: v["frame"] for name, v in self.sim.items()}
+        wf = walk_forward(self.inp, self.pols, win, frames, self.score_fn, fallback)
+        if len(wf["result"]["nights"]):
+            wf["result"]["nights"]["symbol"] = self.sym
+        return {"a": win[0][2], "b": win[-1][3], **wf}
+
+
+def _period(runs: List[SymbolRun], d0s: Dict[str, date], d1: date, pols: List[Policy], base: Policy) -> Dict:
+    """Every policy over [d0, d1] (per symbol and in total), the walk-forward on its test days,
+    each fixed policy on the same test days, worst nights and the 'what was worth holding' table."""
+    from .exit_study import paired
+    out = {"from": str(min(d0s.values())), "to": str(d1), "policies": [], "test_days": [], "walk_forward": None,
+           "worst_nights": {}, "worth_holding": [], "worth_holding_by_symbol": {}, "equity": {}, "equity_test": {}}
+    for p in pols:
+        rets, parts, nights, per_sym = [], [], [], {}
+        for run in runs:
+            a, b = _span(run.inp.day, d0s[run.sym], d1)
+            part = run.sim[p.name]["frame"].iloc[a:b]
+            n = _held(run.sim[p.name]["nights"], d0s[run.sym], d1)
+            rets.append(part.ret)
+            parts.append(part)
+            nights.append(n)
+            per_sym[run.sym] = _stats([part.ret], [part], n)
+        nn = pd.concat([x for x in nights if len(x)]) if any(len(x) for x in nights) else _held(None, d1, d1)
+        out["policies"].append({"name": p.name, "mode": p.mode, "flatten_min": p.flatten_min, "require": list(p.require),
+                                "total": _stats(rets, parts, nn), "per_symbol": per_sym})
+        out["worst_nights"][p.name] = _worst5(nn)
+        out["equity"][p.name] = _daily_equity(rets)
+        if p.mode == "hold":
+            out["worth_holding"] = _worth(nn, pols)
+            out["worth_holding_by_symbol"] = {run.sym: _worth(x, pols) for run, x in zip(runs, nights)}
+    wf_rets, wf_parts, wf_nights, choices, per_sym = [], [], [], [], {}
+    fixed: Dict[str, List[pd.DataFrame]] = {p.name: [] for p in pols}
+    for run in runs:
+        w = run.walk(d0s[run.sym], base)
+        if w is None:
+            continue
+        a, b = w["a"], w["b"]
+        f = w["result"]["frame"].iloc[a:b]
+        da, db = run.inp.day[a], run.inp.day[b - 1]
+        n = _held(w["result"]["nights"], da, db)
+        wf_rets.append(f.ret)
+        wf_parts.append(f)
+        wf_nights.append(n)
+        choices += w["choices"]
+        for p in pols:
+            fixed[p.name].append(run.sim[p.name]["frame"].iloc[a:b])
+        per_sym[run.sym] = {**_stats([f.ret], [f], n), "from": str(da), "to": str(db),
+                            "vs_flatten": paired(f.ret, run.sim[base.name]["frame"].iloc[a:b].ret),
+                            "choices": {str(k): int(v) for k, v in pd.Series(w["choices"]).value_counts().items()}}
+    if wf_rets:
+        base_all = _mean_ret([x.ret for x in fixed[base.name]])
+        nn = pd.concat([x for x in wf_nights if len(x)]) if any(len(x) for x in wf_nights) else _held(None, d1, d1)
+        out["walk_forward"] = {**_stats(wf_rets, wf_parts, nn), "vs_flatten": paired(_mean_ret(wf_rets), base_all),
+                               "choices": {str(k): int(v) for k, v in pd.Series(choices).value_counts().items()},
+                               "per_symbol": per_sym, "worst_nights": _worst5(nn),
+                               "from": min(v["from"] for v in per_sym.values()), "to": max(v["to"] for v in per_sym.values())}
+        out["equity_test"]["walk_forward"] = _daily_equity(wf_rets)
+        for p in pols:
+            fr = fixed[p.name]
+            out["test_days"].append({"name": p.name, **_stats([x.ret for x in fr], fr, _held(None, d1, d1)),
+                                     "vs_flatten": None if p.name == base.name else paired(_mean_ret([x.ret for x in fr]), base_all)})
+            out["equity_test"][p.name] = _daily_equity([x.ret for x in fr])
+    return out
+
+
+def policy_text(p: Dict, opts: Dict) -> str:
+    """Plain description of a policy (plain.OVERNIGHT_POLICIES / OVERNIGHT_CONDITIONS)."""
+    from . import plain
+    if p["mode"] == "flatten":
+        return plain.OVERNIGHT_POLICIES["flatten"].format(n=p["flatten_min"])
+    if p["mode"] == "hold":
+        return plain.OVERNIGHT_POLICIES["hold"]
+    conds = [plain.OVERNIGHT_CONDITIONS[c].format(x=opts["profit_x_pct"], m=opts["bad_news_materiality"],
+                                                  m3=opts["bad_news_alt_materiality"], h=opts["bad_news_hours"])
+             for c in p["require"]]
+    text = conds[0] if len(conds) == 1 else ", ".join(conds[:-1]) + " and " + conds[-1]
+    return plain.OVERNIGHT_POLICIES["conditional"].format(conds=text)
+
+
+def _bps(v: Dict) -> Dict[str, str]:
+    return {"mean": f"{v['mean_bps']:+.1f}", "lo": f"{v['ci95_bps'][0]:+.1f}", "hi": f"{v['ci95_bps'][1]:+.1f}"}
+
+
+def summary(res: Dict) -> List[str]:
+    """Plain-English findings from plain.OVERNIGHT templates, filled with the numbers only."""
+    from . import plain
+    T = plain.OVERNIGHT
+    lines: List[str] = []
+    pkey = "long" if "long" in res["periods"] else "90d"
+    per = res["periods"][pkey]
+    period = T["period"][pkey].format(days=per.get("days", ""))
+    wf = per.get("walk_forward")
+    if wf:
+        v = wf["vs_flatten"]
+        key = "verdict_yes" if v["significant"] and v["mean_bps"] > 0 else "verdict_worse" if v["significant"] else "verdict_no"
+        lines.append(T[key].format(**_bps(v)))
+        cands = [t for t in per["test_days"] if t["vs_flatten"]]
+        if cands:
+            b = max(cands, key=lambda t: t["vs_flatten"]["mean_bps"])
+            v = b["vs_flatten"]
+            sig = "" if v["significant"] else ", within chance (and it is the best of many, chosen afterwards)"
+            lines.append(T["best_fixed"].format(policy=res["policy_text"][b["name"]], diff=f"{v['mean_bps']:+.1f}",
+                                                lo=f"{v['ci95_bps'][0]:+.1f}", hi=f"{v['ci95_bps'][1]:+.1f}", sig=sig))
+    hold = next(p for p in per["policies"] if p["mode"] == "hold")
+    flat = next(p for p in per["policies"] if p["name"] == res["base_policy"])
+    for s in res["symbols"]:
+        sym, nick = s["symbol"], plain.nick(s["strategy"])
+        h, f = hold["per_symbol"].get(sym), flat["per_symbol"].get(sym)
+        if not h or not f:
+            continue
+        if not h["nights"]:
+            lines.append(T["symbol_none"].format(sym=sym, nick=nick))
+            continue
+        diff = h["return_%"] - f["return_%"]
+        lines.append(T["symbol"].format(sym=sym, nick=nick, verb="added" if diff >= 0 else "lost", diff=f"{abs(diff):.1f}",
+                                        period=period, nights=h["nights"], helped=f"{h['helped_%']:.0f}",
+                                        worst=f"{h['worst_night_%']:+.2f}", date=h["worst_night_date"]))
+        e = next((r for r in per["worth_holding_by_symbol"].get(sym, []) if r["group"] == "no_earnings" and r["met"] is False), None)
+        if e and e["nights"]:
+            lines.append(T["earnings"].format(sym=sym, n=e["nights"], avg=f"{e['avg_%']:+.2f}", worst=f"{e['worst_%']:+.2f}"))
+    lines.append(T["caveat"].format(slip=f"{res['settings']['edge_mult']:g}"))
+    return lines
+
+
+def run(cfg: Dict, days: int = 90, long: bool = True, opts: Optional[Dict] = None,
+        fetch: Optional[Callable[[str, str, int], pd.DataFrame]] = None, closes=None,
+        as_of: Optional[date] = None, progress: Optional[Callable[[float, str], None]] = None,
+        news: bool = True) -> Dict:
+    """The study for every enabled job's stock symbols (crypto is never flattened).
+    fetch(sym, tf, days) -> bars (tests); default load_bars (the 740-day cache for the long
+    period). closes: the exchange calendar (default Alpaca's; None offline: guessed from bars)."""
+    from . import recalibrate as rc
+    from .data import is_crypto
+    say = progress or (lambda f, m: None)
+    o = {**DEFAULTS, **(opts or {})}
+    live = cfg["live"]
+    tf = live["timeframe"]
+    jobs = [j for j in live.get("jobs") or [] if j.get("enabled", True)]
+    pairs = [(j, s) for j in jobs for s in j["symbols"] if not is_crypto(s)]
+    if not pairs:
+        raise ValueError("No enabled stock jobs to study (crypto is never flattened).")
+    r = rc.settings(cfg)
+    n_cfg = int(r["flatten_min"]) or 5
+    pols = policies(n_cfg, o["flatten_mins"])
+    if all(p.name != f"flatten_{n_cfg}" for p in pols):
+        pols.insert(0, Policy(f"flatten_{n_cfg}", "flatten", n_cfg))
+    base = next(p for p in pols if p.name == f"flatten_{n_cfg}")
+    load = fetch or load_bars
+    want = LONG_DAYS if long else days + int(r["warmup_days"]) + 5
+    data = {}
+    for k, (job, sym) in enumerate(pairs):
+        say(0.05 * k / len(pairs), f"{sym}: loading {want} days of {tf} bars")
+        data[sym] = load(sym, tf, want)
+    end = as_of or min(np.asarray(d.index.tz_convert(NY).date).max() for d in data.values())
+    if closes is None and fetch is None:
+        start = min(np.asarray(d.index.tz_convert(NY).date).min() for d in data.values())
+        closes = trading_calendar(start, end + timedelta(days=10))
+    runs = []
+    for k, (job, sym) in enumerate(pairs):
+        say(0.05 + 0.75 * k / len(pairs), f"{sym}: {len(pols)} overnight policies")
+        df = data[sym]
+        df = df[np.asarray(df.index.tz_convert(NY).date) <= end].copy()
+        df.attrs["symbol"] = sym
+        runs.append(SymbolRun(sym, job, df, r, o, closes, pols, news=news))
+    periods = {}
+    say(0.82, f"last {days} days and walk-forward")
+    short0 = end - timedelta(days=days - 1)
+    periods["90d"] = {**_period(runs, {x.sym: short0 for x in runs}, end, pols, base), "days": days}
+    if long:
+        say(0.9, "whole period and walk-forward")
+        d0s = {x.sym: x.inp.day[0] + timedelta(days=int(r["warmup_days"])) for x in runs}
+        periods["long"] = {**_period(runs, d0s, end, pols, base), "days": (end - min(d0s.values())).days + 1}
+    res = {"as_of": str(end), "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+           "timeframe": tf, "flatten_min": n_cfg, "base_policy": base.name,
+           "calendar": "alpaca" if closes else "guessed from the bars",
+           "train_days": int(r["train_days"]), "test_days": int(r["test_days"]),
+           "settings": {k: o[k] for k in DEFAULTS},
+           "symbols": [{"symbol": s, "job": j["name"], "strategy": j["strategy"], "params": j.get("params") or {}} for j, s in pairs],
+           "policy_text": {p.name: policy_text({"mode": p.mode, "flatten_min": p.flatten_min, "require": list(p.require)}, o)
+                           for p in pols},
+           "periods": periods}
+    res["summary"] = summary(res)
+    wf = (periods.get("long") or periods["90d"]).get("walk_forward")
+    res["beats_flatten_oos"] = bool(wf and wf["vs_flatten"]["significant"] and wf["vs_flatten"]["mean_bps"] > 0)
+    say(1.0, "done")
+    return res
+
+
+def _clean(o):
+    if isinstance(o, dict):
+        return {str(k): _clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_clean(v) for v in o]
+    if isinstance(o, np.bool_):
+        return bool(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, (float, np.floating)):
+        return round(float(o), 6) if math.isfinite(float(o)) else None
+    if isinstance(o, (date, pd.Timestamp)):
+        return str(o)
+    return o
+
+
+def save(res: Dict, path: Path = OUT) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_clean(res), indent=1), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def load(path: Path = OUT) -> Optional[Dict]:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def main():
+    import argparse
+    import sys
+    import yaml
+    sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="Overnight study: sell before the close vs hold overnight.")
+    ap.add_argument("--days", type=int, default=90)
+    ap.add_argument("--no-long", action="store_true", help="only the last --days (skip the 740-day period)")
+    a = ap.parse_args()
+    cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    res = run(cfg, a.days, long=not a.no_long, progress=lambda f, m: print(f"{f:4.0%} {m}", flush=True))
+    print("\n".join(res["summary"]))
+    print("saved", save(res))
+
+
+if __name__ == "__main__":
+    main()

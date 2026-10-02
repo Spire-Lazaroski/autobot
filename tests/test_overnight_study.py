@@ -192,6 +192,12 @@ def test_decision_bar_is_the_last_one_that_can_still_trade():
     a, b = hi.sessions[0]
     assert h.index[hi.decision_bar(a, b, 5)].tz_convert(NY).strftime("%H:%M") == "15:30"   # ends 15:45
     assert hi.decision_bar(a, a + 3, 5) is None        # session data ends early: nothing decided
+    ny = df.index.tz_convert(NY)
+    gap = df[~((np.asarray(ny.date) == WEEK[0]) & np.isin(ny.strftime("%H:%M"), ["15:45", "15:50"]))]
+    g = inputs(gap, 1.0)
+    a, b = g.sessions[0]
+    assert t(df.index.get_loc(gap.index[g.decision_bar(a, b, 5)])) == "15:40"   # window bars missing: the bar before
+    assert ov.simulate(g, P("flatten", 5))["frame"].overnight.sum() == 0
 
 
 def test_half_day_after_hours_prints_are_trimmed():
@@ -209,3 +215,53 @@ def test_half_day_after_hours_prints_are_trimmed():
     assert f.overnight.sum() == 0 and f.weekend.sum() == 0
     closes = {date(2026, 11, 27): pd.Timestamp("2026-11-27 13:00")}   # from the exchange calendar
     assert ov.calendar(bars(days), closes).loc[date(2026, 11, 27), "close"] == pd.Timestamp("2026-11-27 13:00", tz=NY)
+
+
+def _gapped(sym, days=120, seed=2):
+    from autobot.data import synthetic_bars
+    df = synthetic_bars([sym], "5Min", days, seed=seed)[sym]
+    rng = np.random.default_rng(seed)
+    first = np.r_[True, np.asarray(df.index.tz_convert(NY).date)[1:] != np.asarray(df.index.tz_convert(NY).date)[:-1]]
+    df.loc[first, "open"] = df.close.shift(1)[first] * (1 + rng.normal(0, 0.01, first.sum()))
+    df.iloc[0, df.columns.get_loc("open")] = df.close.iloc[0]
+    df.attrs["symbol"] = sym
+    return df
+
+
+def test_run_writes_a_complete_study(tmp_path):
+    cfg = {"live": {"timeframe": "5Min", "risk": {"flatten_before_close_min": 5}, "jobs": [
+        {"name": "a", "strategy": "ema_cross", "params": {}, "symbols": ["AAA"], "enabled": True},
+        {"name": "b", "strategy": "donchian_breakout", "params": {}, "symbols": ["BBB"], "enabled": True},
+        {"name": "c", "strategy": "ema_cross", "params": {}, "symbols": ["BTC/USD"], "enabled": True},
+        {"name": "off", "strategy": "ema_cross", "params": {}, "symbols": ["CCC"], "enabled": False}]}}
+    data = {"AAA": _gapped("AAA"), "BBB": _gapped("BBB", seed=3)}
+    res = ov.run(cfg, 90, long=True, fetch=lambda s, tf, d: data[s], news=False)
+    assert [s["symbol"] for s in res["symbols"]] == ["AAA", "BBB"]          # crypto and disabled jobs left out
+    assert res["base_policy"] == "flatten_5" and res["calendar"] == "guessed from the bars"
+    for key in ("90d", "long"):
+        per = res["periods"][key]
+        names = [p["name"] for p in per["policies"]]
+        assert "hold" in names and "if_all" in names
+        flat = next(p for p in per["policies"] if p["name"] == "flatten_5")["total"]
+        assert flat["overnight_%"] == 0 and flat["weekend_%"] == 0 and flat["nights"] == 0
+        hold = next(p for p in per["policies"] if p["name"] == "hold")["total"]
+        assert hold["nights"] > 0
+        wf = per["walk_forward"]
+        assert wf and set(wf["vs_flatten"]) >= {"mean_bps", "ci95_bps", "significant"}
+        assert sum(wf["choices"].values()) > 0
+        assert any(r["group"] == "if_all" for r in per["worth_holding"])
+        assert per["equity"]["hold"] and per["equity_test"]["walk_forward"]
+    assert res["summary"][0].startswith("Out of sample")
+    assert isinstance(res["beats_flatten_oos"], bool)
+    path = ov.save(res, tmp_path / "ov.json")
+    back = ov.load(path)
+    assert back["periods"]["long"]["policies"][0]["name"] == res["periods"]["long"]["policies"][0]["name"]
+
+
+def test_policy_text_reads_plainly():
+    o = ov.DEFAULTS
+    assert ov.policy_text({"mode": "flatten", "flatten_min": 15, "require": []}, o) == "sell everything 15 minutes before the close"
+    t = ov.policy_text({"mode": "conditional", "flatten_min": 5, "require": ["signal_on", "in_profit", "no_earnings"]}, o)
+    assert t == ("keep the position overnight only if the strategy still wants the position, the position is in profit "
+                 "and no earnings release before the next open")
+    assert "materiality 4+" in ov.policy_text({"mode": "conditional", "flatten_min": 5, "require": ["no_bad_news"]}, o)

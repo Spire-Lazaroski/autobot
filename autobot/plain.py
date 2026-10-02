@@ -202,6 +202,39 @@ RECAL_SHAPES: Dict[str, str] = {
     "exit": ", with a {trail}% trailing exit (re-entry: {reentry})",
 }
 
+OVERNIGHT_CONDITIONS: Dict[str, str] = {
+    "signal_on": "the strategy still wants the position",
+    "in_profit": "the position is in profit",
+    "in_profit_x": "the position is more than {x}% in profit",
+    "trend_regime": "the market mood is trending",
+    "not_friday": "it is not a Friday",
+    "no_earnings": "no earnings release before the next open",
+    "no_bad_news": "no important bad news (materiality {m}+) in the last {h} hours",
+    "no_bad_news_m3": "no notable bad news (materiality {m3}+) in the last {h} hours",
+}
+OVERNIGHT_POLICIES: Dict[str, str] = {
+    "flatten": "sell everything {n} minutes before the close",
+    "hold": "keep whatever the strategy holds overnight",
+    "conditional": "keep the position overnight only if {conds}",
+}
+OVERNIGHT: Dict[str, str] = {
+    "verdict_no": ("Out of sample, after costs, nothing beats selling everything before the close. The overnight rule picked on "
+                   "earlier days differed from selling before the close by {mean} bps a day (95% range {lo} to {hi}), "
+                   "which is within chance."),
+    "verdict_worse": ("Out of sample, after costs, holding overnight did worse than selling before the close: {mean} bps a day "
+                      "(95% range {lo} to {hi})."),
+    "verdict_yes": ("Out of sample, after costs, the overnight rule picked on earlier days beat selling before the close by "
+                    "{mean} bps a day (95% range {lo} to {hi})."),
+    "best_fixed": "Best single rule on the test days: '{policy}', {diff} bps a day against selling before the close (95% range {lo} to {hi}){sig}.",
+    "symbol": ("Holding {sym} overnight whenever its strategy ({nick}) still held it {verb} {diff}% over {period} compared with "
+               "selling before the close; {nights} nights held, {helped}% of them gained, worst night {worst}% ({date})."),
+    "symbol_none": "{sym}: its strategy ({nick}) never held a position at the close, so the overnight rule makes no difference.",
+    "earnings": "Holding {sym} through earnings ({n} nights) made {avg}% a night on average; worst {worst}%.",
+    "period": {"long": "{days} days", "90d": "the last 90 days"},
+    "caveat": ("These are backtests on IEX prices with {slip}x the usual trading cost at the open and in the last bar. "
+               "Only the walk-forward ('out of sample') figures are an honest test; the full-period figures show where the money came from."),
+}
+
 GLOSSARY: Dict[str, str] = {
     "Paper trading": "Trading with pretend money in a practice account; no real money is at risk.",
     "Buy and hold": "Buying once and simply keeping it; the baseline every strategy is compared with.",
