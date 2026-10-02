@@ -104,7 +104,7 @@ def run_one(cfg: Dict, version: str, cost: str, phase: str, symbols: Sequence[st
 
 
 def run_phase(cfg: Dict, phase: str, versions: Sequence[str] = tuple(VERSIONS), costs: Sequence[str] = tuple(COSTS),
-              workers: int = 4, symbols: Optional[Sequence[str]] = None, progress=print) -> None:
+              workers: int = 2, symbols: Optional[Sequence[str]] = None, progress=print) -> None:
     syms = list(symbols or cs.universe_symbols())
     data = cs.Data(syms)  # once, for the calendar and the common last day
     if phase == "confirm":
@@ -113,7 +113,10 @@ def run_phase(cfg: Dict, phase: str, versions: Sequence[str] = tuple(VERSIONS), 
             raise RuntimeError(f"run the design phase first: {missing}")
         if not (PARTS / "design_frozen.json").exists():
             raise RuntimeError("write the design report first (--report), so the design period is frozen before confirmation")
-    tasks = [(v, c) for c in costs for v in versions]
+    tasks = [(v, c) for c in costs for v in versions if not _part(c, v, phase).exists()]  # finished parts are kept
+    for v, c in [(v, c) for c in costs for v in versions if _part(c, v, phase).exists()]:
+        progress(f"{c} {v} {phase}: already done, kept")
+    # each worker holds one symbol's backtests in memory (~1-2 GB); keep workers low on this machine
     with ProcessPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(run_one, cfg, v, c, phase, syms, data.closes, data.as_of) for v, c in tasks]
         for f in futs:
@@ -367,7 +370,7 @@ def main():
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--versions", default=",".join(VERSIONS))
     ap.add_argument("--costs", default=",".join(COSTS))
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--workers", type=int, default=2)
     a = ap.parse_args()
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     if a.phase:
