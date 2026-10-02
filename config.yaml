@@ -213,7 +213,7 @@ universe:
   min_dollar_volume: 1000000
   total:
     min: 10
-    max: 15
+    max: 20
   buckets:
     tech:
       min: 5
@@ -240,6 +240,26 @@ universe:
       - USO
       - GLD
       - SLV
+    health:
+      min: 2
+      max: 3
+      candidates:
+      - LLY
+      - UNH
+      - JNJ
+      - ABBV
+      - MRK
+      - PFE
+    staples:
+      min: 2
+      max: 3
+      candidates:
+      - WMT
+      - COST
+      - KO
+      - PEP
+      - PG
+      - MCD
     crypto:
       min: 1
       max: 2
