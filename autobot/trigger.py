@@ -20,6 +20,9 @@ bars_if_flat: if the price instead stays just short of the trigger (0.1% of the 
 the last close), how many bars until the signal changes anyway (an average crossing can keep
 moving towards the price), up to MAX_FLAT_BARS; None if not within that.
 
+trigger_levels: the same search, but keeping the nearest boundary on EACH side (below and above),
+sorted into buy and sell levels, for the separate 'Trigger buy' / 'Trigger sell' columns.
+
 Peak since entry: the best price since the position was opened, and how much has been given back.
 """
 from __future__ import annotations
@@ -60,51 +63,35 @@ def _signal_fn(strategy: str, df: pd.DataFrame, params: Dict, allow_short: bool,
     return last
 
 
-def trigger_level(strategy: str, df: pd.DataFrame, params: Optional[Dict] = None, allow_short: bool = False,
-                  long_only: bool = False) -> Optional[Dict]:
-    """The nearest next-bar close that changes the signal, or None if none within +-5%.
-    long_only: crypto (no shorting on Alpaca), so a short signal counts as flat, like the bot."""
-    params = params or {}
-    if df is None or len(df) < 3:
-        return None
+def _setup(strategy, df, params, allow_short, long_only):
     cur = float(get_signal(strategy, df.copy(), params, allow_short).iloc[-1])
     if long_only:
         cur = max(cur, 0.0)
-    last = float(df.close.iloc[-1])
-    sig = _signal_fn(strategy, df, params, allow_short, long_only)
-    differs = lambda p: abs(sig([p]) - cur) > 1e-9  # noqa: E731
-    # Usually an unchanged price keeps the signal and we look for the nearest price that changes it.
-    # Sometimes the signal changes at the next close even if the price doesn't move (e.g. momentum:
-    # an old price leaves the lookback); then we look for the nearest price that would KEEP it.
-    # Either way the answer is the nearest boundary between "keeps" and "changes".
-    past = differs(last)
-    want = (lambda p: not differs(p)) if past else differs
-    best = None
-    for side in (-1, 1):
-        prev = 0.0
-        k = 1
-        while k * STEP <= SPAN + 1e-12:
-            off = k * STEP
-            if want(last * (1 + side * off)):
-                lo, hi = prev, off  # `want` false at lo, true at hi
-                for _ in range(BISECT):
-                    mid = (lo + hi) / 2
-                    if want(last * (1 + side * mid)):
-                        hi = mid
-                    else:
-                        lo = mid
-                if best is None or hi < best[1]:
-                    best = (side, hi, lo)
-                break
-            prev = off
-            k += 1
-    flip_to = sig([last]) if past else None
-    if best is None:
-        if not past:
-            return None  # no change within +-5%
-        return {"current_signal": cur, "flip_to": flip_to, "trigger_price": None, "distance_pct": None, "direction": None,
-                "kind": "sell" if flip_to < cur else "buy", "already_past": True, "bars_if_flat": 1, "last_close": last}
-    side, off, lo = best
+    return cur, float(df.close.iloc[-1]), _signal_fn(strategy, df, params, allow_short, long_only)
+
+
+def _scan(want: Callable[[float], bool], last: float, side: int) -> Optional[tuple]:
+    """Nearest offset on one side (-1 below, +1 above) where `want` becomes true: (hi, lo) with
+    `want` true at hi and false at lo (fractions of the last close), or None within +-SPAN."""
+    prev = 0.0
+    k = 1
+    while k * STEP <= SPAN + 1e-12:
+        off = k * STEP
+        if want(last * (1 + side * off)):
+            lo, hi = prev, off
+            for _ in range(BISECT):
+                mid = (lo + hi) / 2
+                if want(last * (1 + side * mid)):
+                    hi = mid
+                else:
+                    lo = mid
+            return hi, lo
+        prev = off
+        k += 1
+    return None
+
+
+def _level(sig, cur: float, last: float, side: int, off: float, lo: float, past: bool, flip_to: Optional[float]) -> Dict:
     # the bisection end on the CHANGING side of the boundary (hi when looking for a change, lo when
     # looking for a keep); not rounded, since rounding could cross the boundary
     price = last * (1 + side * (off if not past else lo))
@@ -121,6 +108,65 @@ def trigger_level(strategy: str, df: pd.DataFrame, params: Optional[Dict] = None
             "distance_pct": round(side * off * 100, 3), "direction": "above" if flip_side > 0 else "below",
             "kind": "sell" if flip_to < cur else "buy", "already_past": past, "bars_if_flat": bars_if_flat,
             "last_close": last}
+
+
+def trigger_level(strategy: str, df: pd.DataFrame, params: Optional[Dict] = None, allow_short: bool = False,
+                  long_only: bool = False) -> Optional[Dict]:
+    """The nearest next-bar close that changes the signal, or None if none within +-5%.
+    long_only: crypto (no shorting on Alpaca), so a short signal counts as flat, like the bot."""
+    params = params or {}
+    if df is None or len(df) < 3:
+        return None
+    cur, last, sig = _setup(strategy, df, params, allow_short, long_only)
+    differs = lambda p: abs(sig([p]) - cur) > 1e-9  # noqa: E731
+    # Usually an unchanged price keeps the signal and we look for the nearest price that changes it.
+    # Sometimes the signal changes at the next close even if the price doesn't move (e.g. momentum:
+    # an old price leaves the lookback); then we look for the nearest price that would KEEP it.
+    # Either way the answer is the nearest boundary between "keeps" and "changes".
+    past = differs(last)
+    want = (lambda p: not differs(p)) if past else differs
+    best = None
+    for side in (-1, 1):
+        r = _scan(want, last, side)
+        if r and (best is None or r[0] < best[1]):
+            best = (side, r[0], r[1])
+    flip_to = sig([last]) if past else None
+    if best is None:
+        if not past:
+            return None  # no change within +-5%
+        return {"current_signal": cur, "flip_to": flip_to, "trigger_price": None, "distance_pct": None, "direction": None,
+                "kind": "sell" if flip_to < cur else "buy", "already_past": True, "bars_if_flat": 1, "last_close": last}
+    return _level(sig, cur, last, *best, past, flip_to)
+
+
+def trigger_levels(strategy: str, df: pd.DataFrame, params: Optional[Dict] = None, allow_short: bool = False,
+                   long_only: bool = False) -> Optional[Dict]:
+    """Both sides at once, for the separate 'Trigger buy' / 'Trigger sell' columns:
+    {"nearest": <same as trigger_level>, "buy": [levels], "sell": [levels], "position": current signal}.
+    Normally there is one boundary below and one above the last close (either may be missing within
+    +-5%), and each is a buy or a sell: a long rsi_reversion sells ABOVE (it takes its profit), a
+    long donchian_breakout sells BELOW (its exit channel, which rises with the price) and has
+    nothing above. When the signal changes at the next close anyway (already_past) there is only
+    the one level that would prevent it, as in trigger_level."""
+    params = params or {}
+    if df is None or len(df) < 3:
+        return None
+    cur, last, sig = _setup(strategy, df, params, allow_short, long_only)
+    differs = lambda p: abs(sig([p]) - cur) > 1e-9  # noqa: E731
+    out = {"nearest": None, "buy": [], "sell": [], "position": cur}
+    if differs(last):
+        out["nearest"] = trigger_level(strategy, df, params, allow_short, long_only)
+        if out["nearest"]:
+            out[out["nearest"]["kind"]].append(out["nearest"])
+        return out
+    for side in (-1, 1):
+        r = _scan(differs, last, side)
+        if r:
+            lv = _level(sig, cur, last, side, r[0], r[1], False, None)
+            out[lv["kind"]].append(lv)
+            if out["nearest"] is None or abs(lv["distance_pct"]) < abs(out["nearest"]["distance_pct"]):
+                out["nearest"] = lv
+    return out
 
 
 # ----------------------------------------------------------------- peak since entry
@@ -184,3 +230,23 @@ def with_exit(trig: Optional[Dict], exit_view: Optional[Dict], last: float) -> O
     if exit_view.get("state") == "waiting" or trig is None or trig.get("distance_pct") is None:
         return lvl  # while waiting, the strategy's own flip doesn't trade; the re-entry level does
     return lvl if abs(lvl["distance_pct"]) < abs(trig["distance_pct"]) else {**trig, "source": "strategy"}
+
+
+def with_exit_levels(levels: Optional[Dict], exit_view: Optional[Dict], last: float) -> Optional[Dict]:
+    """trigger_levels plus the exit layer, by the same rules as with_exit: in a position the trail
+    level replaces a strategy level on the same side of the price only if it is nearer; while
+    waiting after a trail exit the strategy's own levels don't trade, only the re-entry level does."""
+    if not exit_view or levels is None:
+        return levels
+    lvl = with_exit(None, exit_view, last)
+    if lvl is None:
+        return levels
+    if lvl["source"] == "re-entry":
+        return {**levels, "buy": [lvl] if lvl["kind"] == "buy" else [], "sell": [lvl] if lvl["kind"] == "sell" else []}
+    out = {**levels, "buy": [dict(lv) for lv in levels["buy"]], "sell": [dict(lv) for lv in levels["sell"]]}
+    side = [lv for lv in out[lvl["kind"]] if lv.get("direction") == lvl["direction"] and lv.get("distance_pct") is not None]
+    if side and abs(side[0]["distance_pct"]) <= abs(lvl["distance_pct"]):
+        side[0]["source"] = "strategy"
+        return out
+    out[lvl["kind"]] = [lvl] + [lv for lv in out[lvl["kind"]] if lv.get("direction") != lvl["direction"]]
+    return out

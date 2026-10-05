@@ -43,9 +43,11 @@ interface Trigger {
   source?: "strategy" | "trail" | "re-entry";   // with an exit layer: which rule the nearest level comes from
 }
 interface Peak { peak: number; gave_back_pct: number; since: string }
+/** Both sides of the price (autobot/trigger.trigger_levels): at most one level below and one above. */
+interface Levels { buy: Trigger[]; sell: Trigger[]; partial?: boolean }
 interface SymView {
   job: string; strategy: string; price: number; signal: number; position: number; target: number; active?: string | null;
-  trigger?: Trigger | null; trigger_note?: string; peak?: Peak | null;
+  trigger?: Trigger | null; triggers?: Levels | null; trigger_note?: string; peak?: Peak | null;
 }
 
 const verb = (t: Trigger) => (t.kind === "sell" ? (t.flip_to < 0 ? "goes short" : "sells") : t.flip_to > 0 && t.current_signal < 0 ? "covers" : "buys");
@@ -58,6 +60,53 @@ export function triggerText(t: Trigger | null | undefined, note?: string): strin
   const flat = t.bars_if_flat ? `, ~${t.bars_if_flat} bar${t.bars_if_flat > 1 ? "s" : ""} if flat` : "";
   const why = t.source === "trail" ? ", trailing exit" : t.source === "re-entry" ? ", re-entry after a trailing exit" : "";
   return `${verb(t)} ${t.direction} ${p} (${d}${flat}${why})`;
+}
+
+/** The buy and sell levels; a bot started before the two columns existed only sends the nearest
+ *  one, so the other side is unknown (partial) rather than "none". */
+function levelsOf(v: SymView | undefined): Levels | null {
+  if (!v) return null;
+  if (v.triggers) return v.triggers;
+  if (!v.trigger) return null;
+  return { buy: v.trigger.kind === "buy" ? [v.trigger] : [], sell: v.trigger.kind === "sell" ? [v.trigger] : [], partial: true };
+}
+
+/** For a level that closes the position: on the profit side of the price it takes the profit; on the
+ *  other side it is a stop, or locks in a profit once it has moved past the entry price. */
+function roleOf(t: Trigger, position: number, entry: number | null): string | null {
+  if (!position || t.trigger_price === null || t.already_past) return null;
+  const long = position > 0;
+  if ((long && t.kind !== "sell") || (!long && t.kind !== "buy")) return null;   // adds or flips, doesn't close
+  if (t.direction === (long ? "above" : "below")) return "take profit";
+  if (entry !== null && (long ? t.trigger_price > entry : t.trigger_price < entry)) return "locks profit";
+  return "stop";
+}
+
+/** One trigger column: each level on its own line, and in plain words what is missing. */
+function LevelCell({ v, kind, entry }: { v?: SymView; kind: "buy" | "sell"; entry: number | null }) {
+  const lv = levelsOf(v);
+  if (!v || !lv) return <span className="text-muted">{v?.trigger_note ?? "–"}</span>;
+  const pos = v.target ?? v.position ?? 0, long = pos > 0, short = pos < 0;   // after this bar's orders
+  const closes = (long && kind === "sell") || (short && kind === "buy");
+  const lines = lv[kind].map((t) => { const r = roleOf(t, pos, entry); return { text: `${r ? `${r}: ` : ""}${triggerText(t)}`, muted: false }; });
+  if (closes && !lv.partial) {
+    const profit = long ? "above" : "below";
+    const has = (dir: string) => lv[kind].some((t) => t.direction === dir || t.trigger_price === null);
+    if (!has(profit)) lines.push({ text: "no profit target within 5% (lets profits run)", muted: true });
+    if (!has(profit === "above" ? "below" : "above")) lines.push({ text: "no stop within 5% (the daily loss limit still applies)", muted: true });
+  }
+  if (!lines.length) {
+    const why = (kind === "sell" && !pos) ? "no position" : (long && kind === "buy") || (short && kind === "sell") ? "holding" : lv.partial ? "" : "none within 5%";
+    return <span className="text-muted">{why ? `– (${why})` : "–"}</span>;
+  }
+  return <span className="block">{lines.map((l, i) => (
+    <span key={i} className={`block ${l.muted ? "text-muted" : kind === "sell" ? "text-down" : "text-up"}`}>{l.text}</span>))}</span>;
+}
+
+/** Average entry price of the paper position for a job symbol (crypto comes back without the slash). */
+function entryOf(positions: Row[] | undefined, symbol: string): number | null {
+  const p = positions?.find((q) => q.symbol === symbol || q.symbol === symbol.replace("/", ""));
+  return p && p.avg_entry_price !== undefined && p.avg_entry_price !== null ? Number(p.avg_entry_price) : null;
 }
 
 const ts = (s: string | number | null | undefined) => (s === null || s === undefined || s === "" ? "–" : nyTime(typeof s === "number" ? s : Date.parse(s) / 1000));
@@ -165,9 +214,13 @@ export function Live() {
                     { key: "position", label: "Pos", digits: 4 },
                     { key: "target", label: "Target", digits: 4 },
                     { key: "price", label: "Price" },
-                    { key: "trigger", label: "Trigger", align: "left", title: "Price that would change the signal at the next bar's close (display only)",
-                      render: (r) => <span className={`num whitespace-normal block min-w-[18ch] max-w-[30ch] ${r.trigger ? (r.trigger.kind === "sell" ? "text-down" : "text-up") : "text-muted"}`}>
-                        {triggerText(r.trigger, r.trigger_note)}</span> },
+                    { key: "trigger_buy", label: "Trigger buy", align: "left", title: "Price at which the strategy would buy at the next bar's close (display only)",
+                      render: (r) => <span className="num whitespace-normal block min-w-[18ch] max-w-[30ch]">
+                        <LevelCell v={viewOf(st?.symbols, r.symbol)} kind="buy" entry={entryOf(d.positions, r.symbol)} /></span> },
+                    { key: "trigger_sell", label: "Trigger sell", align: "left",
+                      title: "Price at which the strategy would sell (close the position) at the next bar's close: take profit above, stop or locked-in profit below (display only)",
+                      render: (r) => <span className="num whitespace-normal block min-w-[18ch] max-w-[30ch]">
+                        <LevelCell v={viewOf(st?.symbols, r.symbol)} kind="sell" entry={entryOf(d.positions, r.symbol)} /></span> },
                   ]} />
               ) : <p className="text-muted text-[12px]">{bot?.running ? "Waiting for the next bar…" : "Start the bot to see its per-symbol view."}</p>}
             </Panel>
@@ -275,7 +328,7 @@ function LiveCharts({ symbols, positions, timeframe, views }: {
               <span className="text-muted font-normal"> · held {fmt(pos.qty, Number(pos.qty) % 1 ? 4 : 0)} @ {fmt(pos.avg_entry_price, 2)} · </span>
               <span className={`num font-normal ${pnl(pos.unrealized_pl)}`}>{signed(pos.unrealized_pl)} ({signed(pos.unrealized_plpc, 2)}%)</span>
             </span>}>
-              <SymbolChart symbol={s} timeframe={timeframe} view={viewOf(views, s)} height={held.length > 1 ? 300 : 360} />
+              <SymbolChart symbol={s} timeframe={timeframe} view={viewOf(views, s)} entry={entryOf(positions, s)} height={held.length > 1 ? 300 : 360} />
             </Panel>))}
         </div>)}
       <Panel title={`${held.length ? "All symbols" : "Live candles"} · markers = actual paper fills · refreshes every 30 s`}
@@ -284,22 +337,27 @@ function LiveCharts({ symbols, positions, timeframe, views }: {
             className={`chip border num ${s === current ? "tab-on" : "border-line-2 text-muted"}`}>{heldSet.has(s) && <span className="text-up mr-0.5">●</span>}{s}</button>
         ))}</div>}>
         {!current && <p className="text-muted text-[12px]">No symbols in jobs or positions.</p>}
-        {current && <SymbolChart symbol={current} timeframe={timeframe} view={viewOf(views, current)} height={420} />}
+        {current && <SymbolChart symbol={current} timeframe={timeframe} view={viewOf(views, current)} entry={entryOf(positions, current)} height={420} />}
       </Panel>
     </>
   );
 }
 
-function SymbolChart({ symbol, timeframe, view: v, height }: { symbol: string; timeframe?: string; view?: SymView; height: number }) {
-  const tp = v?.trigger?.trigger_price ?? null, tk = v?.trigger?.kind, td = v?.trigger?.direction, pk = v?.peak?.peak ?? null;
-  const tsrc = v?.trigger?.source;
+function SymbolChart({ symbol, timeframe, view: v, entry, height }: { symbol: string; timeframe?: string; view?: SymView; entry: number | null; height: number }) {
+  const pk = v?.peak?.peak ?? null;
+  const lv = levelsOf(v), pos = v?.target ?? v?.position ?? 0;
+  const key = JSON.stringify([lv, pos, entry]);
   const priceLines: PriceMark[] = useMemo(() => {
     const out: PriceMark[] = [];
-    if (tp !== null && tk) out.push({ price: tp, color: tk === "sell" ? C.loss : C.profit, style: "dashed",
-      title: `${tk} ${td === "below" ? "<" : ">"} ${fmt(tp, 2)}${tsrc === "trail" ? " (trail)" : tsrc === "re-entry" ? " (re-entry)" : ""}` });
+    for (const t of [...(lv?.buy ?? []), ...(lv?.sell ?? [])]) {
+      if (t.trigger_price === null) continue;
+      const role = roleOf(t, pos, entry), src = t.source === "trail" ? " (trail)" : t.source === "re-entry" ? " (re-entry)" : "";
+      out.push({ price: t.trigger_price, color: t.kind === "sell" ? C.loss : C.profit, style: "dashed",
+        title: `${role ? `${role}: ` : ""}${t.kind} ${t.direction === "below" ? "<" : ">"} ${fmt(t.trigger_price, 2)}${src}` });
+    }
     if (pk !== null) out.push({ price: pk, color: C.inkFaint, style: "dotted", title: `peak ${fmt(pk, 2)}` });
     return out;
-  }, [tp, tk, td, pk, tsrc]);
+  }, [key, pk]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = useQuery({
     queryKey: ["live-candles", symbol, timeframe],
     queryFn: () => api<{ candles: Candles; fills: { time: number; price: number; side: string; qty: number }[]; timeframe: string }>(
@@ -316,7 +374,8 @@ function SymbolChart({ symbol, timeframe, view: v, height }: { symbol: string; t
       <ErrorBox error={q.error} />
       {q.data && <CandleChart candles={q.data.candles} fills={fills} priceLines={priceLines} height={height} />}
       {v && (v.trigger || v.peak) && <p className="text-[11.5px] text-muted mt-1">
-        {q.data ? `${q.data.timeframe} bars. ` : ""}Dashed line, judged at the next bar's close: the strategy {triggerText(v.trigger, v.trigger_note)}.
+        {q.data ? `${q.data.timeframe} bars. ` : ""}Dashed lines, judged at the next bar's close: green where the strategy buys, red where it sells
+        {lv && [...lv.buy, ...lv.sell].length ? ` (${[...lv.buy, ...lv.sell].map((t) => triggerText(t)).join("; ")})` : ` (${triggerText(v.trigger, v.trigger_note)})`}.
         {v.peak && ` Dotted line: the best price since the bot opened the position; it has given back ${fmt(v.peak.gave_back_pct, 2)}%.`} Display only.</p>}
     </>
   );

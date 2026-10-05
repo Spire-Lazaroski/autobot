@@ -48,7 +48,10 @@ const toLine = (t: number[], vals: (number | null)[]) =>
  * top pane, then one pane per indicator, the position, the active-strategy band and equity.
  * Times display in New York time.
  */
-export function CandleChart({ candles, priceLines, overlays = [], panes = [], fills = [], position, equity, band, height = 620 }: Props) {
+// shared defaults: a fresh [] per render would re-run the chart effect (and its setReady) forever
+const NO_OVERLAYS: Line[] = [], NO_PANES: Pane[] = [], NO_FILLS: Fill[] = [];
+
+export function CandleChart({ candles, priceLines, overlays = NO_OVERLAYS, panes = NO_PANES, fills = NO_FILLS, position, equity, band, height = 620 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const priceRef = useRef<ISeriesApi<"Candlestick"> | null>(null);

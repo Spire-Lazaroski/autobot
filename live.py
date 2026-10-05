@@ -456,8 +456,9 @@ class Bot:
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
 
     def _annotate(self, pending: list, status: dict):
-        """For the Live page and the decision log only (never used for trading): the price that
-        would change each signal at the next bar's close (autobot.trigger) and, for held
+        """For the Live page and the decision log only (never used for trading): the prices that
+        would change each signal at the next bar's close (autobot.trigger: the nearest one, and the
+        buy / sell levels on each side for the two trigger columns) and, for held
         positions, the best price since entry. Bounded by TRIGGER_BUDGET_S per bar so a slow
         meta-strategy can't hold the loop up; every step is guarded by _safe."""
         deadline = time.time() + TRIGGER_BUDGET_S
@@ -465,17 +466,23 @@ class Bot:
         for p in pending:
             self._progress = time.time()
             sym, job = p["sym"], p["job"]
-            trig = peak = None
+            trig = peak = levels = None
             if time.time() < deadline:
-                trig = self._safe(trigger.trigger_level, job["strategy"], p["df"], job.get("params") or {},
-                                  bool(self.cfg.get("allow_short", False)), p["crypto"])
-                trig = self._safe(trigger.with_exit, trig, p.get("exit"), float(p["df"].close.iloc[-1])) or trig
+                last = float(p["df"].close.iloc[-1])
+                levels = self._safe(trigger.trigger_levels, job["strategy"], p["df"], job.get("params") or {},
+                                    bool(self.cfg.get("allow_short", False)), p["crypto"])
+                trig = (levels or {}).get("nearest")
+                trig = self._safe(trigger.with_exit, trig, p.get("exit"), last) or trig
+                levels = self._safe(trigger.with_exit_levels, levels, p.get("exit"), last) or levels
+                if levels:
+                    levels = {"buy": levels["buy"], "sell": levels["sell"]}
                 peak = self._safe(lambda: trigger.peak_since(p["df"], trigger.entry_time(trades, sym, p["held_after"]), p["held_after"]))
             else:
                 status["symbols"][sym]["trigger_note"] = "not computed this bar (time budget)"
             status["symbols"][sym]["trigger"] = trig
+            status["symbols"][sym]["triggers"] = levels
             status["symbols"][sym]["peak"] = peak
-            self._safe(self.rec.bar, *p["bar_args"], extra={"time": p["at"], "trigger": trig, "peak_since_entry": peak,
+            self._safe(self.rec.bar, *p["bar_args"], extra={"time": p["at"], "trigger": trig, "triggers": levels, "peak_since_entry": peak,
                                                             "exit_layer": p.get("exit")})
 
     def _trade_rows(self) -> list:

@@ -169,12 +169,19 @@ EXIT_SOP: Dict[str, str] = {
 }
 
 LIVE_VIEW: Dict[str, str] = {
-    "trigger": ("<b>Trigger</b> (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current "
-                "strategy would change its mind at the next bar's close. Red 'sell &lt; 762.70' means it would sell if a bar closes below "
-                "762.70; green 'buy &gt; 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from "
+    "trigger": ("<b>Trigger buy / Trigger sell</b> (Bot view per symbol, and the dashed lines on the live chart): the prices at which "
+                "the bot's current strategy would change its mind at the next bar's close, one level below the price and one above, "
+                "each where the strategy has one within 5%. Green 'buys below 330.30' means it would buy if a bar closes below 330.30; "
+                "red 'sells below 768.96' means it would sell if a bar closes below 768.96. The percentage is how far that is from "
                 "the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level. "
-                "For a job with an exit layer the line shows whichever is nearer: the strategy's level or the trailing-exit level "
-                "(marked 'trail'), or, after a trailing exit, the price that allows a re-entry (marked 're-entry')."),
+                "While the bot holds a position, the sell levels say what kind of exit they are: <b>take profit</b> (above the price, "
+                "e.g. a mean-reversion job selling once the bounce is done), <b>stop</b> (below the price and the entry), or "
+                "<b>locks profit</b> (below the price but above the entry: a trend job's exit level that has risen with the price). "
+                "'No profit target' means the strategy lets the trade run and only sells on the way down; 'no stop' means only the "
+                "daily loss limit (and, for stocks, the close-out before the bell) would end a falling trade. For a short position "
+                "everything is mirrored: the take profit is below the price and the stop above. "
+                "For a job with an exit layer the trailing-exit level (marked 'trail') replaces the strategy's level on that side "
+                "when it is nearer, and after a trailing exit the price that allows a re-entry (marked 're-entry') is the only buy level."),
     "already_past": ("'sells at the next close unless above X' means the change happens even if the price doesn't move "
                      "(for example an old price drops out of a momentum look-back); only a close beyond X would prevent it."),
     "none": "'–' means no close within 5% of the last price would change the strategy's mind at the next bar.",

@@ -67,7 +67,7 @@ def test_auto_section_follows_the_config():
 
 def test_sop_explains_the_trigger_and_peak_lines():
     md = build_sop.to_md(build_sop.build(build_sop.facts()))
-    assert "### Reading the trigger and peak lines" in md and "sell < 762.70" in md and "never change an order" in md
+    assert "### Reading the trigger and peak lines" in md and "Trigger buy / Trigger sell" in md and "take profit" in md and "locks profit" in md and "never change an order" in md
 
 
 def test_sop_explains_the_exit_layer_and_its_state():

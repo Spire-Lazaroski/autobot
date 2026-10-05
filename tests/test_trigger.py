@@ -66,6 +66,57 @@ def test_every_strategy_gets_the_nearest_flip(name, bars):
         assert sig(last + (t["trigger_price"] - last) * 0.999) == t["current_signal"]
 
 
+@pytest.mark.parametrize("name", sorted(STRATEGIES))
+def test_both_sides_are_true_boundaries_and_the_nearest_matches_trigger_level(name, bars):
+    lv = trigger.trigger_levels(name, bars, {})
+    assert lv["nearest"] == trigger.trigger_level(name, bars, {})
+    sig = lambda p: float(get_signal(name, trigger._with_bars(bars, [p]), {}).iloc[-1])  # noqa: E731
+    for kind in ("buy", "sell"):
+        for t in lv[kind]:
+            assert t["kind"] == kind
+            if t["already_past"] or t["trigger_price"] is None:
+                continue
+            assert (t["flip_to"] > t["current_signal"]) == (kind == "buy")
+            assert sig(t["trigger_price"]) == t["flip_to"]
+            last = float(bars.close.iloc[-1])
+            assert sig(last + (t["trigger_price"] - last) * 0.999) == t["current_signal"]
+    if lv["nearest"] and not lv["nearest"]["already_past"]:
+        assert len({t["direction"] for t in lv["buy"] + lv["sell"]}) == len(lv["buy"] + lv["sell"])  # at most one per side
+
+
+def test_take_profit_above_for_rsi_reversion_and_a_rising_sell_level_below_for_donchian():
+    idx = pd.date_range("2026-09-01 13:30", periods=60, freq="5min", tz="UTC")
+    # a slide to a low RSI, then a small bounce: rsi_reversion is long and sells when the bounce goes far enough
+    c = np.r_[np.full(40, 100.0), 100 - 0.4 * np.arange(1, 19), [93.0, 93.1]]
+    dip = pd.DataFrame({"open": c, "high": c + 0.05, "low": c - 0.05, "close": c, "volume": 1000.0}, index=idx)
+    p = {"period": 7, "oversold": 30, "exit_level": 50}
+    assert get_signal("rsi_reversion", dip, p).iloc[-1] == 1
+    lv = trigger.trigger_levels("rsi_reversion", dip, p)
+    assert [t["direction"] for t in lv["sell"]] == ["above"] and lv["buy"] == []      # take profit, no stop
+    # steady rise: donchian_breakout is long, sells only below its exit channel, nothing above
+    up = rising(60, 0.1)
+    d = {"entry": 20, "exit": 10}
+    assert get_signal("donchian_breakout", up, d).iloc[-1] == 1
+    lv = trigger.trigger_levels("donchian_breakout", up, d)
+    assert [t["direction"] for t in lv["sell"]] == ["below"] and lv["buy"] == []
+    assert lv["sell"][0]["trigger_price"] == pytest.approx(up.low.iloc[-10:].min(), abs=1e-3)
+
+
+def test_exit_layer_trail_and_reentry_in_the_two_columns():
+    sell_below = {"kind": "sell", "direction": "below", "distance_pct": -1.0, "trigger_price": 99.0, "source": None}
+    sell_above = {"kind": "sell", "direction": "above", "distance_pct": 2.0, "trigger_price": 102.0}
+    lv = {"nearest": sell_below, "buy": [], "sell": [sell_below, sell_above], "position": 1.0}
+    near = trigger.with_exit_levels(lv, {"state": "in", "trail_level": 99.5}, 100.0)   # trail nearer than 99
+    assert [(t["trigger_price"], t.get("source")) for t in near["sell"]] == [(99.5, "trail"), (102.0, None)]
+    far = trigger.with_exit_levels(lv, {"state": "in", "trail_level": 98.0}, 100.0)    # strategy nearer: kept
+    assert [t["trigger_price"] for t in far["sell"]] == [99.0, 102.0] and far["sell"][0]["source"] == "strategy"
+    assert sell_below["source"] is None                                                # inputs untouched
+    wait = trigger.with_exit_levels({**lv, "position": 0.0, "buy": [sell_above], "sell": []},
+                                    {"state": "waiting", "waiting_for": "new_high", "peak": 103.0}, 100.0)
+    assert [(t["kind"], t["trigger_price"], t["source"]) for t in wait["buy"]] == [("buy", 103.0, "re-entry")] and wait["sell"] == []
+    assert trigger.with_exit_levels(lv, None, 100.0) is lv
+
+
 def test_bars_if_flat_is_consistent_with_a_flat_price():
     df = rising()
     t = trigger.trigger_level("ema_cross", df, {})
@@ -112,6 +163,7 @@ def test_bot_writes_trigger_to_status_and_decisions_without_changing_orders(env,
     assert [(o.symbol, o.qty, o.side) for o in with_tc.orders] == [(o.symbol, o.qty, o.side) for o in plain_tc.orders]
     st = json.loads((live.LOGS / "status.json").read_text())
     assert set(st["symbols"]) == {"SPY", "AAPL"} and all("trigger" in v and "peak" in v for v in st["symbols"].values())
+    assert all(set(v["triggers"]) == {"buy", "sell"} for v in st["symbols"].values())
     decs = [json.loads(l) for l in (live.LOGS / "decisions.jsonl").read_text().splitlines() if '"decision"' in l]
-    assert decs and all("trigger" in d and "peak_since_entry" in d for d in decs[-2:])
+    assert decs and all("trigger" in d and "triggers" in d and "peak_since_entry" in d for d in decs[-2:])
     assert all(pd.Timestamp(d["time"]) <= pd.Timestamp.now(tz="UTC") for d in decs)
