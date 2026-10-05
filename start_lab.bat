@@ -31,6 +31,9 @@ start "autobot web :%WEB_PORT%" %MIN% cmd /k "cd web && npm run dev"
 REM News collector under its supervisor (restarts it after a crash, max 3 per hour): backfills
 REM what is missing, then collects live news (never trades)
 start "autobot news" %MIN% cmd /k .venv\Scripts\python run_news.py
+REM Shadow AI judge (autobot/llm_judge.py): asks Claude take/skip for each trading signal and logs it;
+REM never changes an order; exits at once when llm_judge is off in config.yaml or past its "until" date
+start "autobot judge" %MIN% cmd /k .venv\Scripts\python -m autobot.llm_judge --watch
 if /i "%~1"=="auto" exit /b
 timeout /t 4 /nobreak >nul
 start "" http://127.0.0.1:%WEB_PORT%/
