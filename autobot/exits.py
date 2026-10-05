@@ -12,7 +12,12 @@ Per job in config.yaml (validated by liveconfig.validate_live through validate()
     trail_pct: 0.25          sell if a bar CLOSES this % below the highest close since entry
     take_profit_pct: 1.0     sell if a bar CLOSES this % above the entry close (take the profit)
     stop_pct: 0.5            sell if a bar CLOSES this % below the entry close (cut the loss)
-                             each of the three is off unless present; any one switches the layer on
+    atr_stop: 3              dynamic stop: sell if a bar CLOSES more than this many ATRs below the
+                             best close since entry (ATR = average true range of the last band_period bars)
+    band_profit: 2           dynamic take-profit: sell if a bar CLOSES above the band_period-bar
+                             moving average plus this many ATRs
+    band_period: 20          bars for the moving average and the ATR (both end at the current bar)
+                             each level is off unless present; any one switches the layer on
     reentry: both            fresh_cross | new_high | both | cooldown
     cooldown_bars: 6         only for "cooldown"
     no_entry_last_min: 30    no new positions in the last N minutes before the close (stocks)
@@ -53,7 +58,7 @@ REENTRY = ("fresh_cross", "new_high", "both", "cooldown")
 DEFAULTS = {"trail_pct": 0.25, "reentry": "both", "cooldown_bars": 6, "no_entry_last_min": 30}
 
 
-LEVELS = ("trail_pct", "take_profit_pct", "stop_pct")
+LEVELS = ("trail_pct", "take_profit_pct", "stop_pct", "atr_stop", "band_profit")
 
 
 def enabled(cfg: Optional[Dict]) -> bool:
@@ -73,6 +78,13 @@ def validate(cfg, where: str = "exit") -> List[str]:
         v = cfg.get(k)
         if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or not 0 < v < 50):
             errs.append(f"{where}.{k} must be between 0 and 50")
+    for k in ("atr_stop", "band_profit"):
+        v = cfg.get(k)
+        if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or not 0 < v <= 20):
+            errs.append(f"{where}.{k} must be between 0 and 20 (ATRs)")
+    bp = cfg.get("band_period", 20)
+    if not isinstance(bp, int) or isinstance(bp, bool) or not 2 <= bp <= 500:
+        errs.append(f"{where}.band_period must be a whole number from 2 to 500")
     if cfg.get("reentry", DEFAULTS["reentry"]) not in REENTRY:
         errs.append(f"{where}.reentry must be one of {', '.join(REENTRY)}")
     c = cfg.get("cooldown_bars", DEFAULTS["cooldown_bars"])
@@ -81,7 +93,7 @@ def validate(cfg, where: str = "exit") -> List[str]:
     n = cfg.get("no_entry_last_min", DEFAULTS["no_entry_last_min"])
     if not isinstance(n, (int, float)) or not 0 <= n <= 390:
         errs.append(f"{where}.no_entry_last_min must be between 0 and 390")
-    unknown = set(cfg) - set(DEFAULTS) - set(LEVELS) - {"enabled"}
+    unknown = set(cfg) - set(DEFAULTS) - set(LEVELS) - {"enabled", "band_period"}
     if unknown:
         errs.append(f"{where}: unknown settings {', '.join(sorted(unknown))}")
     return errs
@@ -112,6 +124,14 @@ def exit_states(signal: pd.Series, df: pd.DataFrame, cfg: Optional[Dict], crypto
     t = float(cfg.get("trail_pct") or 0) / 100        # each level is off unless set
     tp = float(cfg.get("take_profit_pct") or 0) / 100
     sl = float(cfg.get("stop_pct") or 0) / 100
+    ka = float(cfg.get("atr_stop") or 0)
+    kb = float(cfg.get("band_profit") or 0)
+    if ka or kb:   # causal: the moving average and ATR of the last band_period bars, ending at bar t
+        bpn = int(cfg.get("band_period", 20))
+        prev_c = df.close.shift(1)
+        tr = pd.concat([df.high - df.low, (df.high - prev_c).abs(), (df.low - prev_c).abs()], axis=1).max(axis=1)
+        atr = tr.rolling(bpn).mean().to_numpy(dtype=float)
+        ma = df.close.rolling(bpn).mean().to_numpy(dtype=float)
     mode = c["reentry"]
     cool = int(c["cooldown_bars"])
     if crypto is None:
@@ -170,12 +190,20 @@ def exit_states(signal: pd.Series, df: pd.DataFrame, cfg: Optional[Dict], crypto
         trail = (peak * (1 - t) if side > 0 else peak * (1 + t)) if t else np.nan
         tp_lvl = entry * (1 + side * tp) if tp else np.nan
         sl_lvl = entry * (1 - side * sl) if sl else np.nan
+        as_lvl = peak - side * ka * atr[i] if ka and np.isfinite(atr[i]) else np.nan
+        bp_lvl = ma[i] + side * kb * atr[i] if kb and np.isfinite(atr[i]) else np.nan
+        if ka:
+            sl_lvl = as_lvl if np.isnan(sl_lvl) else (max(sl_lvl, as_lvl) if side > 0 else min(sl_lvl, as_lvl))
+        if kb:
+            tp_lvl = bp_lvl if np.isnan(tp_lvl) else (min(tp_lvl, bp_lvl) if side > 0 else max(tp_lvl, bp_lvl))
         out["peak"][i], out["trail"][i], out["state"][i] = peak, trail, "in"
         out["entry"][i], out["tp"][i], out["stop"][i] = entry, tp_lvl, sl_lvl
         x = close[i] * side   # "beyond" tests in the position's direction (a short's prices flipped)
-        hit = ("stop_exit" if sl and x <= sl_lvl * side else
+        hit = ("stop_exit" if sl and x <= entry * (1 - side * sl) * side else
+               "atr_stop" if ka and np.isfinite(as_lvl) and x < as_lvl * side else
                "trail_exit" if t and x < trail * side else
-               "take_profit" if tp and x >= tp_lvl * side else None)
+               "take_profit" if tp and x >= entry * (1 + side * tp) * side else
+               "band_profit" if kb and np.isfinite(bp_lvl) and x >= bp_lvl * side else None)
         if hit:
             out_t[i] = 0.0
             out["state"][i] = "flat"
@@ -215,6 +243,13 @@ def exit_view_of(state: pd.Series, cfg: Dict, close: float) -> Dict:
         down = close < peak
         text = t["trail_exit" if down else "trail_exit_short"].format(
             close=f"{close:,.2f}", pct=f"{abs(close / peak - 1) * 100:.2f}", peak=f"{peak:,.2f}", trail=f"{float(c['trail_pct']):g}")
+    elif reason in ("atr_stop", "band_profit"):
+        lvl = num("stop") if reason == "atr_stop" else num("tp")
+        short = lvl is not None and ((reason == "atr_stop" and peak is not None and lvl > peak)
+                                     or (reason == "band_profit" and entry is not None and lvl < entry))
+        text = t[reason + ("_short" if short else "")].format(
+            close=f"{close:,.2f}", level=f"{lvl:,.2f}" if lvl else "?", peak=f"{peak:,.2f}" if peak else "?",
+            k=f"{float(c.get('atr_stop' if reason == 'atr_stop' else 'band_profit') or 0):g}", n=int(c.get("band_period", 20)))
     elif reason in ("take_profit", "stop_exit") and entry:
         text = t[reason + ("" if (close > entry) == (reason == "take_profit") else "_short")].format(
             close=f"{close:,.2f}", pct=f"{abs(close / entry - 1) * 100:.2f}", entry=f"{entry:,.2f}",

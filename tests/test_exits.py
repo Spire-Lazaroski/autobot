@@ -232,3 +232,57 @@ def test_take_profit_and_stop_text_and_validation():
     assert exits.validate({"take_profit_pct": 0, "stop_pct": 60}) == [
         "exit.take_profit_pct must be between 0 and 50", "exit.stop_pct must be between 0 and 50"]
     assert exits.validate({"take_profit_pct": 1, "stop_pct": 0.5}) == [] and exits.enabled({"stop_pct": 0.5})
+
+
+# ----------------------------------------------------------------- dynamic bands (ATR stop, band take-profit)
+def ranged(closes, start="2026-09-28 13:30"):
+    idx = pd.date_range(start, periods=len(closes), freq="5min", tz="UTC")
+    c = np.asarray(closes, dtype=float)
+    df = pd.DataFrame({"open": c, "high": c + 0.5, "low": c - 0.5, "close": c, "volume": 1.0}, index=idx)
+    df.attrs["symbol"] = "BTC/USD"
+    return df
+
+
+def test_atr_stop_trails_the_best_close_by_k_atrs():
+    closes = [100.0] * 20 + [100, 101, 102, 103, 104, 105, 104, 103, 102, 101, 100, 99]
+    df = ranged(closes)
+    sig = pd.Series([0.0] * 20 + [1.0] * 12, index=df.index)
+    st = exits.exit_states(sig, df, {"atr_stop": 3, "reentry": "fresh_cross"})
+    prev = df.close.shift(1)
+    tr = pd.concat([df.high - df.low, (df.high - prev).abs(), (df.low - prev).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(20).mean()
+    peak = df.close.iloc[20:].cummax()
+    level = peak - 3 * atr.iloc[20:]
+    first = (df.close.iloc[20:] < level).idxmax()                # first close below best close - 3 ATR
+    k = df.index.get_loc(first)
+    assert st.reason.iloc[k] == "atr_stop" and (st.target.iloc[20:k] == 1).all() and st.target.iloc[k] == 0
+    assert st.stop.iloc[k - 1] == pytest.approx(level.iloc[k - 1 - 20])
+
+
+def test_band_profit_sells_above_the_average_plus_k_atrs():
+    closes = [100.0] * 25 + [100.5, 103.0, 103.0]
+    df = ranged(closes)
+    sig = pd.Series([0.0] * 24 + [1.0] * 4, index=df.index)
+    st = exits.exit_states(sig, df, {"band_profit": 2, "reentry": "fresh_cross"})
+    assert list(st.target.iloc[24:]) == [1, 1, 0, 0] and st.reason.iloc[26] == "band_profit"
+    v = exits.exit_view_of(st.iloc[26], {"band_profit": 2}, 103.0)
+    assert v["text"].startswith("Sold: price 103.00 reached the upper band")
+
+
+@pytest.mark.parametrize("cfg", [{"atr_stop": 2}, {"band_profit": 2}, {"atr_stop": 3, "band_profit": 3, "band_period": 10}])
+def test_bands_have_no_look_ahead(cfg):
+    df = synthetic_bars(["X"], "5Min", 30, seed=4)["X"]
+    sig = rc.flat_before_close(get_signal("ema_cross", df, {}), df, 5)
+    cfg = {"reentry": "fresh_cross", **cfg}
+    full = exits.apply_exit_layer(sig, df, cfg, crypto=False)
+    assert (full != sig).any()
+    for cut in (len(df) // 3, len(df) - 1):
+        pd.testing.assert_series_equal(exits.apply_exit_layer(sig.iloc[: cut + 1], df.iloc[: cut + 1], cfg, crypto=False),
+                                       full.iloc[: cut + 1], check_names=False)
+
+
+def test_band_validation():
+    assert exits.validate({"atr_stop": 0, "band_profit": 30, "band_period": 1}) == [
+        "exit.atr_stop must be between 0 and 20 (ATRs)", "exit.band_profit must be between 0 and 20 (ATRs)",
+        "exit.band_period must be a whole number from 2 to 500"]
+    assert exits.validate({"atr_stop": 3, "band_profit": 2, "band_period": 20}) == [] and exits.enabled({"atr_stop": 3})

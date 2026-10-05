@@ -143,3 +143,42 @@ About 3 pairs would look "clearly better" by luck; 42 is far beyond that. The ru
 the losses by cutting a third of the trades, but it does not create an edge: the live jobs stay
 negative after costs. Rule 1 (tiny orders): 5 of the bot's 46 logged orders were under 10% of the
 usual size ($1,974 traded for nothing but cost).
+
+## 8. Markov switching regimes (Markov study, 2026-10-06)
+
+`autobot/markov.py`: a 2-state Gaussian Markov switching model (calm / turbulent), refitted
+walk-forward and used only through FILTERED probabilities (no later bars). Intraday returns are
+first divided by their usual size at that time of day, so the open's normal jumpiness is not
+"turbulence". `python -m autobot.markov_study --part a|b`.
+
+**A: inside regime_switch on 5-minute bars** (the volatility rule replaced by P(turbulent) > 0.5;
+refit every 5 sessions on the previous 60; 11 symbols + the 3 live regime_switch jobs, 446 days).
+
+| | Fixed rule (today) | Markov |
+|---|---|---|
+| Share of bars called turbulent | 11% | 18% |
+| Next-hour moves when "turbulent" vs otherwise | 1.35x | **1.56x** |
+| All pairs, after costs | −24.2% | −25.2% (−0.3 bps/day, −3.2 to +2.6) |
+| Live jobs (TSLA, USO, QQQ) | −34.8% | −41.1% (−2.3 bps/day, −5.7 to +1.1) |
+
+The Markov model is the better turbulence detector, but standing aside at better-chosen times
+does not make the 5-minute strategies profitable: no difference beyond chance, slightly worse on
+the live jobs.
+
+**B: daily risk overlay** (hold, but cut exposure when turbulence is likely; refit every 21 sessions
+on the previous 500; next-open fills, open costs 2x).
+
+| | Per year | Worst drop | Sharpe |
+|---|---|---|---|
+| 17 stocks, mid-2022 on: hold | **+29.7%** | −18% | **1.66** |
+| volatility targeting | +26.2% | −17% | 1.65 |
+| Markov scaled / on-off | +17.2% / +18.0% | −13% / −15% | 1.59 / 1.50 (both clearly below hold and vol targeting) |
+| VOO, mid-2022 on: hold | **+18.7%** | −18.7% | 1.16 |
+| VOO Markov on/off (about 5 trades a year) | +16.8% | **−10.0%** | **1.51** (not clearly different) |
+| S&P 500 2018-2026: hold | **+13.0%** | −33.9% | 0.72 |
+| volatility targeting | +12.7% | −20.8% | **0.88** |
+| Markov on/off | +8.7% | **−13.0%** | 0.84 |
+
+Reading: on single stocks the overlay clearly costs return. On the index it is insurance: it
+roughly halves the worst drop for about 2-4 points of return a year; volatility targeting buys
+less protection more cheaply. Nothing here beats holding on return.
