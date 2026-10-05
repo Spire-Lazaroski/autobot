@@ -24,6 +24,22 @@ Variants, long only (a short signal counts as flat):
                      days is used on the next TEST days (out of sample)
   best of all (walk-forward)  every strategy x setting AND buy and hold compete on the train days;
                      the winner is used on the test days
+Candidates from docs/STRATEGY_EVIDENCE.md (not registered strategies; defined here only):
+  vol target         hold, scaled by (the stock's own past-year volatility / its last 20 days'),
+                     at most 1 (no borrowing); changed only when it moves by 0.1 or more
+  momentum 12-1      in while the return from 12 months to 1 month ago is positive, checked at
+                     each month's last close (Moskowitz, Ooi & Pedersen 2012)
+  turn of month      in from the last trading day of a month to the 3rd of the next (calendar
+                     known in advance)
+  relative strength  at each month's last close, the TOP_N symbols with the best 12-1 return,
+                     equal weight; "+ trend" also needs its own 12-1 return above zero, else cash
+  news rules         daily versions of the news guard, only for symbols with scored news (from
+                     Oct 2024): "earnings out" = flat the day before and the day of an earnings
+                     reaction; "bad news out" = flat the day after a materiality-4+ story with
+                     negative sentiment arrived (up to that day's close). On buy and hold and on
+                     momentum, each compared with its own base on the same symbols and days.
+                     (The bot's news_guard itself never triggers on daily bars: its window is
+                     30 minutes and its earnings blackout is intraday only.)
 Portfolio = equal weight over the symbols, rebalanced daily. Compared with buy and hold on the
 same days: return, yearly growth, worst drop, Sharpe, time in the market, and the daily difference
 with a 95% range.
@@ -51,6 +67,8 @@ OUT = ROOT / "data" / "daily_study.json"
 DAYS = 2600          # calendar days requested (the IEX history starts mid-2020)
 WARMUP = 252         # bars before the test period
 TRAIN, TEST = 252, 63
+TOP_N = 4
+NEWS_FROM = pd.Timestamp("2024-10-01", tz="UTC")   # scored news for most covered symbols starts here
 OPEN_MULT = 2.0      # trades at the open cost this many times the normal cost per side
 BH, TREND = "buy and hold", "above 200-day avg"
 
@@ -113,6 +131,14 @@ def symbol_runs(sym: str, df: pd.DataFrame, cfg: Dict, cost_mult: float = 1.0) -
     runs: Dict[str, pd.DataFrame] = {BH: simulate(df, pd.Series(1.0, index=df.index), side)}
     sma = df.close.rolling(200).mean()
     runs[TREND] = simulate(df, (df.close > sma).astype(float).where(sma.notna(), 0.0), side)
+    for k, t in candidates(df).items():
+        runs[k] = simulate(df, t, side)
+    out = news_out(df)
+    if out is not None:
+        mom = get_signal("momentum", df, STRATEGIES["momentum"].defaults, False)
+        for rule, mask in out.items():
+            runs[f"news: {rule}, on buy and hold"] = simulate(df, pd.Series(1.0, index=df.index).where(~mask, 0.0), side)
+            runs[f"news: {rule}, on momentum"] = simulate(df, mom.where(~mask, 0.0), side)
     cand: Dict[str, pd.DataFrame] = {BH: runs[BH]}
     names = cs.strategies_for("1Day", r)
     for name in names:
@@ -126,6 +152,96 @@ def symbol_runs(sym: str, df: pd.DataFrame, cfg: Dict, cost_mult: float = 1.0) -
     runs["best of all (walk-forward)"] = _walk(cand, df, side)
     runs["best strategy (walk-forward, no buy and hold)"] = _walk({k: v for k, v in cand.items() if k != BH}, df, side)
     return runs
+
+
+def month_ends(idx: pd.DatetimeIndex) -> np.ndarray:
+    m = idx.tz_localize(None).to_period("M") if idx.tz is None else idx.tz_convert(NY).tz_localize(None).to_period("M")
+    return np.r_[m[1:] != m[:-1], False]   # the last bar in the data is never treated as a month end
+
+
+def mom_12_1(close: pd.Series) -> pd.Series:
+    return close.shift(21) / close.shift(252) - 1
+
+
+def monthly(x: pd.Series, idx: pd.DatetimeIndex) -> pd.Series:
+    """A value decided at each month's last close and kept until the next month end."""
+    return x.where(month_ends(idx)).ffill().fillna(0.0)
+
+
+def news_out(df: pd.DataFrame) -> Optional[Dict[str, pd.Series]]:
+    """Targets to zero (at day t's close, i.e. out on day t+1), or None without scored news."""
+    from . import news_guard as ng
+    sym = df.attrs.get("symbol", "")
+    st = ng.stories(sym)
+    if st.empty:
+        return None
+    idx = df.index
+    d = np.asarray(idx.tz_convert(NY).date)
+    close_t = pd.DatetimeIndex([pd.Timestamp(x).tz_localize(NY) + pd.Timedelta(hours=16) for x in d]).tz_convert("UTC")
+    bad = st[(st.materiality >= 4) & (st.sentiment < 0)].t_info.dt.tz_convert("UTC").sort_values()
+    hi = np.searchsorted(bad.values, close_t.values, side="right")
+    lo = np.r_[0, hi[:-1]]
+    bad_day = pd.Series(hi > lo, index=idx)                      # a story since the previous close
+    held_out = np.zeros(len(idx), bool)                           # days to be flat on
+    sess = list(d)
+    for k_day in ng.earnings_sessions(sym):
+        k = int(np.searchsorted(np.asarray(sess), k_day))
+        for j in (k - 1, k):
+            if 0 <= j < len(sess):
+                held_out[j] = True
+    earn = pd.Series(np.r_[held_out[1:], False], index=idx)       # flat on day t+1 -> target 0 at t
+    out = {"bad news out": bad_day}
+    if held_out.any():
+        out["earnings out"] = earn
+        out["earnings + bad news out"] = earn | bad_day
+    return out
+
+
+def candidates(df: pd.DataFrame) -> Dict[str, pd.Series]:
+    """Per-symbol candidate targets (decided at each close, from data up to that close)."""
+    idx, c = df.index, df.close
+    r = c.pct_change()
+    long_vol, short_vol = r.rolling(252).std(), r.rolling(20).std()
+    raw = (long_vol / short_vol).clip(upper=1.0).where(long_vol.notna(), 0.0).fillna(0.0).to_numpy()
+    vt = np.zeros(len(raw))
+    for i in range(len(raw)):  # a 0.1 band, so the position isn't nudged every day
+        vt[i] = raw[i] if i == 0 or abs(raw[i] - vt[i - 1]) >= 0.1 else vt[i - 1]
+    vt = pd.Series(vt, index=idx)
+    mom = monthly((mom_12_1(c) > 0).astype(float).where(mom_12_1(c).notna(), 0.0), idx)
+    # turn of month: held on the last trading day of a month and the first 3 of the next; the
+    # target set at day t's close is what is held on day t+1
+    m = idx.tz_convert(NY).tz_localize(None).to_period("M")
+    first = np.r_[True, m[1:] != m[:-1]]
+    day_no = pd.Series(1, index=idx).groupby(np.cumsum(first)).cumsum().to_numpy()
+    last = np.r_[m[1:] != m[:-1], False]
+    held = (last | (day_no <= 3)).astype(float)
+    tom = pd.Series(np.r_[held[1:], 0.0], index=idx)
+    return {"vol target (on hold)": vt, "momentum 12-1": mom, "vol target + momentum 12-1": vt * mom,
+            "turn of month": tom}
+
+
+def relative_strength(data: Dict[str, pd.DataFrame], cfg: Dict, cost_mult: float, trend: bool) -> Dict[str, pd.DataFrame]:
+    """Top TOP_N symbols by 12-1 return at each month end, as per-symbol frames whose returns
+    are scaled so that the plain average over all symbols is the equal-weight top-N portfolio."""
+    r = rc.settings(cfg)
+    syms = list(data)
+    score = pd.DataFrame({s: mom_12_1(data[s].close) for s in syms})
+    idx = score.index
+    ends = month_ends(idx)
+    pick = pd.DataFrame(0.0, index=idx, columns=syms)
+    for i in np.flatnonzero(ends):
+        row = score.iloc[i].dropna()
+        if trend:
+            row = row[row > 0]
+        pick.iloc[i, [syms.index(s) for s in row.nlargest(TOP_N).index]] = 1.0
+    pick = pick.where(pd.Series(ends, index=idx), np.nan).ffill().fillna(0.0)
+    k = len(syms) / TOP_N
+    out = {}
+    for s in syms:
+        f = simulate(data[s], pick[s].reindex(data[s].index).fillna(0.0), rc.costs_for(s, r).per_turn * cost_mult)
+        f[["ret", "position"]] *= k
+        out[s] = f
+    return out
 
 
 def _walk(cands: Dict[str, pd.DataFrame], df: pd.DataFrame, side: float) -> pd.DataFrame:
@@ -158,23 +274,35 @@ def run(cfg: Dict, symbols: Optional[Sequence[str]] = None, data: Optional[Dict[
            "settings": {"warmup": WARMUP, "train": TRAIN, "test": TEST, "open_cost_mult": OPEN_MULT}}
     for label, mult in (("normal costs", 1.0), ("double costs", 2.0)):
         runs = {s: symbol_runs(s, data[s], cfg, mult) for s in syms}
-        variants = list(runs[syms[0]])
+        for name, trend in ((f"relative strength top {TOP_N}", False), (f"relative strength top {TOP_N} + trend", True)):
+            for s, f in relative_strength({s: data[s] for s in syms}, cfg, mult, trend).items():
+                runs[s][name] = f
+        variants = list(dict.fromkeys(v for s in syms for v in runs[s]))
         acc = {}
         for v in variants:
-            R = pd.DataFrame({s: runs[s][v].ret for s in syms}).sort_index()
+            R = pd.DataFrame({s: runs[s][v].ret for s in syms if v in runs[s]}).sort_index()
             R = R[R.index >= start].fillna(0.0)
-            P = pd.DataFrame({s: runs[s][v].position for s in syms}).reindex(R.index).fillna(0.0)
-            U = pd.DataFrame({s: runs[s][v].turnover for s in syms}).reindex(R.index).fillna(0.0)
-            acc[v] = (R.mean(axis=1), P.mean(axis=1), U)
+            if v.startswith("news:"):  # only where the news data exists
+                R = R[R.index >= NEWS_FROM]
+            P = pd.DataFrame({s: runs[s][v].position for s in syms if v in runs[s]}).reindex(R.index).fillna(0.0)
+            U = pd.DataFrame({s: runs[s][v].turnover for s in syms if v in runs[s]}).reindex(R.index).fillna(0.0)
+            acc[v] = (R.mean(axis=1), P.mean(axis=1), U, R.shape[1])
         bh = acc[BH][0]
         rows = []
-        for v, (r, p, u) in acc.items():
+        for v, (r, p, u, nsym) in acc.items():
             years = len(r) / 252
             row = {"variant": v, **stats(r, p),
                    "trades_per_year_per_symbol": round(float((u > 0).sum().mean() / 2 / years), 1) if years else 0.0,
                    "by_year": by_year(r)}
             if v != BH:
-                row["vs_buy_and_hold"] = paired(r, bh)
+                row["vs_buy_and_hold"] = paired(r, bh.reindex(r.index))
+            if v.startswith("news:"):
+                bname = BH if v.endswith("buy and hold") else "momentum default"
+                have = [s for s in syms if v in runs[s]]
+                base = pd.DataFrame({s: runs[s][bname].ret for s in have}).reindex(r.index).fillna(0.0).mean(axis=1)
+                row["vs_own_base"] = paired(r, base)
+                row["base_return_%"] = round(float(((1 + base).prod() - 1) * 100), 1)
+                row["symbols"] = nsym
             rows.append(row)
         rows.sort(key=lambda x: -x["sharpe"])
         res[label] = {"portfolio": rows}

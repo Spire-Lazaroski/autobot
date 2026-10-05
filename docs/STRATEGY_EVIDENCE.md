@@ -73,3 +73,27 @@ Test the ones that fit the bot today in the daily study, on the same data, costs
 
 Overnight holding can be added from the 5-minute data if wanted. Pre-FOMC, earnings drift and
 pairs are left out: the evidence is weak for our symbols, or they need data or shorts we don't have.
+
+## 5. Results on our data (daily study, 2026-10-05)
+
+Same data, costs and fills as section 1 (17 symbols, July 2021 to October 2026, next-open fills,
+long only). Buy and hold: +24.2% a year, worst drop −24%, Sharpe 1.33.
+
+| Candidate | Per year | Worst drop | Sharpe | vs buy and hold (bps/day, 95% range) |
+|---|---|---|---|---|
+| Volatility targeting (on hold) | +22.2% | −21% | 1.39 | −0.8 (−1.9 to +0.2), not clearly different |
+| Momentum 12-1, monthly | +16.9% | −17% | 1.22 | −2.7 (−5.3 to 0.0) |
+| Vol target + momentum 12-1 | +15.5% | −13% | 1.29 | −3.2, clearly worse |
+| Turn of the month | +4.8% | −9% | 0.66 | −7.2, clearly worse |
+| Relative strength, top 4 monthly | +31.8% | −31% | 1.10 | +3.4 (−3.1 to +9.9), not clearly different |
+| Relative strength top 4 + own trend | +31.4% | −31% | 1.09 | +3.3 (−3.2 to +9.7) |
+
+News rules (daily versions; only NVDA, AAPL, TSLA, SPY, QQQ have scored news, mostly from
+October 2024; earnings only for the three stocks, 8 each), compared with their own base on the
+same symbols and days: every rule is ahead by +0.3 to +2.7 bps a day, **none clearly** (all
+95% ranges include zero), from a small sample with 6 rules tried. The bot's `news_guard` itself
+never triggers on daily bars (30-minute window, intraday-only earnings blackout).
+
+Reading: relative strength earns the most but with the largest drop, and our 2026-chosen symbol
+list flatters it most (it would have held NVDA, AMD, LLY). Volatility targeting is the closest to
+holding with a slightly smaller drop. Nothing clearly beats buy and hold.
