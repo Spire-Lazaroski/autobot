@@ -262,54 +262,175 @@ def watch(cfg: Dict, poll_s: float = 10.0):
 
 
 # ----------------------------------------------------------------- compare the models afterwards
-def trade_outcomes(recs: List[Dict]) -> Dict[str, float]:
-    """P&L in % of each ENTRY order (keyed by its first order id): from its fill to the fill of
-    the order that next closes that symbol's position. Exits are not scored: they only remove risk."""
-    out: Dict[str, float] = {}
+_PX: Dict = {}
+
+
+def session_prices(sym: str, day: str) -> Dict[str, Optional[float]]:
+    """The session's opening price and the close-out price (the close of the bar ending 15:55,
+    when the bot sells everything) from 5-minute bars."""
+    key = (sym, day)
+    if key not in _PX:
+        t = pd.Timestamp(day).tz_localize(NY) + pd.Timedelta(hours=17)
+        b = load_bars(sym, t.tz_convert("UTC"))
+        ny = b.index.tz_convert(NY)
+        m = ny.hour * 60 + ny.minute
+        d = b[(ny.date == pd.Timestamp(day).date()) & (m >= 570) & (m < 960)]
+        dm = d.index.tz_convert(NY).hour * 60 + d.index.tz_convert(NY).minute
+        last = d[dm <= 950]                       # bars that end by 15:55
+        _PX[key] = {"open": float(d.open.iloc[0]) if len(d) else None, "closeout": float(last.close.iloc[-1]) if len(last) else None}
+    return _PX[key]
+
+
+def outcomes(recs: List[Dict]) -> Dict[str, Dict]:
+    """Per signal (keyed by its first order id), what it was worth, from actual fills:
+    entry -> the round trip's result in % (fill to the fill that closed it);
+    exit  -> what holding on instead would have made, in %, until the 15:55 close-out.
+    Each also carries the dollars (qty x price) so results can be summed in $."""
+    out: Dict[str, Dict] = {}
     open_: Dict[str, Dict] = {}
     for r in recs:
-        if r.get("type") != "decision" or r.get("action") not in ("buy", "sell") or r.get("job") == "core":
+        if r.get("type") != "decision" or r.get("job") == "core":
             continue
-        sym, px = r["symbol"], float(r.get("fill_price") or r.get("price") or 0)
-        if not px:
-            continue
+        sym = r.get("symbol")
+        px = float(r.get("fill_price") or r.get("price") or 0)
         before, after = float(r.get("position_before") or 0), float(r.get("target") or 0)
-        if before == 0 and after != 0 and r.get("order_ids"):
-            open_[sym] = {"id": r["order_ids"][0], "px": px, "side": 1 if after > 0 else -1}
-        elif after == 0 and sym in open_:
-            o = open_.pop(sym)
-            out[o["id"]] = round((px / o["px"] - 1) * 100 * o["side"], 4)
+        if not px or r.get("action") not in ("buy", "sell", "flatten before close"):
+            continue
+        ids = r.get("order_ids") or []
+        if before == 0 and after != 0 and ids and is_signal(r):
+            open_[sym] = {"id": ids[0], "px": px, "side": 1 if after > 0 else -1, "qty": abs(after)}
+        elif before != 0 and after == 0:
+            o = open_.pop(sym, None)
+            if o:
+                pct = (px / o["px"] - 1) * 100 * o["side"]
+                out[o["id"]] = {"kind": "entry", "pct": round(pct, 4), "usd": round(pct / 100 * o["px"] * o["qty"], 2),
+                                "symbol": sym, "job": r.get("job"), "day": _t(r).tz_convert(NY).date().isoformat()}
+            if is_signal(r) and ids:            # a strategy exit (not the close-out): what would holding have done?
+                day = _t(r).tz_convert(NY).date().isoformat()
+                co = session_prices(sym, day)["closeout"]
+                if co:
+                    side = 1 if before > 0 else -1
+                    pct = (co / px - 1) * 100 * side
+                    out[ids[0]] = {"kind": "exit", "pct": round(pct, 4), "usd": round(pct / 100 * px * abs(before), 2),
+                                   "symbol": sym, "job": r.get("job"), "day": day}
     return out
 
 
-def compare(path: Path = OUT) -> Dict:
+def trade_outcomes(recs: List[Dict]) -> Dict[str, float]:
+    """Entry round-trip results in % by order id (kept for older callers)."""
+    return {k: v["pct"] for k, v in outcomes(recs).items() if v["kind"] == "entry"}
+
+
+def broker_fills(day: str) -> List[Dict]:
+    """Every filled order of a New York day from Alpaca (read-only; includes manual stops)."""
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.enums import QueryOrderStatus
+    from alpaca.trading.requests import GetOrdersRequest
+    from .data import _keys, with_timeout
+    k, sec = _keys()
+    tc = with_timeout(TradingClient(k, sec, paper=True))
+    t0 = pd.Timestamp(day).tz_localize(NY).tz_convert("UTC")
+    orders = tc.get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, after=t0.to_pydatetime(),
+                                            until=(t0 + pd.Timedelta(days=1)).to_pydatetime(), limit=500))
+    return [{"symbol": o.symbol, "side": o.side.value, "qty": float(o.filled_qty), "px": float(o.filled_avg_price),
+             "t": str(o.filled_at)} for o in orders if o.filled_at and float(o.filled_qty or 0) > 0]
+
+
+def jobs_vs_hold(recs: List[Dict], days: List[str], fills=None) -> List[Dict]:
+    """Per job and day, from the broker's actual fills: the strategy's dollars (realized, plus any
+    position left open valued at the 15:55 close-out) against simply buying at the open and
+    holding to the close-out with the largest position the job held that day."""
+    job_of = {r["symbol"]: r["job"] for r in recs if r.get("type") == "decision" and r.get("job") and r.get("job") != "core"}
+    fills = fills or broker_fills
+    rows = []
+    for day in days:
+        try:
+            fl = fills(day)
+        except Exception as e:  # noqa: BLE001
+            rows.append({"day": day, "error": f"no broker fills: {e}"})
+            continue
+        for sym in sorted({f["symbol"] for f in fl if f["symbol"] in job_of}):
+            ff = sorted((f for f in fl if f["symbol"] == sym), key=lambda f: f["t"])
+            cash, pos, size = 0.0, 0.0, 0.0
+            for f in ff:
+                q = f["qty"] if f["side"] == "buy" else -f["qty"]
+                cash -= q * f["px"]
+                pos += q
+                size = max(size, abs(pos) * f["px"])
+            sp = session_prices(sym, day)
+            if pos and sp["closeout"]:
+                cash += pos * sp["closeout"]
+            hold = size / sp["open"] * (sp["closeout"] - sp["open"]) if sp["open"] and sp["closeout"] and size else None
+            rows.append({"day": day, "job": job_of[sym], "symbol": sym, "fills": len(ff), "strategy_usd": round(cash, 2),
+                         "hold_usd": round(hold, 2) if hold is not None else None})
+    return rows
+
+
+def compare(path: Path = OUT, modes=("shadow", "replay")) -> Dict:
     rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
-    rows = [r for r in rows if r.get("mode") == "shadow" and r.get("verdict")]
-    outcome = trade_outcomes(decisions())
-    by_sig: Dict[str, Dict[str, str]] = {}
+    rows = [r for r in rows if r.get("mode") in modes and r.get("verdict")]
+    recs = decisions()
+    val = outcomes(recs)
+    by_sig: Dict[str, Dict] = {}
     for r in rows:
         key = (r.get("order_ids") or [r["decision_time"]])[0]
-        by_sig.setdefault(key, {"action": r["action"], "symbol": r["symbol"]})[r["model"]] = r["verdict"]
+        by_sig.setdefault(key, {"action": r["action"], "symbol": r["symbol"], "day": r["decision_time"][:10]})[r["model"]] = r["verdict"]
     models = sorted({r["model"] for r in rows})
-    res = {"signals": len(by_sig), "models": {}}
+    days = sorted({v["day"] for v in by_sig.values()})
+    res = {"days": days, "signals": len(by_sig), "models": {}}
     for m in models:
         mine = {k: v[m] for k, v in by_sig.items() if m in v}
-        entries = {k: v for k, v in mine.items() if k in outcome}
-        skipped = [outcome[k] for k, v in entries.items() if v == "skip"]
-        taken = [outcome[k] for k, v in entries.items() if v == "take"]
+        ent = {k: v for k, v in mine.items() if k in val and val[k]["kind"] == "entry"}
+        ex = {k: v for k, v in mine.items() if k in val and val[k]["kind"] == "exit"}
+        sk_ent = [val[k] for k, v in ent.items() if v == "skip"]
+        tk_ent = [val[k] for k, v in ent.items() if v == "take"]
+        sk_ex = [val[k] for k, v in ex.items() if v == "skip"]
         rm = [r for r in rows if r["model"] == m]
-        res["models"][m] = {"judged": len(mine), "skip_%": round(100 * sum(v == "skip" for v in mine.values()) / max(1, len(mine)), 1),
-                            "entries_with_outcome": len(entries),
-                            "avg_%_of_taken_entries": round(sum(taken) / len(taken), 4) if taken else None,
-                            "avg_%_of_skipped_entries": round(sum(skipped) / len(skipped), 4) if skipped else None,
-                            "pnl_%_if_only_taken": round(sum(taken), 3), "pnl_%_all_entries": round(sum(taken) + sum(skipped), 3),
-                            "cost_usd": round(sum(r.get("cost_usd") or 0 for r in rm), 3)}
+        gain_usd = -sum(x["usd"] for x in sk_ent) + sum(x["usd"] for x in sk_ex)   # vs the bot taking everything
+        res["models"][m] = {
+            "judged": len(mine), "skip_%": round(100 * sum(v == "skip" for v in mine.values()) / max(1, len(mine)), 1),
+            "entries": {"scored": len(ent), "taken": len(tk_ent), "skipped": len(sk_ent),
+                        "avg_%_taken": round(sum(x["pct"] for x in tk_ent) / len(tk_ent), 4) if tk_ent else None,
+                        "avg_%_skipped": round(sum(x["pct"] for x in sk_ent) / len(sk_ent), 4) if sk_ent else None,
+                        "skipped_that_lost": sum(x["pct"] < 0 for x in sk_ent)},
+            "exits": {"scored": len(ex), "skipped": len(sk_ex),
+                      "avg_%_if_held_instead": round(sum(x["pct"] for x in sk_ex) / len(sk_ex), 4) if sk_ex else None},
+            "usd_vs_bot": round(gain_usd, 2),
+            "cost_usd": round(sum(r.get("cost_usd") or 0 for r in rm), 3)}
     if len(models) >= 2:
         a, b = models[:2]
         both = [v for v in by_sig.values() if a in v and b in v]
         res["agreement_%"] = round(100 * sum(v[a] == v[b] for v in both) / max(1, len(both)), 1)
-        res["disagreements"] = [{"symbol": v["symbol"], "action": v["action"], a: v[a], b: v[b]} for v in both if v[a] != v[b]][:20]
+        res["disagreements"] = [{"day": v["day"], "symbol": v["symbol"], "action": v["action"], a: v[a], b: v[b]}
+                                for v in both if v[a] != v[b]][:30]
+    res["bot_entries_usd"] = round(sum(x["usd"] for x in val.values() if x["kind"] == "entry" and x["day"] in days), 2)
+    res["jobs_vs_hold"] = jobs_vs_hold(recs, days)
     return res
+
+
+def replay(days: List[str], models: List[str], effort: str) -> int:
+    """Ask every model about every signal of past days (questions cut at each decision time).
+    Both models' training data ends before these days, so they can't know what happened."""
+    c = client()
+    done = set()
+    if OUT.exists():
+        for x in OUT.read_text(encoding="utf-8").splitlines():
+            r = json.loads(x)
+            if r.get("mode") == "replay" and r.get("verdict"):
+                done.add(((r.get("order_ids") or [""])[0], r["model"]))
+    n = 0
+    for day in days:
+        for q in questions(day):
+            oid = (q["rec"].get("order_ids") or [""])[0]
+            for m in models:
+                if (oid, m) in done:
+                    continue
+                try:
+                    record(q, {**ask(c, q["prompt"], m, effort), "mode": "replay"})
+                except Exception as e:  # noqa: BLE001
+                    record(q, {"verdict": None, "error": str(e), "model": m, "mode": "replay"})
+                n += 1
+    return n
 
 
 def main():
@@ -323,6 +444,7 @@ def main():
     ap.add_argument("--model", default=None)
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--compare", action="store_true", help="compare the models' shadow verdicts with what the trades did")
+    ap.add_argument("--replay", nargs="+", metavar="YYYY-MM-DD", help="ask every model about every signal of these past days")
     a = ap.parse_args()
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     s = settings(cfg)
@@ -331,6 +453,9 @@ def main():
         return
     if a.compare:
         print(json.dumps(compare(), indent=1))
+        return
+    if a.replay:
+        print("asked", replay(a.replay, s["models"], s["effort"]), "questions")
         return
     if a.estimate:
         est = estimate(a.estimate)

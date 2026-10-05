@@ -44,20 +44,30 @@ def test_estimate_needs_no_api(monkeypatch):
 
 def test_outcomes_and_compare(monkeypatch, tmp_path):
     import json
+    monkeypatch.setattr(lj, "session_prices", lambda sym, day: {"open": 99.0, "closeout": 102.0})
     recs = [{**REC, "order_ids": ["a"], "fill_price": 100.0},
             {**REC, "action": "sell", "position_before": 12, "target": 0, "order_ids": ["b"], "fill_price": 101.0, "time": "2026-10-05T14:30:00+00:00"},
             {**REC, "order_ids": ["c"], "fill_price": 101.0, "time": "2026-10-05T15:00:00+00:00"},
             {**REC, "action": "sell", "position_before": 12, "target": 0, "order_ids": ["d"], "fill_price": 100.0, "time": "2026-10-05T15:30:00+00:00"}]
-    out = lj.trade_outcomes(recs)
-    assert out["a"] == 1.0 and round(out["c"], 4) == round((100 / 101 - 1) * 100, 4)
+    val = lj.outcomes(recs)
+    assert val["a"]["kind"] == "entry" and val["a"]["pct"] == 1.0 and val["a"]["usd"] == 12.0
+    assert val["c"]["usd"] == round((100 / 101 - 1) * 101 * 12, 2)
+    assert val["d"]["kind"] == "exit" and val["d"]["pct"] == 2.0 and val["d"]["usd"] == 24.0   # holding to the 102 close-out
     f = tmp_path / "j.jsonl"
-    rows = [("a", "opus", "take"), ("a", "haiku", "skip"), ("c", "opus", "skip"), ("c", "haiku", "skip")]
-    f.write_text("\n".join(json.dumps({"mode": "shadow", "order_ids": [k], "decision_time": k, "symbol": "SPY", "action": "buy",
-                                        "model": m, "verdict": v, "cost_usd": 0.01}) for k, m, v in rows))
+    rows = [("a", "opus", "take"), ("b", "opus", "take"), ("c", "opus", "skip"), ("d", "opus", "skip"),
+            ("a", "haiku", "skip"), ("c", "haiku", "skip")]
+    f.write_text(chr(10).join(json.dumps({"mode": "replay", "order_ids": [k], "decision_time": "2026-10-05T14:00:00+00:00",
+                                        "symbol": "SPY", "action": "buy", "model": m, "verdict": v, "cost_usd": 0.01}) for k, m, v in rows))
     monkeypatch.setattr(lj, "decisions", lambda *a: recs)
+    monkeypatch.setattr(lj, "broker_fills", lambda day: [
+        {"symbol": "SPY", "side": "buy", "qty": 12, "px": 100.0, "t": "1"}, {"symbol": "SPY", "side": "sell", "qty": 12, "px": 101.0, "t": "2"},
+        {"symbol": "SPY", "side": "buy", "qty": 12, "px": 101.0, "t": "3"}, {"symbol": "SPY", "side": "sell", "qty": 12, "px": 100.0, "t": "4"}])
     res = lj.compare(f)
-    assert res["agreement_%"] == 50.0 and res["models"]["opus"]["pnl_%_if_only_taken"] == 1.0
-    assert res["models"]["haiku"]["pnl_%_if_only_taken"] == 0 and res["models"]["haiku"]["skip_%"] == 100.0
+    assert res["models"]["opus"]["usd_vs_bot"] == round(-val["c"]["usd"] + 24.0, 2)    # skipped a loser, held a winner
+    assert res["models"]["haiku"]["usd_vs_bot"] == round(-12.0 - val["c"]["usd"], 2)
+    assert res["agreement_%"] == 50.0 and res["bot_entries_usd"] == round(12.0 + val["c"]["usd"], 2)
+    assert res["jobs_vs_hold"][0]["strategy_usd"] == round(12 * (101 - 100) + 12 * (100 - 101), 2)
+    assert res["jobs_vs_hold"][0]["hold_usd"] == round(12 * 101 / 99 * 3, 2)
 
 
 def test_settings_accept_one_model_or_several():
