@@ -205,48 +205,70 @@ def peak_since(df: pd.DataFrame, since: pd.Timestamp, qty: float) -> Optional[Di
     return {"peak": round(peak, 4), "gave_back_pct": round(max(gave, 0.0), 3), "since": since.isoformat()}
 
 
-def with_exit(trig: Optional[Dict], exit_view: Optional[Dict], last: float) -> Optional[Dict]:
-    """The chart line shows the NEAREST level that changes the position at the next close: the
-    strategy's own flip level, or the exit layer's trail level (while in a position) or its
-    new-high re-entry level (while waiting after a trail exit)."""
+def _exit_levels(exit_view: Optional[Dict], last: float) -> List[Dict]:
+    """The exit layer's own levels as trigger dicts: in a position its trail, take-profit and
+    stop levels (each closes the position); while waiting after an exit, the re-entry level."""
     if not exit_view:
-        return trig
-    lvl = None
-    if exit_view.get("state") == "in" and exit_view.get("trail_level"):
-        tl = exit_view["trail_level"]
-        long = tl < last
-        lvl = {"current_signal": 1.0 if long else -1.0, "flip_to": 0.0, "trigger_price": tl,
-               "distance_pct": round((tl / last - 1) * 100, 3), "direction": "below" if long else "above",
-               "kind": "sell" if long else "buy", "already_past": False, "bars_if_flat": None, "last_close": last,
-               "source": "trail"}
+        return []
+    out = []
+    if exit_view.get("state") == "in":
+        for key, src in (("trail_level", "trail"), ("take_profit_level", "take-profit"), ("stop_level", "stop")):
+            lv = exit_view.get(key)
+            if not lv:
+                continue
+            if src == "trail":
+                long = lv < last
+            else:  # take-profit above / stop below the entry when long, mirrored when short
+                e = exit_view.get("entry") or last
+                long = (lv > e) == (src == "take-profit")
+            out.append({"current_signal": 1.0 if long else -1.0, "flip_to": 0.0, "trigger_price": lv,
+                        "distance_pct": round((lv / last - 1) * 100, 3), "direction": "above" if lv > last else "below",
+                        "kind": "sell" if long else "buy", "already_past": False, "bars_if_flat": None, "last_close": last,
+                        "source": src})
     elif exit_view.get("state") == "waiting" and exit_view.get("waiting_for") in ("new_high", "both") and exit_view.get("peak"):
         pk = exit_view["peak"]
-        lvl = {"current_signal": 0.0, "flip_to": 1.0 if pk > last else -1.0, "trigger_price": pk,
-               "distance_pct": round((pk / last - 1) * 100, 3), "direction": "above" if pk > last else "below",
-               "kind": "buy" if pk > last else "sell", "already_past": False, "bars_if_flat": None, "last_close": last,
-               "source": "re-entry"}
-    if lvl is None:
+        out.append({"current_signal": 0.0, "flip_to": 1.0 if pk > last else -1.0, "trigger_price": pk,
+                    "distance_pct": round((pk / last - 1) * 100, 3), "direction": "above" if pk > last else "below",
+                    "kind": "buy" if pk > last else "sell", "already_past": False, "bars_if_flat": None, "last_close": last,
+                    "source": "re-entry"})
+    return out
+
+
+def with_exit(trig: Optional[Dict], exit_view: Optional[Dict], last: float) -> Optional[Dict]:
+    """The chart line shows the NEAREST level that changes the position at the next close: the
+    strategy's own flip level, or the exit layer's trail / take-profit / stop level (while in a
+    position) or its new-high re-entry level (while waiting after an exit)."""
+    lv = _exit_levels(exit_view, last)
+    if not lv:
         return trig
-    if exit_view.get("state") == "waiting" or trig is None or trig.get("distance_pct") is None:
-        return lvl  # while waiting, the strategy's own flip doesn't trade; the re-entry level does
-    return lvl if abs(lvl["distance_pct"]) < abs(trig["distance_pct"]) else {**trig, "source": "strategy"}
+    if exit_view.get("state") == "waiting":
+        return lv[0]  # while waiting, the strategy's own flip doesn't trade; the re-entry level does
+    near = min(lv, key=lambda x: abs(x["distance_pct"]))
+    if trig is None or trig.get("distance_pct") is None:
+        return near
+    return near if abs(near["distance_pct"]) < abs(trig["distance_pct"]) else {**trig, "source": "strategy"}
 
 
 def with_exit_levels(levels: Optional[Dict], exit_view: Optional[Dict], last: float) -> Optional[Dict]:
-    """trigger_levels plus the exit layer, by the same rules as with_exit: in a position the trail
-    level replaces a strategy level on the same side of the price only if it is nearer; while
-    waiting after a trail exit the strategy's own levels don't trade, only the re-entry level does."""
+    """trigger_levels plus the exit layer, by the same rules as with_exit: in a position each exit
+    level replaces the level on the same side of the price only if it is nearer (one level per
+    side); while waiting after an exit the strategy's own levels don't trade, only the re-entry
+    level does."""
     if not exit_view or levels is None:
         return levels
-    lvl = with_exit(None, exit_view, last)
-    if lvl is None:
+    lvls = _exit_levels(exit_view, last)
+    if not lvls:
         return levels
-    if lvl["source"] == "re-entry":
+    if lvls[0]["source"] == "re-entry":
+        lvl = lvls[0]
         return {**levels, "buy": [lvl] if lvl["kind"] == "buy" else [], "sell": [lvl] if lvl["kind"] == "sell" else []}
     out = {**levels, "buy": [dict(lv) for lv in levels["buy"]], "sell": [dict(lv) for lv in levels["sell"]]}
-    side = [lv for lv in out[lvl["kind"]] if lv.get("direction") == lvl["direction"] and lv.get("distance_pct") is not None]
-    if side and abs(side[0]["distance_pct"]) <= abs(lvl["distance_pct"]):
-        side[0]["source"] = "strategy"
-        return out
-    out[lvl["kind"]] = [lvl] + [lv for lv in out[lvl["kind"]] if lv.get("direction") != lvl["direction"]]
+    for lvl in sorted(lvls, key=lambda x: abs(x["distance_pct"])):
+        same = [lv for k in ("buy", "sell") for lv in out[k] if lv.get("direction") == lvl["direction"] and lv.get("distance_pct") is not None]
+        if same and abs(same[0]["distance_pct"]) <= abs(lvl["distance_pct"]):
+            same[0]["source"] = same[0].get("source") or "strategy"
+            continue
+        for k in ("buy", "sell"):
+            out[k] = [lv for lv in out[k] if lv.get("direction") != lvl["direction"]]
+        out[lvl["kind"]].insert(0, lvl)
     return out

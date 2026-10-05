@@ -40,7 +40,7 @@ interface Snapshot {
 interface Trigger {
   current_signal: number; flip_to: number; trigger_price: number | null; distance_pct: number | null;
   direction: "above" | "below" | null; kind: "sell" | "buy"; already_past: boolean; bars_if_flat: number | null; last_close: number;
-  source?: "strategy" | "trail" | "re-entry";   // with an exit layer: which rule the nearest level comes from
+  source?: "strategy" | "trail" | "re-entry" | "take-profit" | "stop";   // with an exit layer: which rule the level comes from
 }
 interface Peak { peak: number; gave_back_pct: number; since: string }
 /** Both sides of the price (autobot/trigger.trigger_levels): at most one level below and one above. */
@@ -58,7 +58,8 @@ export function triggerText(t: Trigger | null | undefined, note?: string): strin
   const p = fmt(t.trigger_price, 2), d = `${t.distance_pct! > 0 ? "+" : ""}${fmt(t.distance_pct, 2)}%`;
   if (t.already_past) return `${verb(t)} at the next close unless ${t.direction === "below" ? "above" : "below"} ${p} (${d})`;
   const flat = t.bars_if_flat ? `, ~${t.bars_if_flat} bar${t.bars_if_flat > 1 ? "s" : ""} if flat` : "";
-  const why = t.source === "trail" ? ", trailing exit" : t.source === "re-entry" ? ", re-entry after a trailing exit" : "";
+  const why = t.source === "trail" ? ", trailing exit" : t.source === "re-entry" ? ", re-entry after an exit"
+    : t.source === "take-profit" ? ", take-profit rule" : t.source === "stop" ? ", stop-loss rule" : "";
   return `${verb(t)} ${t.direction} ${p} (${d}${flat}${why})`;
 }
 
@@ -351,7 +352,7 @@ function SymbolChart({ symbol, timeframe, view: v, entry, height }: { symbol: st
     const out: PriceMark[] = [];
     for (const t of [...(lv?.buy ?? []), ...(lv?.sell ?? [])]) {
       if (t.trigger_price === null) continue;
-      const role = roleOf(t, pos, entry), src = t.source === "trail" ? " (trail)" : t.source === "re-entry" ? " (re-entry)" : "";
+      const role = roleOf(t, pos, entry), src = t.source && t.source !== "strategy" ? ` (${t.source})` : "";
       out.push({ price: t.trigger_price, color: t.kind === "sell" ? C.loss : C.profit, style: "dashed",
         title: `${role ? `${role}: ` : ""}${t.kind} ${t.direction === "below" ? "<" : ">"} ${fmt(t.trigger_price, 2)}${src}` });
     }

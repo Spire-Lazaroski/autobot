@@ -180,3 +180,55 @@ def test_lab_exit_study_on_demo_data():
     assert set(res["walk_forward"]["vs_none"]) >= {"mean_bps", "ci95_bps", "significant"}
     assert isinstance(res["beats_none_oos"], bool) and sum(res["walk_forward"]["choices"].values()) > 0
     json.dumps(res)  # plain JSON for the API
+
+
+# ----------------------------------------------------------------- take-profit and stop-loss
+def tp_sl(closes, signal, **cfg):
+    df = bars(closes)
+    return exits.exit_states(pd.Series(signal, index=df.index, dtype=float), df, {"reentry": "fresh_cross", **cfg})
+
+
+def test_take_profit_and_stop_from_the_entry_close():
+    # entry close 100: take profit 1% -> a close of 101 sells; the trail is off (not set)
+    st = tp_sl([100, 100.5, 100.99, 101.0, 102], [1] * 5, take_profit_pct=1.0)
+    assert list(st.target) == [1, 1, 1, 0, 0] and st.reason.iloc[3] == "take_profit"
+    assert st.tp.iloc[0] == pytest.approx(101.0) and np.isnan(st.trail.iloc[0]) and np.isnan(st.stop.iloc[0])
+    # stop 0.5% -> a close of 99.5 sells
+    st = tp_sl([100, 99.8, 99.5, 99], [1] * 4, stop_pct=0.5, take_profit_pct=1.0)
+    assert list(st.target) == [1, 1, 0, 0] and st.reason.iloc[2] == "stop_exit"
+
+
+def test_short_take_profit_is_below_and_stop_above():
+    st = tp_sl([100, 99.5, 99.0], [-1] * 3, take_profit_pct=1.0, stop_pct=0.5)
+    assert st.tp.iloc[0] == pytest.approx(99.0) and st.stop.iloc[0] == pytest.approx(100.5)
+    assert list(st.target) == [-1, -1, 0] and st.reason.iloc[2] == "take_profit"
+    st = tp_sl([100, 100.2, 100.5], [-1] * 3, take_profit_pct=1.0, stop_pct=0.5)
+    assert list(st.target) == [-1, -1, 0] and st.reason.iloc[2] == "stop_exit"
+
+
+def test_after_a_take_profit_it_waits_for_a_fresh_signal():
+    st = tp_sl([100, 101, 101.5, 101.5, 101.5, 101.2], [1, 1, 1, 0, 1, 1], take_profit_pct=1.0)
+    assert list(st.target) == [1, 0, 0, 0, 1, 1]   # out at 101, back in only after the strategy went out and in
+
+
+@pytest.mark.parametrize("cfg", [{"take_profit_pct": 0.3}, {"stop_pct": 0.2}, {"take_profit_pct": 0.5, "stop_pct": 0.3, "trail_pct": 0.4}])
+def test_take_profit_and_stop_have_no_look_ahead(cfg):
+    df = synthetic_bars(["X"], "5Min", 30, seed=4)["X"]
+    sig = rc.flat_before_close(get_signal("ema_cross", df, {}, allow_short=True), df, 5)
+    cfg = {"reentry": "fresh_cross", **cfg}
+    full = exits.apply_exit_layer(sig, df, cfg, crypto=False)
+    assert (full != sig).any()
+    for cut in (len(df) // 3, len(df) // 2, len(df) - 1):
+        part = exits.apply_exit_layer(sig.iloc[: cut + 1], df.iloc[: cut + 1], cfg, crypto=False)
+        pd.testing.assert_series_equal(part, full.iloc[: cut + 1], check_names=False)
+
+
+def test_take_profit_and_stop_text_and_validation():
+    st = tp_sl([100, 101.2], [1, 1], take_profit_pct=1.0).iloc[-1]
+    v = exits.exit_view_of(st, {"take_profit_pct": 1.0, "reentry": "fresh_cross"}, 101.2)
+    assert v["text"] == "Sold: price 101.20 is 1.20% above the 100.00 entry (take profit 1%)." and v["trail_pct"] == 0
+    st = tp_sl([100, 100.6], [-1, -1], stop_pct=0.5).iloc[-1]
+    assert exits.exit_view_of(st, {"stop_pct": 0.5}, 100.6)["text"] == "Bought back: price 100.60 is 0.60% above the 100.00 entry (stop 0.5%)."
+    assert exits.validate({"take_profit_pct": 0, "stop_pct": 60}) == [
+        "exit.take_profit_pct must be between 0 and 50", "exit.stop_pct must be between 0 and 50"]
+    assert exits.validate({"take_profit_pct": 1, "stop_pct": 0.5}) == [] and exits.enabled({"stop_pct": 0.5})

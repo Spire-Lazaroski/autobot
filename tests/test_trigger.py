@@ -167,3 +167,14 @@ def test_bot_writes_trigger_to_status_and_decisions_without_changing_orders(env,
     decs = [json.loads(l) for l in (live.LOGS / "decisions.jsonl").read_text().splitlines() if '"decision"' in l]
     assert decs and all("trigger" in d and "triggers" in d and "peak_since_entry" in d for d in decs[-2:])
     assert all(pd.Timestamp(d["time"]) <= pd.Timestamp.now(tz="UTC") for d in decs)
+
+
+def test_take_profit_and_stop_levels_in_the_sell_column():
+    view = {"state": "in", "entry": 100.0, "take_profit_level": 101.0, "stop_level": 99.5, "trail_level": None}
+    lv = trigger.with_exit_levels({"nearest": None, "buy": [], "sell": [], "position": 1.0}, view, 100.2)
+    assert sorted((t["direction"], t["trigger_price"], t["source"]) for t in lv["sell"]) == [("above", 101.0, "take-profit"), ("below", 99.5, "stop")]
+    assert lv["buy"] == []
+    short = {"state": "in", "entry": 100.0, "take_profit_level": 99.0, "stop_level": 100.5, "trail_level": None}
+    lv = trigger.with_exit_levels({"nearest": None, "buy": [], "sell": [], "position": -1.0}, short, 99.8)
+    assert sorted((t["kind"], t["direction"], t["source"]) for t in lv["buy"]) == [("buy", "above", "stop"), ("buy", "below", "take-profit")]
+    assert trigger.with_exit(None, view, 100.2)["source"] == "stop"            # 99.5 is nearer than 101

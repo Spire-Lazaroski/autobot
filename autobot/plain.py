@@ -139,13 +139,17 @@ RECAL_REASONS: Dict[str, str] = {
 EXIT_REASONS: Dict[str, str] = {
     "trail_exit": "Sold: price {close} fell {pct}% from the {peak} high since entry (trail {trail}%).",
     "trail_exit_short": "Bought back: price {close} rose {pct}% from the {peak} low since entry (trail {trail}%).",
+    "take_profit": "Sold: price {close} is {pct}% above the {entry} entry (take profit {level}%).",
+    "take_profit_short": "Bought back: price {close} is {pct}% below the {entry} entry (take profit {level}%).",
+    "stop_exit": "Sold: price {close} is {pct}% below the {entry} entry (stop {level}%).",
+    "stop_exit_short": "Bought back: price {close} is {pct}% above the {entry} entry (stop {level}%).",
     "waiting": "Stayed out: waiting for {what}.",
     "wait_fresh_cross": "a fresh crossover (the strategy has to go out and back in)",
     "wait_new_high": "a close above {peak}",
     "wait_both": "a fresh crossover or a close above {peak}",
     "wait_cooldown": "the {n}-bar cooldown to end",
     "late": "No new position in the last {n} minutes before the close.",
-    "reentry": "Back in after the trailing exit: {rule}.",
+    "reentry": "Back in after the exit: {rule}.",
     "rule_fresh_cross": "the strategy went out and back in",
     "rule_new_high": "a bar closed beyond the level it had exited from",
     "rule_both": "a fresh crossover or a new high came first",
@@ -163,6 +167,10 @@ EXIT_SOP: Dict[str, str] = {
     "same": ("The backtests, the Lab, the nightly check and the bot all use the same code for this, so the bot does exactly what was tested. "
              "Each sale or wait is explained in the decision log and the daily report, for example "
              "'Sold: price 763.05 fell 0.29% from the 765.27 high since entry (trail 0.25%).'"),
+    "levels": ("Two more optional rules, each measured from the price when the position was opened: <code>take_profit_pct</code> "
+               "sells once a bar closes that % above it (takes the profit), <code>stop_pct</code> sells once a bar closes that % below "
+               "it (cuts the loss). For a short both are mirrored. After either, the re-entry rule applies as after a trailing exit. "
+               "Off unless set; any of the three switches the layer on."),
     "lab": ("Lab → <i>Exit rules</i> compares the jobs without the layer and with every setting on the last 90 days, including a walk-forward "
             "test on days the setting was not chosen on. Only switch it on if that walk-forward result beats 'none'."),
     "recal": "The nightly check can also try exit settings for each symbol (<code>recalibration: include_exit: true</code>, off by default).",
