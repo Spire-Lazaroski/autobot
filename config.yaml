@@ -145,6 +145,87 @@ live:
     - QQQ
     allocation_pct: 10
     enabled: true
+  - name: auto_SPCX
+    strategy: regime_switch
+    params:
+      trend_strategy: noise_area
+      range_strategy: momentum
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        noise_area:
+          lookback: 14
+          band_mult: 1.2
+        momentum:
+          lookback: 20
+          threshold: 0.5
+    symbols:
+    - SPCX
+    allocation_pct: 10
+    enabled: true
+  - name: auto_AMD
+    strategy: intraday_momentum
+    params:
+      signal_min: 60
+      hold_min: 30
+    symbols:
+    - AMD
+    allocation_pct: 10
+    enabled: true
+  - name: auto_SLV
+    strategy: perf_rotation
+    params:
+      candidates:
+      - rsi_reversion
+      - bollinger_reversion
+      - vwap_reversion
+      candidate_params:
+        rsi_reversion:
+          period: 2
+          oversold: 10
+          overbought: 70
+          exit_level: 50
+        bollinger_reversion:
+          period: 10
+          num_std: 2.0
+        vwap_reversion:
+          band_pct: 0.15
+      cost_bps: 2.0
+    symbols:
+    - SLV
+    allocation_pct: 10
+    enabled: true
+  - name: auto_PFE
+    strategy: rsi_reversion
+    params:
+      period: 14
+      oversold: 20
+      overbought: 70
+      exit_level: 60
+    symbols:
+    - PFE
+    allocation_pct: 10
+    enabled: true
+  - name: auto_KO
+    strategy: bollinger_reversion
+    params:
+      period: 10
+      num_std: 2.5
+    symbols:
+    - KO
+    allocation_pct: 10
+    enabled: true
+  - name: auto_COST
+    strategy: rsi_reversion
+    params:
+      period: 7
+      oversold: 10
+      overbought: 70
+      exit_level: 60
+    symbols:
+    - COST
+    allocation_pct: 10
+    enabled: true
 news:
   symbols:
   - SPY
