@@ -21,7 +21,7 @@ live:
     no_quick_reentry: true
     min_change_pct: 10
   core:
-    enabled: false
+    enabled: true
     symbol: VOO
     allocation_pct: 30
     rebalance_band_pct: 5
