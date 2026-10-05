@@ -4,6 +4,8 @@ Position sizing, shared by the live bot and the portfolio backtester so both siz
 config.yaml live.risk:
   sizing: fixed | risk_balanced          (default fixed: today's behaviour)
   max_position_usd                       hard per-symbol cap in both modes
+  max_gross_pct: 100                     both modes: all symbols together never get more than this %
+                                         of equity; above it every symbol is scaled down alike
   gross_budget_pct: 90                   risk_balanced: share of equity spread over all job symbols
   bucket_max_pct: {crypto: 20}           risk_balanced: a bucket's cap, % of the gross budget
   atr_days: 20                           risk_balanced: days of average true range
@@ -14,6 +16,9 @@ risk_balanced  gross = equity x gross_budget_pct; each symbol of an enabled job 
                the account about equally), then the per-symbol cap and the bucket caps apply.
                Money cut by a cap is NOT handed to the other symbols: it stays as cash, so the
                totals never exceed any limit.
+max_gross_pct  last step in both modes: if the dollars of all job symbols add up to more than
+               equity x max_gross_pct, each is scaled by the same factor (e.g. 20 jobs at 10%
+               become 5% each with the default 100), so the jobs can never borrow on margin.
 
 ATR% = average over the last `atr_days` COMPLETED New York days of the daily true range
 (max(high, previous close) - min(low, previous close)) / close x 100. Today's unfinished day
@@ -29,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 NY = "America/New_York"
-DEFAULTS = {"sizing": "fixed", "gross_budget_pct": 90.0, "bucket_max_pct": {"crypto": 20.0}, "atr_days": 20}
+DEFAULTS = {"sizing": "fixed", "gross_budget_pct": 90.0, "bucket_max_pct": {"crypto": 20.0}, "atr_days": 20, "max_gross_pct": 100.0}
 
 
 def settings(risk: Dict) -> Dict:
@@ -50,6 +55,9 @@ def validate(risk: Dict) -> List[str]:
     for b, v in ((risk or {}).get("bucket_max_pct") or {}).items():
         if not isinstance(v, (int, float)) or not 0 < v <= 100:
             errs.append(f"risk.bucket_max_pct.{b} must be between 0 and 100")
+    m = (risk or {}).get("max_gross_pct", DEFAULTS["max_gross_pct"])
+    if not isinstance(m, (int, float)) or isinstance(m, bool) or not 0 < m <= 100:
+        errs.append("risk.max_gross_pct must be between 0 and 100")
     a = (risk or {}).get("atr_days", DEFAULTS["atr_days"])
     if not isinstance(a, int) or not 2 <= a <= 250:
         errs.append("risk.atr_days must be a whole number between 2 and 250")
@@ -98,11 +106,12 @@ def daily_atr_pct(bars: pd.DataFrame, before: date, days: int) -> Optional[float
 # ----------------------------------------------------------------- dollars per symbol
 def budgets(equity: float, symbols: Iterable[str], risk: Dict, atr: Dict[str, Optional[float]],
             alloc_pct: Dict[str, float], buckets: Dict[str, str]) -> Dict[str, float]:
-    """Dollars each symbol may hold (long or short), for the configured sizing mode."""
+    """Dollars each symbol may hold (long or short), for the configured sizing mode, then the
+    max_gross_pct cap over all symbols together."""
     s = settings(risk)
     syms = list(dict.fromkeys(symbols))
     if s["sizing"] != "risk_balanced":
-        return {x: min(equity * alloc_pct.get(x, 0) / 100, s["max_position_usd"]) for x in syms}
+        return _gross_cap({x: min(equity * alloc_pct.get(x, 0) / 100, s["max_position_usd"]) for x in syms}, equity, s)
     gross = equity * s["gross_budget_pct"] / 100
     inv = {x: 1.0 / atr[x] for x in syms if atr.get(x) and atr[x] > 0}
     if not inv:
@@ -118,6 +127,14 @@ def budgets(equity: float, symbols: Iterable[str], risk: Dict, atr: Dict[str, Op
         elif cap <= 0:
             for x in members:
                 usd[x] = 0.0
+    return _gross_cap(usd, equity, s)
+
+
+def _gross_cap(usd: Dict[str, float], equity: float, s: Dict) -> Dict[str, float]:
+    cap, have = equity * float(s["max_gross_pct"]) / 100, sum(usd.values())
+    if have > cap and have > 0:
+        k = max(cap, 0.0) / have
+        return {x: v * k for x, v in usd.items()}
     return usd
 
 

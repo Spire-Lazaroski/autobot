@@ -456,6 +456,8 @@ def auto_section(f: dict) -> list:
                  f"<b>Now: risk-balanced.</b> {sz['gross_budget_pct']:g}% of the account is shared out so calmer symbols get more dollars "
                  f"(based on the last {sz['atr_days']} days' daily range), at most ${sz['max_position_usd']:,.0f} per symbol"
                  + "".join(f" and {v:g}% of the budget for {k}" for k, v in sz["bucket_max_pct"].items()) + ".")
+                + f" All jobs together never get more than {sz['max_gross_pct']:g}% of the account (<code>risk: max_gross_pct</code>): "
+                "if their shares add up to more, every symbol is scaled down alike, so the bot never trades on borrowed money."
                 + " The other mode is available in config.yaml (<code>risk: sizing</code>); compare it in the Lab first.")]
     B += [("h3", "Profit lock")]
     B += [("p", (f"<b>On:</b> once the day's gain reaches {lock.get('trigger_pct')}%, if it then falls back by more than {lock.get('giveback_pct')}% of the day's best, "

@@ -183,7 +183,7 @@ export function Live() {
             <Kpi label="Bot last tick" value={st ? ts(st.time) : "–"} sub={st ? `${st.timeframe ?? ""} bars · ${st.jobs?.length ?? 0} jobs` : "no status yet"} />
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3">{/* one table per row: side by side they needed a sideways scroll */}
             <Panel title="Positions">
               {d.positions.length ? (
                 <SortTable rows={d.positions} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }}

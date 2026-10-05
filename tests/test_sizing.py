@@ -45,6 +45,19 @@ def test_fixed_mode_is_todays_rule():
     assert b == {"SPY": 10000, "AAPL": 5000}
 
 
+def test_jobs_together_never_exceed_the_account():
+    risk = {"max_daily_loss_pct": 2, "max_position_usd": 10000}
+    syms = [f"S{i}" for i in range(20)]
+    b = sizing.budgets(100_000, syms, risk, {}, {s: 10 for s in syms}, {})        # 20 jobs x 10% = 200%
+    assert sum(b.values()) == pytest.approx(100_000) and all(v == pytest.approx(5000) for v in b.values())
+    b = sizing.budgets(100_000, syms, {**risk, "max_gross_pct": 60}, {}, {s: 10 for s in syms}, {})
+    assert sum(b.values()) == pytest.approx(60_000)
+    five = sizing.budgets(100_000, syms[:5], risk, {}, {s: 10 for s in syms[:5]}, {})   # 50%: untouched
+    assert all(v == 10000 for v in five.values())
+    rb = sizing.budgets(100_000, ["A", "B"], {**RB, "max_position_usd": 1e9, "gross_budget_pct": 90, "max_gross_pct": 50}, {"A": 1.0, "B": 1.0}, {}, {})
+    assert sum(rb.values()) == pytest.approx(50_000)
+
+
 def test_quantities_round_down():
     assert sizing.to_qty(10000, 768.64, 1, False) == 13
     assert sizing.to_qty(10000, 768.64, -1, False) == -13
@@ -66,6 +79,7 @@ def test_validation():
     assert sizing.validate({"sizing": "bogus", "gross_budget_pct": 150, "bucket_max_pct": {"crypto": 0}, "atr_days": 1}) == [
         "risk.sizing must be 'fixed' or 'risk_balanced'", "risk.gross_budget_pct must be between 0 and 100",
         "risk.bucket_max_pct.crypto must be between 0 and 100", "risk.atr_days must be a whole number between 2 and 250"]
+    assert sizing.validate({"max_gross_pct": 150}) == ["risk.max_gross_pct must be between 0 and 100"]
     assert sizing.validate(RB) == []
 
 
