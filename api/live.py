@@ -187,6 +187,7 @@ def live_candles(symbol: str, timeframe: Optional[str] = None, bars: int = 300):
 
 class StopReq(BaseModel):
     confirm: bool = False
+    include_core: bool = False   # also sell the core holding (live.core); off = the bot keeps it
 
 
 @router.post("/api/live/start")
@@ -215,5 +216,6 @@ def live_stop(req: StopReq):
     st = bot_state()
     if not (st["running"] or st["unresponsive"]):
         raise HTTPException(409, "The bot isn't running, so there's nothing to stop.")
-    STOP_FILE.touch()
-    return {"ok": True, "message": "Stop requested: the bot will close all positions and exit within a few seconds."}
+    STOP_FILE.write_text(json.dumps({"include_core": bool(req.include_core)}))
+    what = "all positions" if req.include_core else "all positions except the core holding (if one is set)"
+    return {"ok": True, "message": f"Stop requested: the bot will close {what} and exit within a few seconds."}

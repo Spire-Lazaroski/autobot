@@ -101,3 +101,12 @@ def test_daily_loss_limit_ignores_the_core(env):  # noqa: F811
     assert bot.check_risk() is True and not bot.halted
     plain = live.Bot(yaml.safe_load(env.read_text()), tc=CoreTC({"VOO": 60}, equity="97000", last_equity="100000", core_pl=-2500))
     assert plain.check_risk() is False and plain.halted            # no core configured: today's rule
+
+
+def test_switching_the_core_on_takes_effect_at_the_next_bar(env):  # noqa: F811
+    from tests.test_live import _rewrite
+    bot = live.Bot(yaml.safe_load(env.read_text()), tc=CoreTC(), cfg_path=env)
+    assert not bot.core["enabled"]
+    _rewrite(env, lambda l: l.__setitem__("core", dict(CORE)))
+    bot.reload_config()
+    assert bot.core["enabled"] and any("core.enabled: None -> True" in c["change"] for c in bot.changes)

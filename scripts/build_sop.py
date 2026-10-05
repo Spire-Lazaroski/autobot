@@ -459,6 +459,15 @@ def auto_section(f: dict) -> list:
                 + f" All jobs together never get more than {sz['max_gross_pct']:g}% of the account (<code>risk: max_gross_pct</code>): "
                 "if their shares add up to more, every symbol is scaled down alike, so the bot never trades on borrowed money."
                 + " The other mode is available in config.yaml (<code>risk: sizing</code>); compare it in the Lab first.")]
+    B += [("h3", "Core holding")]
+    co = {"enabled": False, "symbol": "VOO", "allocation_pct": 30, "rebalance_band_pct": 5, **(f["live"].get("core") or {})}
+    B += [("p", f"<b>Now: {'on' if co['enabled'] else 'off'}.</b> "
+           f"When on, the bot holds {co['symbol']} long term as {co['allocation_pct']:g}% of the account, outside the trading jobs: "
+           f"it buys up to that share at the first check of a trading day and trades it again only if its share drifts more than "
+           f"{co['rebalance_band_pct']:g} points away. It is not sold before the close, and the daily loss limit and profit lock "
+           "count and sell the trading jobs only. Stop + flatten keeps it unless you tick <i>Also sell the core holding</i>. "
+           "Switched on or off in config.yaml (<code>live: core: enabled</code>); the bot picks the change up at its next bar. "
+           "Why a plain hold and no timing rule: docs/CORE_DESIGN.md.")]
     B += [("h3", "Profit lock")]
     B += [("p", (f"<b>On:</b> once the day's gain reaches {lock.get('trigger_pct')}%, if it then falls back by more than {lock.get('giveback_pct')}% of the day's best, "
                  "the bot sells everything and stops for the day (like the loss limit)." if lock.get("enabled") else

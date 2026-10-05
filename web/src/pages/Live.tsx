@@ -25,6 +25,7 @@ interface Snapshot {
     time: string; equity: number; "day_pnl_%": number; market_open: boolean; halted: boolean; timeframe?: string;
     jobs?: Row[]; config_changes?: { time: string; change: string }[];
     symbols: Record<string, SymView>;
+    core?: CoreView;
   };
   trades: Row[];
   log: string[];
@@ -43,6 +44,12 @@ interface Trigger {
   source?: "strategy" | "trail" | "re-entry" | "take-profit" | "stop";   // with an exit layer: which rule the level comes from
 }
 interface Peak { peak: number; gave_back_pct: number; since: string }
+/** The core holding (autobot/core.py, config live.core): held long term, outside the trading jobs. */
+interface CoreView {
+  enabled: boolean; symbol: string; allocation_pct: number; rebalance_band_pct: number; qty: number;
+  price?: number; value?: number; "weight_%"?: number | null;
+  last_action?: { time: string; qty: number; reason: string; order_id: string | null };
+}
 /** Both sides of the price (autobot/trigger.trigger_levels): at most one level below and one above. */
 interface Levels { buy: Trigger[]; sell: Trigger[]; partial?: boolean }
 interface SymView {
@@ -115,6 +122,7 @@ const ts = (s: string | number | null | undefined) => (s === null || s === undef
 export function Live() {
   const { data: d, connected, lastAt } = useLiveSocket<Snapshot>();
   const [confirmStop, setConfirmStop] = useState(false);
+  const [sellCore, setSellCore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -126,7 +134,7 @@ export function Live() {
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false); setConfirmStop(false);
+      setBusy(false); setConfirmStop(false); setSellCore(false);
     }
   };
 
@@ -185,6 +193,7 @@ export function Live() {
           </div>
 
           <div className="grid grid-cols-1 gap-3">{/* one table per row: side by side they needed a sideways scroll */}
+            <CorePanel core={st?.core} positions={d.positions} />
             <Panel title="Positions">
               {d.positions.length ? (
                 <SortTable rows={d.positions} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }}
@@ -286,13 +295,47 @@ export function Live() {
 
       {confirmStop && (
         <Confirm title="Stop the bot and close every position?" confirmLabel="Stop + flatten" danger busy={busy}
-          onCancel={() => setConfirmStop(false)} onConfirm={() => call("/live/stop", { confirm: true })}>
+          onCancel={() => { setConfirmStop(false); setSellCore(false); }} onConfirm={() => call("/live/stop", { confirm: true, include_core: sellCore })}>
           The bot will <b className="text-fg">close all open positions in the paper account</b> (market orders, open orders cancelled)
-          and exit within a few seconds. This includes positions it didn't open.
+          and exit within a few seconds. This includes positions it didn't open
+          {st?.core?.enabled ? <>, <b className="text-fg">except the core holding ({st.core.symbol})</b> unless you tick the box below.</> : "."}
+          {st?.core?.enabled && (
+            <label className="flex items-center gap-2 mt-3 text-fg">
+              <input type="checkbox" checked={sellCore} onChange={(e) => setSellCore(e.target.checked)} />
+              Also sell the core holding ({st.core.symbol}, {fmt(st.core.qty, 0)} shares)
+            </label>)}
         </Confirm>
       )}
     </div>
   );
+}
+
+/** The core holding: what it holds against its target share, and what it last did. */
+function CorePanel({ core, positions }: { core?: CoreView; positions: Row[] }) {
+  if (!core) return null;
+  if (!core.enabled) {
+    const held = positions.find((p) => p.symbol === core.symbol);
+    return (
+      <Panel title="Core holding">
+        <p className="text-muted text-[12px]">Off. When switched on (<code>live.core.enabled: true</code> in config.yaml) the bot holds {core.symbol} long
+          term as {core.allocation_pct}% of the account, outside the trading jobs.{held ? ` ${core.symbol} is held now (${fmt(held.qty, 0)} shares) but not managed as the core.` : ""}</p>
+      </Panel>);
+  }
+  const w = core["weight_%"], lo = core.allocation_pct - core.rebalance_band_pct, hi = core.allocation_pct + core.rebalance_band_pct;
+  return (
+    <Panel title={`Core holding · ${core.symbol}`}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[12px]">
+        <div><div className="text-muted">Held</div><div className="num font-semibold">{fmt(core.qty, 0)} shares</div></div>
+        <div><div className="text-muted">Value</div><div className="num font-semibold">{core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</div></div>
+        <div><div className="text-muted">Share of the account</div>
+          <div className="num font-semibold">{w !== undefined && w !== null ? `${fmt(w, 1)}%` : "–"} <span className="text-muted font-normal">target {core.allocation_pct}%</span></div></div>
+        <div><div className="text-muted">Rebalances if outside</div><div className="num font-semibold">{lo}% – {hi}%</div></div>
+      </div>
+      <p className="text-[11.5px] text-muted mt-2">
+        {core.last_action ? `Last action ${ts(core.last_action.time)}: ${core.last_action.reason}. ` : "No core order since the bot started. "}
+        Held long term: not sold before the close or by the daily loss limit or profit lock, which count the trading jobs only.
+        Checked once a day at the first tick after the open.</p>
+    </Panel>);
 }
 
 /** Alpaca reports BTC/USD positions as BTCUSD; the bot's status uses the job symbol. */

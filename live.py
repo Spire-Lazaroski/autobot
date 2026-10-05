@@ -132,6 +132,10 @@ def config_diff(old: dict, new: dict) -> list[str]:
         a, b = old.get("risk", {}).get(k), new.get("risk", {}).get(k)
         if a != b:
             out.append(f"risk.{k}: {a} -> {b}")
+    for k in sorted(set(old.get("core") or {}) | set(new.get("core") or {})):
+        a, b = (old.get("core") or {}).get(k), (new.get("core") or {}).get(k)
+        if a != b:
+            out.append(f"core.{k}: {a} -> {b}")
     oj = {j["name"]: j for j in old.get("jobs", [])}
     nj = {j["name"]: j for j in new.get("jobs", [])}
     for name in nj.keys() - oj.keys():

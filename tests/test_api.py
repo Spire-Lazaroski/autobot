@@ -135,3 +135,16 @@ def test_overnight_study_job_on_demo_data():
 
 def test_recal_fix_study_endpoint():
     assert client.get("/api/recal-fix-study").status_code == 200
+
+
+def test_stop_tells_the_bot_whether_to_sell_the_core(monkeypatch, tmp_path):
+    import api.live as L
+    import live
+    stop = tmp_path / "STOP"
+    monkeypatch.setattr(L, "STOP_FILE", stop)
+    monkeypatch.setattr(live, "STOP_FILE", stop)
+    monkeypatch.setattr(L, "bot_state", lambda: {"running": True, "pid": 4242})
+    assert client.post("/api/live/stop", json={"confirm": True}).status_code == 200
+    assert live.stop_includes_core() is False
+    client.post("/api/live/stop", json={"confirm": True, "include_core": True})
+    assert live.stop_includes_core() is True
