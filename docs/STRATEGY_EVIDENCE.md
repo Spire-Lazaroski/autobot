@@ -182,3 +182,24 @@ on the previous 500; next-open fills, open costs 2x).
 Reading: on single stocks the overlay clearly costs return. On the index it is insurance: it
 roughly halves the worst drop for about 2-4 points of return a year; volatility targeting buys
 less protection more cheaply. Nothing here beats holding on return.
+
+## 9. Dynamic band exits (band study, 2026-10-06)
+
+The user's idea: volatility-scaled sell levels instead of fixed %. `autobot/exits.py` `atr_stop`
+(sell more than k ATRs below the best close since entry) and `band_profit` (sell above the 20-bar
+average plus k ATRs); `python -m autobot.band_study`. Tested on top of today's live set-up
+(strategies + no quick re-entry), long only, 11 symbols, 2 years, after costs; settings
+{none, 2, 3, 4} x {none, 2, 3} fixed before the run, chosen walk-forward (60 / 20 sessions).
+
+| | 5-minute (128 pairs) | 1-hour (121 pairs) |
+|---|---|---|
+| No bands | −9.7% on the test days | −4.3% |
+| Walk-forward bands | −11.1% (−0.42 bps/day, −2.88 to +2.04) | −5.0% (−0.17 bps/day, −0.96 to +0.62) |
+| Pairs clearly better / worse (luck ~3) | 1 / 2 | 0 / 0 |
+| Best setting in hindsight | profit at average + 2 ATR: −10.5% vs −11.8% per pair, 43% fewer trades | stop 2 ATR + profit average + 2 ATR: −5.5% vs −6.1% |
+| Chosen most often | none (18%) | none (44%) |
+
+Reading: the bands cut trades a lot (the profit band by about 40%) but the result per day does not
+change beyond chance in either direction; the setting chosen on past days does no better than
+none. Volatility-scaled exits behave like the fixed-% ones (section 2 of the shorts / take-profit
+study): exits re-time a trade, they do not create an edge the entry lacks.
