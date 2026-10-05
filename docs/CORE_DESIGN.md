@@ -1,6 +1,7 @@
 # Core holding: S&P 500 with a 10-month-average rule (design, 2026-10-05)
 
-Status: **design approved in its decisions, not built.** Evidence: `docs/STRATEGY_EVIDENCE.md`
+Status: **phase 1 done; the rule failed its checkpoint on real daily closes (see the end).
+Phases 2-4 on hold until the user decides.** Evidence: `docs/STRATEGY_EVIDENCE.md`
 sections 5-6 (daily study 2021-2026; macro study 1871-2026: the 10-month average kept almost all
 of buy-and-hold's return and cut the worst drop from −82% to −49%).
 
@@ -55,3 +56,23 @@ and the Jobs editor never see it; `validate_live` rejects a core symbol used by 
    sizing carve-out, decision records, tests (including that the loss limit never sells the core).
 3. Live page Core panel, Stop dialog tick box, report and SOP. **Checkpoint: screenshots.**
 4. Switch on in paper. **Bot restart only with the user's OK.**
+
+## Phase 1 result (2026-10-05): the exact live rule on real closes
+
+`autobot/core.py` (`decide` for the bot, `signal` / `replay` for the backtest; tests prove they
+agree every month and use the macro study's formula).
+
+| Data | Rule per year | Hold per year | Rule worst drop | Hold worst drop |
+|---|---|---|---|---|
+| VOO / SGOV, IEX daily, May 2021 - Oct 2026 (`--backtest`) | +7.1% (cash when out: +6.5%) | **+13.6%** | −24.7% | −24.4% |
+| S&P 500 index, FRED daily, Oct 2016 - Oct 2026 (`--sp500`, no dividends) | +6.6% | **+13.3%** | −28.3% | −33.9% |
+
+The rule was caught by every quick dip: it sold after the drop and bought back after the
+recovery (2018, 2019, 2022 twice, 2023, 2025, 2026); 21 switches in 10 years.
+
+Why the 150-year study looked better: Shiller's prices are monthly averages, which smooth
+out quick dips, so the rule switched far less on them. In Shiller's data the same 2021-2026
+window shows the rule about even with holding; on real month-end closes it trails by 6.5 points
+a year. The "acting a month later" check did not remove this effect. Over 150 years the rule
+also trails holding in 57% of 5-year windows; its payoff is the rare slow crash (1929, 1973,
+2000, 2008), none of which happened in the last 10 years.

@@ -121,3 +121,8 @@ worst drop, avoiding most of 1973-74, 2000-02, 2008-09 and 2022 (not the fast 20
 FRED warnings help in some crashes but cost return; the GMD annual figures arrive too late to
 help (at best July of the next year) and none improves on holding. None of the differences in
 yearly return is clearly beyond chance. The trend filter is about smaller drops, not more return.
+
+**Correction after the core holding's phase 1 (docs/CORE_DESIGN.md):** on real daily month-end
+closes (FRED S&P 500, 2016-2026) the same rule made +6.6% a year against +13.3% for holding, with
+21 switches; Shiller's monthly averages hide the quick dips that cause those switches, so the
+table above overstates the 10-month rule even in its "acting a month later" form.
