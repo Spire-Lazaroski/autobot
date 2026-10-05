@@ -51,3 +51,40 @@ def test_no_look_ahead():
     assert (full != sig).any()
     for cut in (len(df) // 3, len(df) - 1):
         pd.testing.assert_series_equal(tr.apply(sig.iloc[:cut + 1], df.iloc[:cut + 1], rules), full.iloc[:cut + 1], check_names=False)
+
+
+def test_small_change_and_validation():
+    assert tr.small_change(68, 69, 10) and tr.small_change(69, 68, 10)       # the 1-share USO nudges
+    assert not tr.small_change(0, 68, 10) and not tr.small_change(68, 0, 10)  # entries and exits always pass
+    assert not tr.small_change(68, -68, 10) and not tr.small_change(68, 69, 0)
+    assert tr.validate({"no_quick_reentry": True, "min_change_pct": 10}) == []
+    errs = " | ".join(tr.validate({"no_quick_reentry": "yes", "min_change_pct": 150, "x": 1}))
+    assert "no_quick_reentry" in errs and "min_change_pct" in errs and "unknown settings x" in errs
+
+
+def test_live_bot_uses_the_same_rule_as_the_study(monkeypatch, tmp_path):
+    import yaml
+    import live
+    from tests.test_live import BASE, FakeTC
+    from autobot import liveconfig
+    monkeypatch.setattr(live, "LOGS", tmp_path)
+    monkeypatch.setattr(liveconfig, "PID_FILE", tmp_path / "bot.pid")
+    closes = [100.0] * 56 + [100, 102, 101, 101.5]                       # one session: in, out, wants back in below 102
+    df = bars(closes)
+    want = pd.Series([0.0] * 56 + [1, 1, 0, 1], index=df.index)
+    monkeypatch.setattr(live, "Context", lambda strat, d, p, s: type("C", (), {"signal": want.reindex(d.index), "active": [None] * len(d)})())
+
+    def run(rules):
+        cfg = yaml.safe_load(yaml.safe_dump(BASE))
+        cfg["live"]["jobs"] = [cfg["live"]["jobs"][0]]
+        if rules:
+            cfg["live"]["trade_rules"] = rules
+        tc = FakeTC()
+        bot = live.Bot(cfg, tc=tc)
+        monkeypatch.setattr(bot, "recent_bars", lambda *a: df)
+        monkeypatch.setattr(live, "_download", lambda *a, **k: df)
+        bot.step_once()
+        return [o for o in tc.orders if o.symbol == "SPY"]
+
+    assert len(run(None)) == 1                                            # control: without the rule it buys back
+    assert run({"no_quick_reentry": True}) == []                          # with it, the re-entry at 101.5 waits

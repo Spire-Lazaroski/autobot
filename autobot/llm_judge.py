@@ -7,8 +7,12 @@ It NEVER changes an order: it runs as its own process, reading the bot's decisio
     python -m autobot.llm_judge --estimate 2026-10-05 --sample 3   # really ask about 3 of them (costs money)
     python -m autobot.llm_judge --watch                      # shadow mode: follow logs/decisions.jsonl live
 
-Config (top level of config.yaml; --watch refuses to run unless enabled):
-    llm_judge: {enabled: false, model: claude-opus-5-5, effort: low, max_calls_per_day: 100}
+Config (top level of config.yaml; --watch refuses to run unless enabled, and stops after `until`):
+    llm_judge: {enabled: false, models: [claude-opus-5-5, claude-haiku-4-5], effort: low,
+                max_calls_per_day: 100, until: 2026-10-08}
+Every signal is put to every listed model (same question), so the models can be compared like
+for like: `python -m autobot.llm_judge --compare` (agreement, and the P&L of the trades each
+model would have skipped). Effort is sent only to models that accept it (not Haiku 4.5).
 
 What the judge sees (all from the decision time or before): the job, strategy and its own
 reason, the proposed order, today's session so far (open / high / low / last, the last 24
@@ -32,7 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "logs"
 OUT = LOGS / "llm_judge.jsonl"
 NY = "America/New_York"
-DEFAULTS = {"enabled": False, "model": "claude-opus-5-5", "effort": "low", "max_calls_per_day": 100}
+DEFAULTS = {"enabled": False, "models": ["claude-opus-5-5"], "effort": "low", "max_calls_per_day": 100, "until": None}
+NO_EFFORT = ("claude-haiku-4-5",)    # effort is rejected on Haiku 4.5
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-4-5": (1.0, 5.0)}  # $ per 1M in / out
 PROMPT_VERSION = 1
 
@@ -56,7 +61,11 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["verdict
 
 
 def settings(cfg: Optional[Dict]) -> Dict:
-    return {**DEFAULTS, **((cfg or {}).get("llm_judge") or {})}
+    raw = (cfg or {}).get("llm_judge") or {}
+    s = {**DEFAULTS, **raw}
+    if raw.get("model") and "models" not in raw:
+        s["models"] = [raw["model"]]
+    return s
 
 
 # ----------------------------------------------------------------- which records are signals
@@ -165,15 +174,17 @@ def client():
 
 
 def ask(c, prompt: str, model: str, effort: str) -> Dict:
+    oc = {"format": {"type": "json_schema", "schema": SCHEMA}}
+    if model not in NO_EFFORT:
+        oc["effort"] = effort
     resp = c.messages.create(model=model, max_tokens=4000, system=SYSTEM,
-                             messages=[{"role": "user", "content": prompt}],
-                             output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}})
+                             messages=[{"role": "user", "content": prompt}], output_config=oc)
     if resp.stop_reason in ("refusal", "max_tokens"):
         raise RuntimeError(f"no verdict ({resp.stop_reason})")
     data = json.loads(next(b.text for b in resp.content if b.type == "text"))
     pin, pout = PRICES.get(model, (0, 0))
     u = resp.usage
-    return {**data, "model": model, "effort": effort, "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+    return {**data, "model": model, "effort": effort if model not in NO_EFFORT else None, "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
             "cost_usd": round((u.input_tokens * pin + u.output_tokens * pout) / 1e6, 5), "request_id": resp._request_id}
 
 
@@ -221,6 +232,9 @@ def watch(cfg: Dict, poll_s: float = 10.0):
             chunk = f.read()
             pos = f.tell()
         recs = decisions()
+        if s.get("until") and pd.Timestamp.now(tz=NY).date().isoformat() > str(s["until"]):
+            print("llm_judge: past its end date", s["until"], "- stopping", flush=True)
+            return
         for line in chunk.splitlines():
             try:
                 r = json.loads(line)
@@ -235,11 +249,67 @@ def watch(cfg: Dict, poll_s: float = 10.0):
                 continue
             calls["n"] += 1
             k = next((i for i, x in enumerate(recs) if x == r), len(recs))
-            q = {"rec": r, "prompt": context(r, recs[:k], load_bars(r["symbol"], _t(r)), load_news(r["symbol"]))}
             try:
-                print(json.dumps(record(q, ask(c, q["prompt"], s["model"], s["effort"]))), flush=True)
-            except Exception as e:  # noqa: BLE001  a failed call is logged, never fatal
-                record(q, {"verdict": None, "error": str(e), "model": s["model"]})
+                q = {"rec": r, "prompt": context(r, recs[:k], load_bars(r["symbol"], _t(r)), load_news(r["symbol"]))}
+            except Exception as e:  # noqa: BLE001  no data for the question: logged, never fatal
+                print("llm_judge: could not build the question:", e, flush=True)
+                continue
+            for model in s["models"]:      # the same question to every model
+                try:
+                    print(json.dumps(record(q, {**ask(c, q["prompt"], model, s["effort"]), "mode": "shadow"})), flush=True)
+                except Exception as e:  # noqa: BLE001  a failed call is logged, never fatal
+                    record(q, {"verdict": None, "error": str(e), "model": model, "mode": "shadow"})
+
+
+# ----------------------------------------------------------------- compare the models afterwards
+def trade_outcomes(recs: List[Dict]) -> Dict[str, float]:
+    """P&L in % of each ENTRY order (keyed by its first order id): from its fill to the fill of
+    the order that next closes that symbol's position. Exits are not scored: they only remove risk."""
+    out: Dict[str, float] = {}
+    open_: Dict[str, Dict] = {}
+    for r in recs:
+        if r.get("type") != "decision" or r.get("action") not in ("buy", "sell") or r.get("job") == "core":
+            continue
+        sym, px = r["symbol"], float(r.get("fill_price") or r.get("price") or 0)
+        if not px:
+            continue
+        before, after = float(r.get("position_before") or 0), float(r.get("target") or 0)
+        if before == 0 and after != 0 and r.get("order_ids"):
+            open_[sym] = {"id": r["order_ids"][0], "px": px, "side": 1 if after > 0 else -1}
+        elif after == 0 and sym in open_:
+            o = open_.pop(sym)
+            out[o["id"]] = round((px / o["px"] - 1) * 100 * o["side"], 4)
+    return out
+
+
+def compare(path: Path = OUT) -> Dict:
+    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+    rows = [r for r in rows if r.get("mode") == "shadow" and r.get("verdict")]
+    outcome = trade_outcomes(decisions())
+    by_sig: Dict[str, Dict[str, str]] = {}
+    for r in rows:
+        key = (r.get("order_ids") or [r["decision_time"]])[0]
+        by_sig.setdefault(key, {"action": r["action"], "symbol": r["symbol"]})[r["model"]] = r["verdict"]
+    models = sorted({r["model"] for r in rows})
+    res = {"signals": len(by_sig), "models": {}}
+    for m in models:
+        mine = {k: v[m] for k, v in by_sig.items() if m in v}
+        entries = {k: v for k, v in mine.items() if k in outcome}
+        skipped = [outcome[k] for k, v in entries.items() if v == "skip"]
+        taken = [outcome[k] for k, v in entries.items() if v == "take"]
+        rm = [r for r in rows if r["model"] == m]
+        res["models"][m] = {"judged": len(mine), "skip_%": round(100 * sum(v == "skip" for v in mine.values()) / max(1, len(mine)), 1),
+                            "entries_with_outcome": len(entries),
+                            "avg_%_of_taken_entries": round(sum(taken) / len(taken), 4) if taken else None,
+                            "avg_%_of_skipped_entries": round(sum(skipped) / len(skipped), 4) if skipped else None,
+                            "pnl_%_if_only_taken": round(sum(taken), 3), "pnl_%_all_entries": round(sum(taken) + sum(skipped), 3),
+                            "cost_usd": round(sum(r.get("cost_usd") or 0 for r in rm), 3)}
+    if len(models) >= 2:
+        a, b = models[:2]
+        both = [v for v in by_sig.values() if a in v and b in v]
+        res["agreement_%"] = round(100 * sum(v[a] == v[b] for v in both) / max(1, len(both)), 1)
+        res["disagreements"] = [{"symbol": v["symbol"], "action": v["action"], a: v[a], b: v[b]} for v in both if v[a] != v[b]][:20]
+    return res
 
 
 def main():
@@ -252,11 +322,15 @@ def main():
     ap.add_argument("--sample", type=int, default=0, help="with --estimate: really ask about the first N signals (costs money)")
     ap.add_argument("--model", default=None)
     ap.add_argument("--watch", action="store_true")
+    ap.add_argument("--compare", action="store_true", help="compare the models' shadow verdicts with what the trades did")
     a = ap.parse_args()
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     s = settings(cfg)
     if a.watch:
         watch(cfg)
+        return
+    if a.compare:
+        print(json.dumps(compare(), indent=1))
         return
     if a.estimate:
         est = estimate(a.estimate)
@@ -265,7 +339,7 @@ def main():
         if a.sample:
             c = client()
             for q in list(questions(a.estimate))[:a.sample]:
-                print(json.dumps(record(q, ask(c, q["prompt"], a.model or s["model"], s["effort"])), indent=1))
+                print(json.dumps(record(q, {**ask(c, q["prompt"], a.model or s["models"][0], s["effort"]), "mode": "sample"}), indent=1))
 
 
 if __name__ == "__main__":

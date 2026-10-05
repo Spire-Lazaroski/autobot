@@ -87,6 +87,8 @@ def validate_live(live: Dict) -> List[str]:
             if s in seen:
                 errs.append(f"{s} is in enabled jobs '{seen[s]}' and '{name}'. One job per symbol.")
             seen[s] = name
+    from .trade_rules import validate as validate_rules
+    errs += validate_rules(live.get("trade_rules"))
     from .core import validate as validate_core
     errs += validate_core(live.get("core"), seen, float(risk.get("max_gross_pct", 100)))
     return errs

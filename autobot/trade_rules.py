@@ -11,6 +11,13 @@ One causal forward pass, like autobot.exits, so a backtest and a live bot could 
         the position just closed (a new high for longs, a new low for shorts); the other side is free
 
 Stocks: each New York session starts fresh (the bot is flat overnight).
+
+Live (config live.trade_rules, applies to every trading job, not the core holding):
+    trade_rules: {no_quick_reentry: true, min_change_pct: 10}
+min_change_pct is an order rule, not a signal rule: while a position is held on the same side,
+the bot skips an order that changes it by less than this % (the 1-share top-ups and trims that
+only come from small sizing changes). Chosen 2026-10-05 after the trade-rules study
+(docs/STRATEGY_EVIDENCE.md section 7); the churn brake is available but not switched on.
 """
 from __future__ import annotations
 
@@ -20,8 +27,39 @@ import numpy as np
 import pandas as pd
 
 
+SIGNAL_RULES = ("churn_brake", "no_quick_reentry")
+
+
+def validate(cfg) -> list:
+    if cfg is None:
+        return []
+    if not isinstance(cfg, dict):
+        return ["trade_rules must be a mapping"]
+    errs = []
+    unknown = set(cfg) - set(SIGNAL_RULES) - {"min_change_pct"}
+    if unknown:
+        errs.append(f"trade_rules: unknown settings {', '.join(sorted(unknown))}")
+    if not isinstance(cfg.get("no_quick_reentry", False), bool):
+        errs.append("trade_rules.no_quick_reentry must be true or false")
+    b = cfg.get("churn_brake")
+    if b is not None and not (isinstance(b, dict) and isinstance(b.get("max_entries"), int) and b["max_entries"] >= 1
+                              and isinstance(b.get("window_min"), (int, float)) and b["window_min"] > 0):
+        errs.append("trade_rules.churn_brake needs max_entries (whole number >= 1) and window_min (> 0)")
+    m = cfg.get("min_change_pct", 0)
+    if not isinstance(m, (int, float)) or isinstance(m, bool) or not 0 <= m < 100:
+        errs.append("trade_rules.min_change_pct must be between 0 and 100")
+    return errs
+
+
+def small_change(cur: float, target: float, min_change_pct: float) -> bool:
+    """True when an order would only nudge a held position (same side) by less than the threshold."""
+    if not min_change_pct or cur == 0 or target == 0 or (cur > 0) != (target > 0):
+        return False
+    return abs(target - cur) < abs(target) * float(min_change_pct) / 100
+
+
 def apply(signal: pd.Series, df: pd.DataFrame, rules: Optional[Dict]) -> pd.Series:
-    if not rules:
+    if not rules or not (rules.get("churn_brake") or rules.get("no_quick_reentry")):
         return signal
     brake = rules.get("churn_brake") or None
     reentry = bool(rules.get("no_quick_reentry"))

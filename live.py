@@ -57,7 +57,7 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
-from autobot import core, exits, sizing, trigger
+from autobot import core, exits, sizing, trade_rules, trigger
 from autobot.exits import exit_view_of
 from autobot.recalibrate import flat_before_close
 from autobot.decisions import Context, Recorder
@@ -132,6 +132,8 @@ def config_diff(old: dict, new: dict) -> list[str]:
         a, b = old.get("risk", {}).get(k), new.get("risk", {}).get(k)
         if a != b:
             out.append(f"risk.{k}: {a} -> {b}")
+    if (old.get("trade_rules") or {}) != (new.get("trade_rules") or {}):
+        out.append(f"trade_rules: {old.get('trade_rules')} -> {new.get('trade_rules')}")
     for k in sorted(set(old.get("core") or {}) | set(new.get("core") or {})):
         a, b = (old.get("core") or {}).get(k), (new.get("core") or {}).get(k)
         if a != b:
@@ -201,6 +203,7 @@ class Bot:
         self.risk = live["risk"]
         self.jobs = enabled_jobs(live)
         self.core = core.settings(live.get("core"))
+        self.rules = live.get("trade_rules") or {}
 
     # ------------------------------------------------------------ hot reload
     def reload_config(self):
@@ -448,13 +451,15 @@ class Bot:
                             log.info("%s: only %d bars, waiting for more history", sym, len(df))
                             continue
                         ctx = Context(job["strategy"], df, job.get("params") or {}, self.cfg.get("allow_short", False))
-                        target_dir = float(ctx.signal.iloc[-1])
+                        sig = trade_rules.apply(ctx.signal, df, self.rules)   # same function as the trade-rules study
+                        target_dir = float(sig.iloc[-1])
+                        rule_hit = target_dir != float(ctx.signal.iloc[-1])
                         price = float(df.close.iloc[-1])
                         if spec.explain:
                             active = ctx.active[-1]
                         exit_view = None
                         if exits.enabled(job.get("exit")):  # optional trailing exit / re-entry (same function as the backtest)
-                            hist = ctx.signal.clip(lower=0) if crypto else flat_before_close(ctx.signal, df, int(self.risk.get("flatten_before_close_min", 0)))
+                            hist = sig.clip(lower=0) if crypto else flat_before_close(sig, df, int(self.risk.get("flatten_before_close_min", 0)))
                             st = exits.exit_states(hist, df, job["exit"], crypto).iloc[-1]
                             target_dir = float(st["target"])
                             exit_view = exit_view_of(st, job["exit"], price)
@@ -470,6 +475,12 @@ class Bot:
                                     "the US market close so nothing is held overnight.")
                     else:
                         reason = f"{job['strategy']} signal={target_dir:+.2f}" + (f" active={active}" if active else "")
+                        if rule_hit:
+                            reason += " rule=no_quick_reentry" if self.rules.get("no_quick_reentry") else " rule=churn_brake"
+                            override = ("No quick re-entry: the strategy wanted back in soon after this position was closed today; "
+                                        "the bot re-enters only beyond the best price of the position it closed."
+                                        if self.rules.get("no_quick_reentry") else
+                                        "Churn brake: too many entries on this symbol in the last hour; no new entry for the rest of the session.")
                         if exit_view and exit_view["text"]:  # the exit layer changed (or explains) the target
                             reason += f" exit={exit_view['reason']}"
                             override = exit_view["text"]
@@ -484,6 +495,8 @@ class Bot:
                     if cur != 0 and target_qty != 0 and (cur > 0) != (target_qty > 0):
                         orders.append(self.submit(sym, -cur, reason + " (close)", price, job["name"]))
                         delta = target_qty
+                    if trade_rules.small_change(cur, target_qty, float(self.rules.get("min_change_pct", 0) or 0)):
+                        delta = 0.0   # only a small nudge to a held position: not worth the trading cost
                     if abs(delta) > 0 and (crypto or abs(delta) >= 1):
                         orders.append(self.submit(sym, delta, reason, price, job["name"]))
                     orders = [o for o in orders if o is not None]

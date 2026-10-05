@@ -40,3 +40,26 @@ def test_estimate_needs_no_api(monkeypatch):
     monkeypatch.setattr(lj, "client", lambda: (_ for _ in ()).throw(AssertionError("no API in estimate")))
     est = lj.estimate("2026-10-05")
     assert est["signals"] == 2 and est["per_model"]["claude-opus-5-5"]["per_day_usd"] > 0
+
+
+def test_outcomes_and_compare(monkeypatch, tmp_path):
+    import json
+    recs = [{**REC, "order_ids": ["a"], "fill_price": 100.0},
+            {**REC, "action": "sell", "position_before": 12, "target": 0, "order_ids": ["b"], "fill_price": 101.0, "time": "2026-10-05T14:30:00+00:00"},
+            {**REC, "order_ids": ["c"], "fill_price": 101.0, "time": "2026-10-05T15:00:00+00:00"},
+            {**REC, "action": "sell", "position_before": 12, "target": 0, "order_ids": ["d"], "fill_price": 100.0, "time": "2026-10-05T15:30:00+00:00"}]
+    out = lj.trade_outcomes(recs)
+    assert out["a"] == 1.0 and round(out["c"], 4) == round((100 / 101 - 1) * 100, 4)
+    f = tmp_path / "j.jsonl"
+    rows = [("a", "opus", "take"), ("a", "haiku", "skip"), ("c", "opus", "skip"), ("c", "haiku", "skip")]
+    f.write_text("\n".join(json.dumps({"mode": "shadow", "order_ids": [k], "decision_time": k, "symbol": "SPY", "action": "buy",
+                                        "model": m, "verdict": v, "cost_usd": 0.01}) for k, m, v in rows))
+    monkeypatch.setattr(lj, "decisions", lambda *a: recs)
+    res = lj.compare(f)
+    assert res["agreement_%"] == 50.0 and res["models"]["opus"]["pnl_%_if_only_taken"] == 1.0
+    assert res["models"]["haiku"]["pnl_%_if_only_taken"] == 0 and res["models"]["haiku"]["skip_%"] == 100.0
+
+
+def test_settings_accept_one_model_or_several():
+    assert lj.settings({"llm_judge": {"model": "claude-haiku-4-5"}})["models"] == ["claude-haiku-4-5"]
+    assert lj.settings({"llm_judge": {"models": ["a", "b"]}})["models"] == ["a", "b"]
