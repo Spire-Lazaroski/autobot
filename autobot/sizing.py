@@ -105,13 +105,13 @@ def daily_atr_pct(bars: pd.DataFrame, before: date, days: int) -> Optional[float
 
 # ----------------------------------------------------------------- dollars per symbol
 def budgets(equity: float, symbols: Iterable[str], risk: Dict, atr: Dict[str, Optional[float]],
-            alloc_pct: Dict[str, float], buckets: Dict[str, str]) -> Dict[str, float]:
+            alloc_pct: Dict[str, float], buckets: Dict[str, str], reserved_pct: float = 0.0) -> Dict[str, float]:
     """Dollars each symbol may hold (long or short), for the configured sizing mode, then the
-    max_gross_pct cap over all symbols together."""
+    max_gross_pct cap over all symbols together, less `reserved_pct` (the core holding's share)."""
     s = settings(risk)
     syms = list(dict.fromkeys(symbols))
     if s["sizing"] != "risk_balanced":
-        return _gross_cap({x: min(equity * alloc_pct.get(x, 0) / 100, s["max_position_usd"]) for x in syms}, equity, s)
+        return _gross_cap({x: min(equity * alloc_pct.get(x, 0) / 100, s["max_position_usd"]) for x in syms}, equity, s, reserved_pct)
     gross = equity * s["gross_budget_pct"] / 100
     inv = {x: 1.0 / atr[x] for x in syms if atr.get(x) and atr[x] > 0}
     if not inv:
@@ -127,11 +127,11 @@ def budgets(equity: float, symbols: Iterable[str], risk: Dict, atr: Dict[str, Op
         elif cap <= 0:
             for x in members:
                 usd[x] = 0.0
-    return _gross_cap(usd, equity, s)
+    return _gross_cap(usd, equity, s, reserved_pct)
 
 
-def _gross_cap(usd: Dict[str, float], equity: float, s: Dict) -> Dict[str, float]:
-    cap, have = equity * float(s["max_gross_pct"]) / 100, sum(usd.values())
+def _gross_cap(usd: Dict[str, float], equity: float, s: Dict, reserved_pct: float = 0.0) -> Dict[str, float]:
+    cap, have = equity * max(float(s["max_gross_pct"]) - float(reserved_pct), 0.0) / 100, sum(usd.values())
     if have > cap and have > 0:
         k = max(cap, 0.0) / have
         return {x: v * k for x, v in usd.items()}

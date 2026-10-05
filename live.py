@@ -57,7 +57,7 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
-from autobot import exits, sizing, trigger
+from autobot import core, exits, sizing, trigger
 from autobot.exits import exit_view_of
 from autobot.recalibrate import flat_before_close
 from autobot.decisions import Context, Recorder
@@ -74,6 +74,38 @@ EXIT_OK, EXIT_STALLED, EXIT_ALREADY_RUNNING = 0, 3, 4
 NY_TZ = "America/New_York"
 SLEEP_GAP_S = 60  # a gap this long between loop turns means the PC slept (or the process was paused)
 TRIGGER_BUDGET_S = 30  # display-only trigger levels: at most this long per bar, after all orders
+
+
+def stop_includes_core() -> bool:
+    """The STOP file may say {"include_core": true} (the Stop dialog's tick box); empty = keep it."""
+    try:
+        return bool(json.loads(STOP_FILE.read_text() or "{}").get("include_core"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def flatten(tc, keep: str | None):
+    """Close every position, or every position except `keep` (the core holding)."""
+    if not keep:
+        tc.close_all_positions(cancel_orders=True)
+        return
+    try:
+        tc.cancel_orders()
+    except Exception as e:  # noqa: BLE001  closing the positions matters more than the orders
+        log.error("cancel orders failed: %s", e)
+    for p in tc.get_all_positions():
+        if p.symbol != keep:
+            tc.close_position(p.symbol)
+
+
+def core_intraday_pl(tc, sym: str | None) -> float:
+    """The core position's P&L today (Alpaca's unrealized_intraday_pl), 0 without a core."""
+    if not sym:
+        return 0.0
+    for p in tc.get_all_positions():
+        if p.symbol == sym:
+            return float(getattr(p, "unrealized_intraday_pl", 0) or 0)
+    return 0.0
 
 
 def setup_logging():
@@ -147,6 +179,7 @@ class Bot:
         self.trading_day = self._today(self.tc.get_clock())
         self.halted = False
         self.day_peak_pnl = None   # profit lock: the day's best P&L % once armed
+        self.core_day = None       # core holding: the trading day it was last checked
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
 
@@ -163,6 +196,7 @@ class Bot:
         self.step = tf_minutes(self.tf)
         self.risk = live["risk"]
         self.jobs = enabled_jobs(live)
+        self.core = core.settings(live.get("core"))
 
     # ------------------------------------------------------------ hot reload
     def reload_config(self):
@@ -258,10 +292,21 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             log.error("decision log failed: %s", e)
 
-    def flatten_all(self, why: str):
-        log.warning("FLATTEN ALL: %s", why)
-        self._safe(self.rec.event, "flatten", f"The bot closed every position: {why}.")
-        self.tc.close_all_positions(cancel_orders=True)
+    def core_symbol(self) -> str | None:
+        return self.core["symbol"] if self.core.get("enabled") else None
+
+    def flatten_all(self, why: str, include_core: bool = False):
+        keep = None if include_core else self.core_symbol()
+        log.warning("FLATTEN ALL: %s%s", why, f" (keeping the core holding {keep})" if keep else "")
+        self._safe(self.rec.event, "flatten", f"The bot closed every position{f' except the core holding {keep}' if keep else ''}: {why}.")
+        flatten(self.tc, keep)
+
+    def trading_pnl_pct(self, tc=None) -> float:
+        """The day's P&L in % of the day's starting equity, without the core holding's move today
+        (the daily loss limit and the profit lock apply to the trading jobs only)."""
+        tc = tc or self.tc
+        eq = float(tc.get_account().equity)
+        return (eq - core_intraday_pl(tc, self.core_symbol()) - self.day_start_equity) / self.day_start_equity * 100
 
     # ------------------------------------------------------------ core
     def recent_bars(self, sym: str, job: dict) -> pd.DataFrame:
@@ -322,9 +367,7 @@ class Bot:
     def check_risk(self) -> bool:
         if self.halted:
             return False  # already flat and halted for today; the next trading day lifts it
-        acct = self.tc.get_account()
-        eq = float(acct.equity)
-        dd = (eq / self.day_start_equity - 1) * 100
+        dd = self.trading_pnl_pct()
         if dd <= -abs(self.risk["max_daily_loss_pct"]):
             self._halt("risk", f"The daily loss limit was reached ({dd:.2f}% vs {self.risk['max_daily_loss_pct']}%); "
                                "the bot sold everything and stopped for the day.", f"daily loss {dd:.2f}% hit limit")
@@ -355,7 +398,8 @@ class Bot:
                         self._atr[s] = None
                 self._atr_day = today
             atr = self._atr
-        return sizing.budgets(equity, syms, self.risk, atr, alloc, self.buckets)
+        reserved = float(self.core["allocation_pct"]) if self.core.get("enabled") else 0.0
+        return sizing.budgets(equity, syms, self.risk, atr, alloc, self.buckets, reserved)
 
     def near_close(self, clock) -> bool:
         mins = self.risk.get("flatten_before_close_min", 0)
@@ -382,6 +426,7 @@ class Bot:
                                  "lock_below_%": None if self.day_peak_pnl is None else
                                  round(self.day_peak_pnl * (1 - float(pl.get("giveback_pct", 50)) / 100), 3)}
         pending = []  # decision records, written after the display-only trigger is known
+        self._safe(self.core_step, status, equity, held, clock)
         try:
             for job in self.jobs:
                 spec = STRATEGIES[job["strategy"]]
@@ -455,6 +500,32 @@ class Bot:
             self._annotate(pending, status)
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
 
+    def core_step(self, status: dict, equity: float, held: dict, clock):
+        """The core holding (autobot.core): bought up to its share, rebalanced only beyond the
+        band, once per trading day at the first open tick. Never part of the jobs loop, so the
+        close-out before the bell doesn't apply to it."""
+        c, sym = self.core, self.core["symbol"]
+        qty = held.get(sym, 0.0)
+        view = {"enabled": bool(c.get("enabled")), "symbol": sym, "allocation_pct": c["allocation_pct"],
+                "rebalance_band_pct": c["rebalance_band_pct"], "qty": qty}
+        status["core"] = view
+        if not c.get("enabled") or not clock.is_open:
+            return
+        today = self._today(clock)
+        first = self.core_day != today
+        bars = _download(sym, self.tf, datetime.now(timezone.utc) - timedelta(days=5), None, "iex")
+        price = float(bars.close.iloc[-1])
+        view.update({"price": price, "value": round(qty * price, 2), "weight_%": round(qty * price / equity * 100, 2) if equity else None})
+        order = core.rebalance(qty, price, equity, c, first)
+        self.core_day = today
+        if order:
+            o = self.submit(sym, order["qty"], order["reason"], price, "core")
+            view["last_action"] = {"time": datetime.now(timezone.utc).isoformat(), "qty": order["qty"], "reason": order["reason"],
+                                   "order_id": str(o.id) if o is not None else None}
+            self._safe(self.rec.write, {"type": "decision", "job": "core", "symbol": sym, "strategy": "core holding",
+                                        "bar_time": datetime.now(timezone.utc).isoformat(), "action": "buy" if order["qty"] > 0 else "sell",
+                                        "qty": abs(order["qty"]), "price": price, "reason": order["reason"] + "."})
+
     def _annotate(self, pending: list, status: dict):
         """For the Live page and the decision log only (never used for trading): the prices that
         would change each signal at the next bar's close (autobot.trigger: the nearest one, and the
@@ -519,7 +590,7 @@ class Bot:
         if STOP_FILE.exists() and time.time() - STOP_FILE.stat().st_mtime > 10:
             log.warning("WATCHDOG: STOP file not handled by the main loop; flattening and exiting")
             state["wtc"] = state["wtc"] or self._watch_tc_factory()
-            state["wtc"].close_all_positions(cancel_orders=True)
+            flatten(state["wtc"], None if stop_includes_core() else self.core_symbol())
             STOP_FILE.unlink(missing_ok=True)
             release_lock()
             self._exit(0)
@@ -527,16 +598,15 @@ class Bot:
         if idle > self.watch_risk_after and time.time() - state["last_risk"] > 30 and not self.halted:
             state["last_risk"] = time.time()
             state["wtc"] = state["wtc"] or self._watch_tc_factory()
-            eq = float(state["wtc"].get_account().equity)
-            dd = (eq / self.day_start_equity - 1) * 100
+            dd = self.trading_pnl_pct(state["wtc"])
             if dd <= -abs(self.risk["max_daily_loss_pct"]):
                 log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
-                state["wtc"].close_all_positions(cancel_orders=True)
+                flatten(state["wtc"], self.core_symbol())
                 self.halted = True
             elif self.profit_lock_hit(dd):
                 log.critical("WATCHDOG: main loop stuck and the profit lock triggered (day P&L %.2f%%, peak %.2f%%); flattening",
                              dd, self.day_peak_pnl)
-                state["wtc"].close_all_positions(cancel_orders=True)
+                flatten(state["wtc"], self.core_symbol())
                 self._safe(self.rec.event, "profit_lock", f"Profit lock (watchdog): the day's gain fell from {self.day_peak_pnl:.2f}% "
                                                           f"to {dd:.2f}% while the bot was stuck; the watchdog sold everything.")
                 self.halted = True
@@ -569,7 +639,7 @@ class Bot:
                 if self._quit.is_set():
                     break
                 if STOP_FILE.exists():
-                    self.flatten_all("STOP file found")
+                    self.flatten_all("STOP file found", include_core=stop_includes_core())
                     STOP_FILE.unlink(missing_ok=True)
                     break
                 now = datetime.now(timezone.utc)

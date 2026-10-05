@@ -458,7 +458,9 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
     auto = {j["symbols"][0]: j for j in jobs if j["name"].startswith(AUTO_PREFIX) and j.get("symbols")}
     uni = universe_result or universe.latest(before=(as_of + timedelta(days=1)).isoformat())
     listed = list(symbols or (uni["selected"] if uni else []))
-    todo = [s for s in listed if take or s not in hand_of]
+    core_cfg = (cfg.get("live") or {}).get("core") or {}
+    core_sym = core_cfg.get("symbol", "VOO") if core_cfg.get("enabled") else None
+    todo = [s for s in listed if (take or s not in hand_of) and s != core_sym]   # the core holding is never a job
     hand = set(hand_of) if not take else set()
     removed = [s for s in auto if s not in listed and not symbols]
     fetch = fetch or (lambda syms, tf, days: fetch_bars(syms, tf, days, rth_only=True))

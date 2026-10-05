@@ -229,3 +229,12 @@ def test_drop_proposes_no_job_and_apply_removes_it(bars, tmp_path):
     from autobot import recal_apply
     prop = {"changes": ["XTEST"], "proposed_jobs": []}
     assert recal_apply.targets_of(prop) == {"XTEST": None}
+
+
+def test_the_core_holding_symbol_is_never_recalibrated(bars, tmp_path):
+    c = cfg([])
+    c["live"]["core"] = {"enabled": True, "symbol": "VOO", "allocation_pct": 30}
+    uni = {"date": "2026-09-01", "selected": ["VOO", "XTEST"]}
+    days = sorted(set(ny_dates(bars)))
+    res = rc.run(days[-1], c, fetch=lambda s, tf, d: {"XTEST": bars}, out_dir=tmp_path, write=False, universe_result=uni)
+    assert "VOO" not in res["symbols"] and all("VOO" not in j["symbols"] for j in res["proposed_jobs"])

@@ -1,7 +1,7 @@
 # Core holding: S&P 500 with a 10-month-average rule (design, 2026-10-05)
 
-Status: **phase 1 done; the rule failed its checkpoint on real daily closes (see the end).
-Phases 2-4 on hold until the user decides.** Evidence: `docs/STRATEGY_EVIDENCE.md`
+Status: **the user chose a PLAIN 30% VOO core (no timing rule) after phase 1's result (see the
+end). Phase 2 (bot integration) done; config `live.core` added with `enabled: false`.** Evidence: `docs/STRATEGY_EVIDENCE.md`
 sections 5-6 (daily study 2021-2026; macro study 1871-2026: the 10-month average kept almost all
 of buy-and-hold's return and cut the worst drop from −82% to −49%).
 
@@ -76,3 +76,17 @@ window shows the rule about even with holding; on real month-end closes it trail
 a year. The "acting a month later" check did not remove this effect. Over 150 years the rule
 also trails holding in 57% of 5-year windows; its payoff is the rare slow crash (1929, 1973,
 2000, 2008), none of which happened in the last 10 years.
+
+## Decision after phase 1 (2026-10-05): plain hold, no rule
+
+Config (inside `live:`, so it is hot-reloaded and validated with the rest):
+
+```yaml
+core: {enabled: false, symbol: VOO, allocation_pct: 30, rebalance_band_pct: 5}
+```
+
+Bought up to 30% of equity at the first open tick of a day; after that traded only when its
+weight is more than 5 points from 30% (checked once per trading day). SGOV and the monthly rule
+are not used. Everything else above (exemptions, sizing, Stop tick box, never a job) applies.
+The daily loss limit and profit lock measure the day's P&L without the core position's move
+today (Alpaca's unrealized_intraday_pl), still as % of the whole account's starting equity.

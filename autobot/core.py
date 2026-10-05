@@ -1,6 +1,15 @@
 """
-Core holding: one index ETF held long term, in or out by a 10-month-average rule
-(design: docs/CORE_DESIGN.md; evidence: docs/STRATEGY_EVIDENCE.md sections 5-6).
+Core holding: one index ETF held long term (design: docs/CORE_DESIGN.md).
+
+Live (config live.core, chosen 2026-10-05 after phase 1): a PLAIN hold, no timing rule.
+  core: {enabled: true, symbol: VOO, allocation_pct: 30, rebalance_band_pct: 5}
+The bot buys the core up to allocation_pct of equity, then trades it again only when its weight
+drifts more than rebalance_band_pct points away (checked once per trading day, at the first open
+tick). It is never sold before the close, by the daily loss limit or by the profit lock (those
+measure the trading jobs only), and Stop + flatten keeps it unless "also sell the core" is ticked.
+
+The 10-month-average rule below stays for the record: it failed its checkpoint on real daily
+closes (docs/CORE_DESIGN.md, "Phase 1 result"), so the bot does not use it.
 
 Rule, decided at each month's last regular-session close: IN if that close is above the average
 of the last `months` month-end closes (that close included), else OUT (money in `out_symbol`, or
@@ -27,16 +36,61 @@ import pandas as pd
 NY = "America/New_York"
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "core_backtest.json"
-DEFAULTS = {"enabled": False, "symbol": "VOO", "out_symbol": "SGOV", "allocation_pct": 30,
-            "rule": {"kind": "month_average", "months": 10}}
+DEFAULTS = {"enabled": False, "symbol": "VOO", "allocation_pct": 30, "rebalance_band_pct": 5}
 OPEN_MULT = 2.0      # trades at the open cost 2x the normal cost per side (as in the daily study)
 COST_SIDE = 0.0002   # 2 bps per side, the ETF cost recalibration uses
 
 
 def settings(cfg: Optional[Dict]) -> Dict:
-    c = {**DEFAULTS, **(cfg or {})}
-    c["rule"] = {**DEFAULTS["rule"], **(c.get("rule") or {})}
-    return c
+    return {**DEFAULTS, **(cfg or {})}
+
+
+def validate(cfg, job_symbols=(), max_gross_pct: float = 100.0) -> List[str]:
+    """Problems with live.core (empty = OK)."""
+    if cfg is None:
+        return []
+    if not isinstance(cfg, dict):
+        return ["core must be a mapping"]
+    errs = []
+    unknown = set(cfg) - set(DEFAULTS)
+    if unknown:
+        errs.append(f"core: unknown settings {', '.join(sorted(unknown))}")
+    if not isinstance(cfg.get("enabled", False), bool):
+        errs.append("core.enabled must be true or false")
+    sym = cfg.get("symbol", DEFAULTS["symbol"])
+    if not isinstance(sym, str) or not sym.strip() or "/" in sym:
+        errs.append("core.symbol must be a stock or ETF symbol (no crypto)")
+    a = cfg.get("allocation_pct", DEFAULTS["allocation_pct"])
+    if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0 < a <= 100:
+        errs.append("core.allocation_pct must be between 0 and 100")
+    elif a > max_gross_pct:
+        errs.append(f"core.allocation_pct ({a}) can't be above risk.max_gross_pct ({max_gross_pct})")
+    b = cfg.get("rebalance_band_pct", DEFAULTS["rebalance_band_pct"])
+    if not isinstance(b, (int, float)) or isinstance(b, bool) or not 0 < b <= 50:
+        errs.append("core.rebalance_band_pct must be between 0 and 50")
+    if cfg.get("enabled") and sym in set(job_symbols):
+        errs.append(f"core.symbol {sym} is also in an enabled job; the core needs a symbol of its own")
+    return errs
+
+
+def rebalance(qty: float, price: float, equity: float, cfg: Dict, first_today: bool) -> Optional[Dict]:
+    """The core order for this tick, or None. Acts only on the first open tick of a trading day:
+    to the target when nothing is held yet, or when the weight is more than the band away."""
+    c = settings(cfg)
+    if not c["enabled"] or not first_today or price <= 0 or equity <= 0:
+        return None
+    target = float(np.floor(equity * float(c["allocation_pct"]) / 100 / price))
+    weight = qty * price / equity * 100
+    drift = weight - float(c["allocation_pct"])
+    if qty > 0 and abs(drift) <= float(c["rebalance_band_pct"]):
+        return None
+    delta = target - qty
+    if delta == 0:
+        return None
+    why = (f"Core: buying {c['symbol']} up to {c['allocation_pct']:g}% of the account" if qty == 0 else
+           f"Core: {c['symbol']} is {weight:.1f}% of the account, more than {c['rebalance_band_pct']:g} points "
+           f"{'above' if drift > 0 else 'below'} its {c['allocation_pct']:g}%; back to the target")
+    return {"qty": delta, "target": target, "weight_%": round(weight, 2), "reason": why}
 
 
 def month_end_closes(daily: pd.DataFrame, as_of: Optional[date] = None) -> pd.Series:

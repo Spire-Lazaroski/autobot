@@ -17,6 +17,11 @@ live:
   poll_seconds: 5
   allow_short: false
   starting_note: paper only - live trading is disabled in code
+  core:
+    enabled: false
+    symbol: VOO
+    allocation_pct: 30
+    rebalance_band_pct: 5
   risk:
     max_daily_loss_pct: 2.0
     max_position_usd: 10000
