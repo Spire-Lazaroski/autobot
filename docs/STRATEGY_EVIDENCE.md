@@ -97,3 +97,27 @@ never triggers on daily bars (30-minute window, intraday-only earnings blackout)
 Reading: relative strength earns the most but with the largest drop, and our 2026-chosen symbol
 list flatters it most (it would have held NVDA, AMD, LLY). Volatility targeting is the closest to
 holding with a slightly smaller drop. Nothing clearly beats buy and hold.
+
+## 6. 150 years of US stocks, and early-warning signals (macro study, 2026-10-05)
+
+`python -m autobot.macro_study` (data: Shiller's monthly S&P since 1871, extended with SPY; FRED;
+the Global Macro Database 2026_09). Monthly decisions, total return, cash = 3-month bills,
+0.1% per switch. Shiller's prices are monthly averages, which flatter timing rules, so the main
+rule is also shown acting one month later (the honest version).
+
+| Rule | Per year | Worst drop | Sharpe | 2008-09 drop | 2000-02 drop |
+|---|---|---|---|---|---|
+| Buy and hold (1871 on) | +9.4% | **−82%** (1929-32) | 0.44 | −49% | −41% |
+| 10-month average, acting a month later | +9.2% | −49% | 0.58 | −5% | −7% |
+| 12-1 momentum, acting a month later | +8.3% | −52% | 0.47 | −14% | −10% |
+| Volatility targeting | +9.0% | −67% | 0.46 | −43% | −34% |
+| Yield curve inverted → out (1934 on; hold +11.2%) | +11.7% | −49% | 0.69 | −49% | −34% |
+| Sahm rule, real time → out (1960 on; hold +10.8%) | +9.1% | −30% | 0.49 | −14% | −20% |
+| Credit spread up 0.5 pt → out (1919 on; hold +10.6%) | +9.2% | −53% | 0.49 | −30% | −39% |
+| GMD annual rules (GDP fell, inflation > 5%, unemployment up, curve inverted, banking crisis) | +8.1% to +9.7% | −52% to −82% | 0.37 to 0.48 | mostly −49% | −41% |
+
+Reading: over 150 years the 10-month average gives up almost no return and roughly halves the
+worst drop, avoiding most of 1973-74, 2000-02, 2008-09 and 2022 (not the fast 2020 crash). The
+FRED warnings help in some crashes but cost return; the GMD annual figures arrive too late to
+help (at best July of the next year) and none improves on holding. None of the differences in
+yearly return is clearly beyond chance. The trend filter is about smaller drops, not more return.
