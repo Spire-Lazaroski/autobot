@@ -273,3 +273,8 @@ universe:
       candidates:
       - BTC/USD
       - ETH/USD
+llm_judge:
+  enabled: false
+  model: claude-opus-5-5
+  effort: low
+  max_calls_per_day: 100

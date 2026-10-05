@@ -126,3 +126,20 @@ yearly return is clearly beyond chance. The trend filter is about smaller drops,
 closes (FRED S&P 500, 2016-2026) the same rule made +6.6% a year against +13.3% for holding, with
 21 switches; Shiller's monthly averages hide the quick dips that cause those switches, so the
 table above overstates the 10-month rule even in its "acting a month later" form.
+
+## 7. Trade rules on 5-minute bars (trade-rules study, 2026-10-05)
+
+`python -m autobot.trade_rules_study` (`autobot/trade_rules.py`; settings fixed before the run).
+126 strategy x symbol pairs plus the 5 live jobs, 2 years, after costs, flat before the close.
+
+| Rule | All pairs | Trades | Daily difference vs alone | Live jobs |
+|---|---|---|---|---|
+| Strategy alone | −23.3% | 99,695 | — | −26.6% |
+| Churn brake (2 entries / 60 min, then stand aside) | −21.6% | −7% | +0.45 bps (+0.23 to +0.67), 13 pairs better / 2 worse | −24.6% |
+| **No quick re-entry** (same-session re-entry only beyond the last position's best close) | **−11.8%** | **−37%** | **+2.86 bps (+2.04 to +3.68), 42 better / 1 worse** | **−15.7%** |
+| Both | −11.7% | −38% | +2.89 bps, 42 better / 1 worse | −15.6% |
+
+About 3 pairs would look "clearly better" by luck; 42 is far beyond that. The rule roughly halves
+the losses by cutting a third of the trades, but it does not create an edge: the live jobs stay
+negative after costs. Rule 1 (tiny orders): 5 of the bot's 46 logged orders were under 10% of the
+usual size ($1,974 traded for nothing but cost).
