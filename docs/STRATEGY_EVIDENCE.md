@@ -321,3 +321,24 @@ al. 2020 found). The VIX tracks next week's volatility best (correlation 0.73 vs
 runs above it (it includes a fear premium), and adding it to HAR or the trees does not help. The
 simple EWMA rule does as well as anything, with the fewest trades. Only 7 years and 3 crashes.
 Nothing changes in the live bot unless the user decides to.
+
+## 13. Scalping: sell as soon as the costs plus a small premium are covered (2026-10-06)
+
+The user's "fast finger" idea: buy on the strategy's signal, sell with a resting limit order at entry x
+(1 + round-trip cost + premium), buy again with new levels while the signal is on. `autobot/scalp_study.py`:
+the limit fills only when a bar trades a cent beyond it (intrabar, not just at closes); stops (if any)
+count first when a bar reaches both; 128 strategy sets, the same 386 unseen sessions, after costs.
+
+| Variant | Total | Trades | Winning trades | Avg win / avg loss (bps) | vs strategy alone, bps/day (95% range) | Pairs worse |
+|---|---|---|---|---|---|---|
+| Strategy alone | −5.2% | 51,285 | 43% | +60.9 / −48.7 | | |
+| +2 bps, no stop | −69.2% | 267,711 | **85%** | +2.6 / −53.8 | −29.1 (−32.2 to −26.0) | 128 of 128 |
+| +10 bps, no stop | −51.2% | 171,041 | 76% | +10.3 / −55.0 | −17.2 (−19.7 to −14.7) | 127 |
+| +5 bps, stop 1x | −30.3% | 80,432 | 40% | +5.7 / −13.3 | −8.0 (−11.8 to −4.2) | 60 |
+| Dynamic (a quarter of the expected swing), stop 1x (best) | −25.3% | 87,449 | 48% | +23.9 / −30.4 | −6.2 (−9.7 to −2.8) | 47 |
+
+All 12 variants are clearly worse than the strategies alone; no pair is better anywhere. Reading: the
+small targets win 76-85% of the time, but each win is a few bps while the trades that miss carry the
+full loss, and every new set of boundaries pays the costs again (up to 5x the trades). This is the
+"win rate is not profit" trap the day-trader studies describe (Barber, Lee, Liu & Odean 2014; Chague,
+De-Losso & Giovannetti 2019).
