@@ -39,17 +39,15 @@ NY = "America/New_York"
 DEFAULTS = {"enabled": False, "models": ["claude-opus-5-5"], "effort": "low", "max_calls_per_day": 100, "until": None}
 NO_EFFORT = ("claude-haiku-4-5",)    # effort is rejected on Haiku 4.5
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-4-5": (1.0, 5.0)}  # $ per 1M in / out
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2   # 2: neutral (v1 told the models to default to skip; they skipped every entry)
 
-SYSTEM = """You review signals from a paper-trading bot, one at a time, and say whether you would take each one.
+SYSTEM = """You review signals from a paper-trading bot, one at a time, and decide whether you would act on each one.
 
-The bot trades US stocks and ETFs on 5-minute bars and closes every position before the close. Its own two-year studies found:
-- a typical 5-minute trade gains about 1 basis point before costs, while a round trip costs about 4 to 5 basis points;
-- most quick flips in and out within the same hour lose; same-session re-entries soon after an exit lose more often than not;
-- news-based filters showed no measurable edge so far.
-So the default answer is SKIP unless the situation clearly offers more than a typical signal: a strong, clean move, a fresh catalyst, a sensible exit that protects a gain or limits a loss.
+The bot trades US stocks and ETFs on 5-minute bars and closes every position before the US close. A round trip (buy and later sell) costs about 4 to 5 basis points in total.
 
-Exits: a SELL that closes a long (or a BUY that closes a short) only removes risk. Say "take" for an exit unless holding on looks clearly better.
+Judge each signal on its merits from the information given. Say "take" if you think acting on it is more likely than not to work out better after costs than not acting; say "skip" otherwise.
+- For an order that opens a position: take = buy (or sell short) now, skip = stay out.
+- For an order that closes a position: take = close it now, skip = keep holding (until the bot's next closing signal or its close-out before the bell).
 
 Use only the information given. It ends at the decision time; do not use any knowledge of what markets did afterwards.
 Answer in the JSON format requested: verdict take or skip, confidence between 0 and 1, and one plain-English sentence of reason."""
@@ -366,9 +364,9 @@ def jobs_vs_hold(recs: List[Dict], days: List[str], fills=None) -> List[Dict]:
     return rows
 
 
-def compare(path: Path = OUT, modes=("shadow", "replay")) -> Dict:
+def compare(path: Path = OUT, modes=("shadow", "replay"), prompt_version: int = PROMPT_VERSION) -> Dict:
     rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
-    rows = [r for r in rows if r.get("mode") in modes and r.get("verdict")]
+    rows = [r for r in rows if r.get("mode") in modes and r.get("verdict") and r.get("prompt_version") == prompt_version]
     recs = decisions()
     val = outcomes(recs)
     by_sig: Dict[str, Dict] = {}
@@ -416,7 +414,7 @@ def replay(days: List[str], models: List[str], effort: str) -> int:
     if OUT.exists():
         for x in OUT.read_text(encoding="utf-8").splitlines():
             r = json.loads(x)
-            if r.get("mode") == "replay" and r.get("verdict"):
+            if r.get("mode") == "replay" and r.get("verdict") and r.get("prompt_version") == PROMPT_VERSION:
                 done.add(((r.get("order_ids") or [""])[0], r["model"]))
     n = 0
     for day in days:

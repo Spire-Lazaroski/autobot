@@ -56,7 +56,7 @@ def test_outcomes_and_compare(monkeypatch, tmp_path):
     f = tmp_path / "j.jsonl"
     rows = [("a", "opus", "take"), ("b", "opus", "take"), ("c", "opus", "skip"), ("d", "opus", "skip"),
             ("a", "haiku", "skip"), ("c", "haiku", "skip")]
-    f.write_text(chr(10).join(json.dumps({"mode": "replay", "order_ids": [k], "decision_time": "2026-10-05T14:00:00+00:00",
+    f.write_text(chr(10).join(json.dumps({"mode": "replay", "prompt_version": lj.PROMPT_VERSION, "order_ids": [k], "decision_time": "2026-10-05T14:00:00+00:00",
                                         "symbol": "SPY", "action": "buy", "model": m, "verdict": v, "cost_usd": 0.01}) for k, m, v in rows))
     monkeypatch.setattr(lj, "decisions", lambda *a: recs)
     monkeypatch.setattr(lj, "broker_fills", lambda day: [
