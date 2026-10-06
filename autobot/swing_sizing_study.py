@@ -66,14 +66,16 @@ def daily_atr_pct(df: pd.DataFrame, days: int = 20) -> pd.Series:
 
 
 def sized(base: pd.Series, w: pd.Series) -> pd.Series:
-    """Position = base x the size at the bar the trade opened (kept until it closes). A missing size
-    (no forecast yet) counts as 1."""
+    """Position = base x the size at the bar the trade opened (kept until it closes). The bot sells
+    everything before each close, so every session opens a new trade with a new size. A missing
+    size (no forecast yet) counts as 1."""
     b = base.to_numpy(float)
+    day = np.asarray(base.index.tz_convert(NY).date)
     wv = np.nan_to_num(w.to_numpy(float), nan=1.0)
     out = np.zeros(len(b))
     cur = 1.0
     for i in range(len(b)):
-        if b[i] != 0 and (i == 0 or b[i - 1] == 0):
+        if b[i] != 0 and (i == 0 or b[i - 1] == 0 or day[i] != day[i - 1]):
             cur = wv[i]
         out[i] = b[i] * cur if b[i] != 0 else 0.0
     return pd.Series(out, index=base.index)

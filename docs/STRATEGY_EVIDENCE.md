@@ -281,3 +281,19 @@ Reading:
 - **The economy**: adds nothing at a 1-hour horizon (over 2 years the monthly and annual figures took
   only 3 to 23 different values). Its use stays the slow, years-long picture (sections 6 and the core holding).
 - Nothing changes in the live bot.
+
+**Follow-up: sizing by the expected swing (step A backtest, 2026-10-06).** Same 386 sessions and costs;
+each trade sized at its opening bar (¼ to 2 times normal, normal = the symbol's previous 20 sessions)
+by fixed size (today), daily ATR (the bot's `risk_balanced` idea), the last 20 bars' ATR, or the trees'
+swing forecast; all scaled to the same average amount (`autobot/swing_sizing_study.py`).
+
+| Same average amount | Fixed | Daily ATR | Bars ATR | Swing forecast | Swing vs fixed: result per risk (95% range) |
+|---|---|---|---|---|---|
+| 128 strategy sets: total / daily ups-downs | −5.4% / 37.5 bps | −6.4% / 31.8 | −7.8% / 28.3 | −9.6% / 27.6 | −0.91 (−1.44 to −0.40), worse |
+| 7 live jobs | −6.1% / 26.5 | −7.2% / 24.9 | −6.8% / 23.3 | −6.2% / 22.9 | −0.19 (−0.88 to +0.52) |
+| Holding open to close, 11 symbols | +5.0% / 111 | +2.9% / 98 | 0.0% / 88 | +6.2% / 95 | +0.07 (−0.33 to +0.58) |
+
+Reading: sizing by the swing forecast makes days calmer (13% to 26% smaller daily ups and downs, worst
+day smaller) but does not improve the result per unit of risk, and it does not beat the plain ATR
+versions clearly anywhere. For the strategies it is clearly worse: their calm hours are not better
+hours. Step B (a shadow test) was not started; the bot keeps fixed sizing.
