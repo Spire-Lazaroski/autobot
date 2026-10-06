@@ -49,6 +49,8 @@ interface CoreView {
   enabled: boolean; symbol: string; allocation_pct: number; rebalance_band_pct: number; qty: number;
   price?: number; value?: number; "weight_%"?: number | null;
   last_action?: { time: string; qty: number; reason: string; order_id: string | null };
+  /** Volatility targeting (autobot/core.py vol_target): today's target share and why. */
+  vol_target?: { target_pct: number; vol_pct: number; normal_pct: number; ratio: number; as_of: string; reason: string };
 }
 /** Both sides of the price (autobot/trigger.trigger_levels): at most one level below and one above. */
 interface Levels { buy: Trigger[]; sell: Trigger[]; partial?: boolean }
@@ -321,17 +323,19 @@ function CorePanel({ core, positions }: { core?: CoreView; positions: Row[] }) {
           term as {core.allocation_pct}% of the account, outside the trading jobs.{held ? ` ${core.symbol} is held now (${fmt(held.qty, 0)} shares) but not managed as the core.` : ""}</p>
       </Panel>);
   }
-  const w = core["weight_%"], lo = core.allocation_pct - core.rebalance_band_pct, hi = core.allocation_pct + core.rebalance_band_pct;
+  const tgt = core.vol_target?.target_pct ?? core.allocation_pct;
+  const w = core["weight_%"], lo = tgt - core.rebalance_band_pct, hi = tgt + core.rebalance_band_pct;
   return (
     <Panel title={`Core holding · ${core.symbol}`}>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[12px]">
         <div><div className="text-muted">Held</div><div className="num font-semibold">{fmt(core.qty, 0)} shares</div></div>
         <div><div className="text-muted">Value</div><div className="num font-semibold">{core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</div></div>
         <div><div className="text-muted">Share of the account</div>
-          <div className="num font-semibold">{w !== undefined && w !== null ? `${fmt(w, 1)}%` : "–"} <span className="text-muted font-normal">target {core.allocation_pct}%</span></div></div>
+          <div className="num font-semibold">{w !== undefined && w !== null ? `${fmt(w, 1)}%` : "–"} <span className="text-muted font-normal">target {fmt(tgt, 1)}%</span></div></div>
         <div><div className="text-muted">Rebalances if outside</div><div className="num font-semibold">{lo}% – {hi}%</div></div>
       </div>
       <p className="text-[11.5px] text-muted mt-2">
+        {core.vol_target ? `Today's target: ${core.vol_target.reason} (from closes up to ${core.vol_target.as_of}). ` : ""}
         {core.last_action ? `Last action ${ts(core.last_action.time)}: ${core.last_action.reason}. ` : "No core order since the bot started. "}
         Held long term: not sold before the close or by the daily loss limit or profit lock, which count the trading jobs only.
         Checked once a day at the first tick after the open.</p>

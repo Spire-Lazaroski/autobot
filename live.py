@@ -186,6 +186,7 @@ class Bot:
         self.halted = False
         self.day_peak_pnl = None   # profit lock: the day's best P&L % once armed
         self.core_day = None       # core holding: the trading day it was last checked
+        self.core_vol = None       # core volatility target for today (autobot.core.vol_target), or None
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
 
@@ -405,7 +406,8 @@ class Bot:
                         self._atr[s] = None
                 self._atr_day = today
             atr = self._atr
-        reserved = float(self.core["allocation_pct"]) if self.core.get("enabled") else 0.0
+        reserved = (float((self.core_vol or {}).get("target_pct") or self.core["allocation_pct"])
+                    if self.core.get("enabled") else 0.0)
         return sizing.budgets(equity, syms, self.risk, atr, alloc, self.buckets, reserved)
 
     def near_close(self, clock) -> bool:
@@ -517,6 +519,24 @@ class Bot:
             self._annotate(pending, status)
         (LOGS / "status.json").write_text(json.dumps(status, indent=2))
 
+    def core_vol_target(self, sym: str, today: str) -> "dict | None":
+        """Volatility targeting (autobot.core.vol_target): today's target share from the core
+        symbol's daily closes of COMPLETED sessions. None when it is off or the data is missing
+        (the plain allocation_pct applies then)."""
+        v = core.vol_settings(self.core)
+        if not v.get("enabled"):
+            return None
+        days = int(v["normal_years"]) * 366 + 120
+        d = _download(sym, "1Day", datetime.now(timezone.utc) - timedelta(days=days), None, "iex")
+        idx = d.index.tz_convert(NY_TZ) if d.index.tz is not None else d.index
+        closes = d.close[[x.date().isoformat() < today for x in idx]]      # completed sessions only
+        out = core.vol_target(closes, self.core)
+        if out:
+            log.info("CORE target %.1f%% (volatility %.1f%% vs normal %.1f%%)", out["target_pct"], out["vol_pct"], out["normal_pct"])
+        else:
+            log.warning("CORE volatility target unavailable (too little daily history); using %s%%", self.core["allocation_pct"])
+        return out
+
     def core_step(self, status: dict, equity: float, held: dict, clock):
         """The core holding (autobot.core): bought up to its share, rebalanced only beyond the
         band, once per trading day at the first open tick. Never part of the jobs loop, so the
@@ -526,14 +546,23 @@ class Bot:
         view = {"enabled": bool(c.get("enabled")), "symbol": sym, "allocation_pct": c["allocation_pct"],
                 "rebalance_band_pct": c["rebalance_band_pct"], "qty": qty}
         status["core"] = view
+        if self.core_vol:
+            view["vol_target"] = self.core_vol
         if not c.get("enabled") or not clock.is_open:
             return
         today = self._today(clock)
         first = self.core_day != today
+        if first:
+            self.core_vol = self._safe(self.core_vol_target, sym, today)
+            if self.core_vol:
+                view["vol_target"] = self.core_vol
+            elif "vol_target" in view:
+                del view["vol_target"]
         bars = _download(sym, self.tf, datetime.now(timezone.utc) - timedelta(days=5), None, "iex")
         price = float(bars.close.iloc[-1])
         view.update({"price": price, "value": round(qty * price, 2), "weight_%": round(qty * price / equity * 100, 2) if equity else None})
-        order = core.rebalance(qty, price, equity, c, first)
+        cv = self.core_vol or {}
+        order = core.rebalance(qty, price, equity, c, first, cv.get("target_pct"), cv.get("reason", ""))
         self.core_day = today
         if order:
             o = self.submit(sym, order["qty"], order["reason"], price, "core")

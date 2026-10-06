@@ -8,6 +8,14 @@ drifts more than rebalance_band_pct points away (checked once per trading day, a
 tick). It is never sold before the close, by the daily loss limit or by the profit lock (those
 measure the trading jobs only), and Stop + flatten keeps it unless "also sell the core" is ticked.
 
+Volatility targeting (chosen 2026-10-06, docs/STRATEGY_EVIDENCE.md section 12), optional:
+  core: {..., vol_target: {enabled: true, min_pct: 15, max_pct: 45, lambda: 0.94, normal_years: 5}}
+Each morning the target share becomes allocation_pct x normal volatility / today's volatility,
+kept between min_pct and max_pct. Volatility = exponentially weighted (RiskMetrics, lambda) daily
+returns of the core symbol's COMPLETED sessions; normal = the median of that volatility over the
+last normal_years. Jumpy markets -> a smaller core, calm markets -> a larger one. The band rule
+is unchanged (it trades only when the weight is more than rebalance_band_pct from the target).
+
 The 10-month-average rule below stays for the record: it failed its checkpoint on real daily
 closes (docs/CORE_DESIGN.md, "Phase 1 result"), so the bot does not use it.
 
@@ -36,7 +44,8 @@ import pandas as pd
 NY = "America/New_York"
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "core_backtest.json"
-DEFAULTS = {"enabled": False, "symbol": "VOO", "allocation_pct": 30, "rebalance_band_pct": 5}
+DEFAULTS = {"enabled": False, "symbol": "VOO", "allocation_pct": 30, "rebalance_band_pct": 5, "vol_target": None}
+VOL_DEFAULTS = {"enabled": False, "min_pct": 15, "max_pct": 45, "lambda": 0.94, "normal_years": 5}
 OPEN_MULT = 2.0      # trades at the open cost 2x the normal cost per side (as in the daily study)
 COST_SIDE = 0.0002   # 2 bps per side, the ETF cost recalibration uses
 
@@ -70,26 +79,99 @@ def validate(cfg, job_symbols=(), max_gross_pct: float = 100.0) -> List[str]:
         errs.append("core.rebalance_band_pct must be between 0 and 50")
     if cfg.get("enabled") and sym in set(job_symbols):
         errs.append(f"core.symbol {sym} is also in an enabled job; the core needs a symbol of its own")
+    errs += _validate_vol(cfg.get("vol_target"), a, max_gross_pct)
     return errs
 
 
-def rebalance(qty: float, price: float, equity: float, cfg: Dict, first_today: bool) -> Optional[Dict]:
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _validate_vol(v, alloc, max_gross_pct: float) -> List[str]:
+    if v is None:
+        return []
+    if not isinstance(v, dict):
+        return ["core.vol_target must be a mapping"]
+    errs = []
+    unknown = set(v) - set(VOL_DEFAULTS)
+    if unknown:
+        errs.append(f"core.vol_target: unknown settings {', '.join(sorted(unknown))}")
+    c = {**VOL_DEFAULTS, **v}
+    if not isinstance(c["enabled"], bool):
+        errs.append("core.vol_target.enabled must be true or false")
+    lo, hi = c["min_pct"], c["max_pct"]
+    if not (_num(lo) and _num(hi) and 0 < lo <= hi <= 100):
+        errs.append("core.vol_target.min_pct and max_pct must be numbers with 0 < min_pct <= max_pct <= 100")
+    else:
+        if _num(alloc) and not lo <= alloc <= hi:
+            errs.append(f"core.allocation_pct ({alloc}) must lie between vol_target.min_pct and max_pct")
+        if hi > max_gross_pct:
+            errs.append(f"core.vol_target.max_pct ({hi}) can't be above risk.max_gross_pct ({max_gross_pct})")
+    if not (_num(c["lambda"]) and 0.5 <= c["lambda"] < 1):
+        errs.append("core.vol_target.lambda must be from 0.5 to below 1")
+    ny = c["normal_years"]
+    if not (isinstance(ny, int) and not isinstance(ny, bool) and 1 <= ny <= 20):
+        errs.append("core.vol_target.normal_years must be a whole number from 1 to 20")
+    return errs
+
+
+def vol_settings(cfg: Optional[Dict]) -> Dict:
+    return {**VOL_DEFAULTS, **(settings(cfg).get("vol_target") or {})}
+
+
+def ewma_vol(closes: pd.Series, lam: float) -> pd.Series:
+    """Yearly volatility in % from exponentially weighted squared daily returns (RiskMetrics)."""
+    r = closes.pct_change().dropna()
+    return ((r ** 2).ewm(alpha=1 - lam, adjust=False).mean() * 252) ** 0.5 * 100
+
+
+def vol_target(closes: pd.Series, cfg: Optional[Dict]) -> Optional[Dict]:
+    """Today's target share for the core from the daily closes of COMPLETED sessions (the caller
+    leaves today's unfinished bar out). None when there is too little history (the plain
+    allocation_pct is used then)."""
+    c, v = settings(cfg), vol_settings(cfg)
+    closes = closes.dropna()
+    if len(closes) < 260:
+        return None
+    vol = ewma_vol(closes, float(v["lambda"]))
+    now = float(vol.iloc[-1])
+    normal = float(vol.iloc[-int(v["normal_years"]) * 252:].median())
+    if not now > 0 or not normal > 0:
+        return None
+    raw = float(c["allocation_pct"]) * normal / now
+    target = round(min(max(raw, float(v["min_pct"])), float(v["max_pct"])), 1)
+    ratio = now / normal
+    mood = "calmer than" if ratio < 0.9 else "jumpier than" if ratio > 1.1 else "about as jumpy as"
+    why = (f"markets are {mood} normal: volatility {now:.1f}% a year vs a normal {normal:.1f}%, "
+           f"so the target is {target:g}% of the account (normally {float(c['allocation_pct']):g}%, kept between "
+           f"{float(v['min_pct']):g}% and {float(v['max_pct']):g}%)")
+    last = closes.index[-1]
+    return {"target_pct": target, "vol_pct": round(now, 2), "normal_pct": round(normal, 2), "ratio": round(ratio, 3),
+            "as_of": str(last.date()) if hasattr(last, "date") else str(last), "reason": why}
+
+
+def rebalance(qty: float, price: float, equity: float, cfg: Dict, first_today: bool,
+              target_pct: Optional[float] = None, why_target: str = "") -> Optional[Dict]:
     """The core order for this tick, or None. Acts only on the first open tick of a trading day:
-    to the target when nothing is held yet, or when the weight is more than the band away."""
+    to the target when nothing is held yet, or when the weight is more than the band away.
+    target_pct (volatility targeting) replaces allocation_pct when given."""
     c = settings(cfg)
     if not c["enabled"] or not first_today or price <= 0 or equity <= 0:
         return None
-    target = float(np.floor(equity * float(c["allocation_pct"]) / 100 / price))
+    pct = float(target_pct if target_pct is not None else c["allocation_pct"])
+    target = float(np.floor(equity * pct / 100 / price))
     weight = qty * price / equity * 100
-    drift = weight - float(c["allocation_pct"])
+    drift = weight - pct
     if qty > 0 and abs(drift) <= float(c["rebalance_band_pct"]):
         return None
     delta = target - qty
     if delta == 0:
         return None
-    why = (f"Core: buying {c['symbol']} up to {c['allocation_pct']:g}% of the account" if qty == 0 else
+    why = (f"Core: buying {c['symbol']} up to {pct:g}% of the account" if qty == 0 else
            f"Core: {c['symbol']} is {weight:.1f}% of the account, more than {c['rebalance_band_pct']:g} points "
-           f"{'above' if drift > 0 else 'below'} its {c['allocation_pct']:g}%; back to the target")
+           f"{'above' if drift > 0 else 'below'} its {pct:g}% target; back to the target")
+    if why_target:
+        why += f"; {why_target}"
     return {"qty": delta, "target": target, "weight_%": round(weight, 2), "reason": why}
 
 
