@@ -139,7 +139,7 @@ def forecast_scores(y: pd.Series, p: pd.Series, day: pd.Series) -> Dict:
     m = (y.notna() & p.notna()).to_numpy()
     y, p, day = y[m], p[m], day[m]
     ic = pd.DataFrame({"y": y.to_numpy(), "p": p.to_numpy(), "d": day.to_numpy()}).groupby("d").apply(
-        lambda g: g.y.corr(g.p, method="spearman") if len(g) > 5 else np.nan, include_groups=False).dropna()
+        lambda g: g.y.rank().corr(g.p.rank()) if len(g) > 5 else np.nan, include_groups=False).dropna()
     se = ic.std(ddof=1) / math.sqrt(len(ic))
     return {"rows": int(m.sum()), "mae": round(float((y - p).abs().mean()), 4),
             "corr": round(float(np.corrcoef(y, p)[0, 1]), 4),
@@ -295,3 +295,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def signal_breakdown(P: pd.DataFrame, col: str, target: str = "fwd_ret") -> Dict:
+    """Where does a return forecast's ranking power come from? Average rank correlation of
+    forecast and outcome, each with a 95% range:
+      within_stock_day   bars of one stock on one day (timing inside the day)
+      across_stocks      the 11 stocks at the same bar time (picking stocks)
+      across_days        one stock's daily average forecast vs its daily average outcome (good vs bad days)"""
+    D = P.dropna(subset=[col, target])[["symbol", "day", "t", col, target]]
+
+    def avg(groups, min_n):
+        r = groups.apply(lambda g: g[col].rank().corr(g[target].rank()) if len(g) >= min_n else np.nan,
+                         include_groups=False).dropna()
+        se = r.std(ddof=1) / math.sqrt(len(r))
+        return {"groups": int(len(r)), "mean": round(float(r.mean()), 4),
+                "ci95": [round(float(r.mean() - 1.96 * se), 4), round(float(r.mean() + 1.96 * se), 4)]}
+
+    daily = D.groupby(["symbol", "day"])[[col, target]].mean().reset_index()
+    return {"within_stock_day": avg(D.groupby(["symbol", "day"]), 20),
+            "across_stocks": avg(D.groupby("t"), 6),
+            "across_days": avg(daily.groupby("symbol"), 50)}
