@@ -233,6 +233,12 @@ news:
   - AAPL
   - NVDA
   - TSLA
+  - META
+  - AMD
+  - MSFT
+  - SLV
+  - GLD
+  - USO
   earnings_dates:
     AAPL:
     - '2024-11-01'

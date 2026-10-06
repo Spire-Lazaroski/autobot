@@ -140,3 +140,16 @@ def test_previews_and_unrelated_stories_do_not_count(tmp_path, monkeypatch):
     f = ns.first_story_flags([(ids["Nvidia Q3 EPS $1.30 Beats $1.25 Estimate"], "NVDA"),
                               (ids["Beijing Blocks Nvidia Chips Amid Antitrust Probe In China"], "NVDA")])
     assert all(v["first"] for v in f.values())  # a preview isn't news; shared broad themes aren't the same story
+
+
+def test_symbols_added_later_get_scored_on_old_stories(tmp_path, monkeypatch):
+    db = tmp_path / "n.db"
+    monkeypatch.setattr(news, "DB_PATH", db)
+    monkeypatch.setattr(news, "configured_symbols", lambda: ["NVDA"])
+    news.store([{"id": 1, "headline": "Nvidia And Meta Sign AI Chip Deal", "symbols": ["NVDA", "META"], "created_at": "2026-09-29T20:05:00Z"}], "backfill", path=db)
+    news.collapse_events(db)
+    assert ns.run_rules() == 1                      # scored for NVDA only
+    assert ns.run_rules_for(["META"]) == 1          # META added to news.symbols later
+    assert ns.run_rules_for(["META"]) == 0
+    with news.connect() as con:
+        assert sorted(r[0] for r in con.execute("SELECT symbol FROM scores")) == ["META", "NVDA"]

@@ -268,6 +268,31 @@ def run_rules(limit: Optional[int] = None, chunk: int = 2000) -> int:
     return len(evs)
 
 
+def run_rules_for(symbols: List[str], chunk: int = 2000) -> int:
+    """Keyword-score (event, symbol) pairs still missing for these symbols: stories already scored
+    for other symbols before these were added to news.symbols. Returns the pairs scored."""
+    want = {s.upper() for s in symbols}
+    ensure_schema()
+    with news.connect() as con:
+        done = {(r[0], r[1]) for r in con.execute("SELECT event_id, symbol FROM scores WHERE scorer='rules' AND version=?",
+                                                  (RULES_VERSION,))}
+        evs = [dict(r) for r in con.execute("SELECT id, headline, summary, symbols FROM events")]
+    batch, n = [], 0
+    for ev in evs:
+        syms = json.loads(ev["symbols"])
+        rows = [{"symbol": t, **rules_score(ev["headline"], ev["summary"], t, syms)}
+                for t in syms if t in want and (ev["id"], t) not in done]
+        if rows:
+            batch.append((ev["id"], rows))
+            n += len(rows)
+        if len(batch) >= chunk:
+            save_many(batch, "rules", RULES_VERSION, None)
+            batch = []
+    if batch:
+        save_many(batch, "rules", RULES_VERSION, None)
+    return n
+
+
 def run_claude(limit: int, progress=None, event_ids: Optional[List[int]] = None) -> Dict:
     """Score the newest `limit` unscored stories, or exactly `event_ids` (skipping ones already scored)."""
     client = claude_client()
