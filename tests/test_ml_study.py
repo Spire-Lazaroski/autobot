@@ -73,3 +73,17 @@ def test_linear_and_lstm_predict_only_unseen_windows(monkeypatch):
     P2.loc[late, "fwd_swing"] *= 10
     w1 = ((P.day >= first) & (P.day < sorted(P.day.unique())[40])).to_numpy()
     np.testing.assert_allclose(ml.linear_predict(P2, "fwd_swing", mf.COLUMNS)[w1], lin[w1])
+
+
+def test_signal_breakdown_separates_stock_picking_from_timing():
+    rng = np.random.default_rng(0)
+    rows = []
+    for d in range(60):
+        for s in range(6):
+            level = s * 0.1                                     # stock s always does a bit better: picking, not timing
+            for b in range(30):
+                rows.append({"symbol": s, "day": d, "t": d * 100 + b, "fwd_ret": level + rng.normal(0, 0.05),
+                             "p": level + rng.normal(0, 0.001)})
+    r = ms.signal_breakdown(pd.DataFrame(rows), "p")
+    assert r["across_stocks"]["mean"] > 0.5
+    assert abs(r["within_stock_day"]["mean"]) < 0.05 and abs(r["across_days"]["mean"]) < 0.2

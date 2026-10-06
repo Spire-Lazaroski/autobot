@@ -226,3 +226,119 @@ ways to draw the bands, each chosen walk-forward (60 / 20 sessions), plus a free
 Reading: anchoring the band to the day, or letting it adapt to the trend and the recent deviation,
 does not help; all three versions land within chance of no bands and slightly below it. The live
 bot keeps exits off (no bands).
+
+## 11. Machine learning: gradient-boosted trees and an LSTM (ML study, 2026-10-06)
+
+Question (the user's, 2026-10-06): can a model that combines everything we have (price, volume,
+indicators, the Markov reading, SPY, news; then the economy) see what rules can't, especially for
+exits? Code: `autobot/ml_features.py` (inputs), `ml_study.py` (trees), `ml_lstm.py` (LSTM),
+`ml_macro.py` (economy); results in `data/ml/`. Separate environment `.venv-ml` (the bot's is untouched).
+
+Set-up, fixed before any run:
+- **Inputs**: 35 per 5-minute bar, each only from what was known when the bar ended (tests cut off the
+  future and check that earlier rows do not change). News now covers all 11 symbols (keyword-scored;
+  the gold, silver and oil funds have very few stories).
+- **Targets**: the next hour's return and the next hour's swing (high minus low), never past the 15:55 close-out.
+- **Walk-forward**: one model for all 11 symbols, refit every 20 sessions on all earlier sessions,
+  scored on the next 20: 386 unseen sessions (March 2025 to September 2026). Costs as in every study.
+- **Three uses**: exit (sell a strategy's position early when the model expects the next hour below
+  -5 bps; back in only after the strategy goes flat), entry (a stand-alone strategy: buy when the
+  model expects more than +5 bps, sell when it turns negative), swing (forecast accuracy).
+
+| | Trees | LSTM (last 2 hours of bars) | Trees + economy |
+|---|---|---|---|
+| Next-hour direction right | 49.8% | 50.1% | 49.1% |
+| Exit, vs strategies alone (−5.4%) | −11.1%; −1.7 bps/day (−4.4 to +1.0) | −8.2%; −0.8 bps/day (−2.0 to +0.4) | −10.3%; −1.4 bps/day (−4.5 to +1.6) |
+| Exit, pairs clearly better / worse (128, luck ~3) | 2 / 2 | 0 / 3 | 1 / 1 |
+| Entry, vs cash 0 and holding open-to-close +5.0% | −10.2% | −2.2% | −12.0% |
+| Swing forecast error (% of price) | **0.246** | 0.250 | 0.248 |
+
+Swing, same rows: simple rule (average swing at this time of day, scaled by today's volatility) 0.330;
+straight-line forecast on the same inputs 0.267; trees 0.246 (better than the straight line on 88% of
+days, clearly). The LSTM is slightly worse than the trees (better on 44% of days), and the economy
+makes the trees slightly worse (48%). The trees lean on recent volatility (about 70%) and the time of day.
+
+Where the faint direction signal comes from (rank correlation of forecast and outcome, 95% range):
+
+| | Within one stock's day | Across stocks at the same time | One stock's good vs bad days |
+|---|---|---|---|
+| Trees | +0.07 (+0.06 to +0.08) | +0.004 | −0.09 |
+| Trees + economy | +0.13 | +0.008 | −0.22 |
+| LSTM | +0.14 (+0.13 to +0.15) | +0.008 | −0.26 |
+
+The within-day part holds on bars with a full hour ahead and when each forecast is compared only with
+its own average so far that day (+0.05 to +0.10, known at the time). But the forecasts' level is wrong
+from day to day (negative last column), which is why trading on them loses. A likely reason for the
+within-day part: the free IEX feed's 5-minute closes are noisy last trades, so a close that is too high
+tends to be followed by a lower one. That kind of pattern can't be traded at those prices after costs.
+
+Reading:
+- **Direction (entry, exit)**: no model beats costs; the exit makes strategies worse with all three.
+  This agrees with sections 5 to 10.
+- **Size of the next move**: predictable, and the trees do it best. This is the one result with a
+  possible use (position size or stop width scaled to the expected swing), which would need its own
+  test, shadow first.
+- **The economy**: adds nothing at a 1-hour horizon (over 2 years the monthly and annual figures took
+  only 3 to 23 different values). Its use stays the slow, years-long picture (sections 6 and the core holding).
+- Nothing changes in the live bot.
+
+**Follow-up: sizing by the expected swing (step A backtest, 2026-10-06).** Same 386 sessions and costs;
+each trade sized at its opening bar (¼ to 2 times normal, normal = the symbol's previous 20 sessions)
+by fixed size (today), daily ATR (the bot's `risk_balanced` idea), the last 20 bars' ATR, or the trees'
+swing forecast; all scaled to the same average amount (`autobot/swing_sizing_study.py`).
+
+| Same average amount | Fixed | Daily ATR | Bars ATR | Swing forecast | Swing vs fixed: result per risk (95% range) |
+|---|---|---|---|---|---|
+| 128 strategy sets: total / daily ups-downs | −5.4% / 37.5 bps | −6.4% / 31.8 | −7.8% / 28.3 | −9.6% / 27.6 | −0.91 (−1.44 to −0.40), worse |
+| 7 live jobs | −6.1% / 26.5 | −7.2% / 24.9 | −6.8% / 23.3 | −6.2% / 22.9 | −0.19 (−0.88 to +0.52) |
+| Holding open to close, 11 symbols | +5.0% / 111 | +2.9% / 98 | 0.0% / 88 | +6.2% / 95 | +0.07 (−0.33 to +0.58) |
+
+Reading: sizing by the swing forecast makes days calmer (13% to 26% smaller daily ups and downs, worst
+day smaller) but does not improve the result per unit of risk, and it does not beat the plain ATR
+versions clearly anywhere. For the strategies it is clearly worse: their calm hours are not better
+hours. Step B (a shadow test) was not started; the bot keeps fixed sizing.
+
+## 12. Volatility targeting for the core holding (2026-10-06)
+
+Question: should the core move between 15% and 45% of the account (30% normally) by a volatility
+forecast? `autobot/vol_target_study.py`; S&P 500 daily closes from FRED (10 years; scored from
+September 2019, after 750 training days), dividends 1.4% a year flat, cash earns 0, decided at the
+close and traded a day later, only when more than 5 points from the target, 2 bps costs.
+Forecasts: EWMA (RiskMetrics), HAR (Corsi), trees, the VIX (FRED VIXCLS), HAR + VIX, trees + VIX.
+
+| | Plain 30% | EWMA | HAR | Trees | VIX | HAR + VIX | Trees + VIX |
+|---|---|---|---|---|---|---|---|
+| Yearly, as traded | +5.2% | +4.0% | +4.3% | +4.4% | +3.8% | +4.9% | +4.4% |
+| Yearly, same average amount | +5.2% | +4.7% | +4.7% | +4.7% | +4.4% | +4.5% | +4.3% |
+| Worst drop of the account | −11.2% | −5.9% | −6.7% | −6.1% | −6.6% | −8.7% | −6.8% |
+| Covid 2020 / 2022 bear / 2025 tariffs | −11.0 / −7.6 / −6.1 | −5.8 / −4.9 / −4.6 | −6.6 / −6.2 / −5.2 | −5.9 / −5.1 / −4.2 | −6.5 / −6.0 / −4.7 | −6.3 / −8.4 / −5.2 | −5.8 / −6.4 / −5.0 |
+| Per risk vs plain (same amount, 95% range) | | +0.08 (−0.19 to +0.31) | +0.07 | +0.13 (−0.18 to +0.39) | +0.02 | +0.06 | +0.04 |
+| Trades a year | 1 | 11 | 44 | 68 | 14 | 43 | 60 |
+
+Reading: every version roughly halves the losses in the three crashes, at a cost of about half a
+point a year in normal times; the gain per unit of risk is small and within chance (as Cederburg et
+al. 2020 found). The VIX tracks next week's volatility best (correlation 0.73 vs 0.61 for EWMA) but
+runs above it (it includes a fear premium), and adding it to HAR or the trees does not help. The
+simple EWMA rule does as well as anything, with the fewest trades. Only 7 years and 3 crashes.
+Nothing changes in the live bot unless the user decides to.
+
+## 13. Scalping: sell as soon as the costs plus a small premium are covered (2026-10-06)
+
+The user's "fast finger" idea: buy on the strategy's signal, sell with a resting limit order at entry x
+(1 + round-trip cost + premium), buy again with new levels while the signal is on. `autobot/scalp_study.py`:
+the limit fills only when a bar trades a cent beyond it (intrabar, not just at closes); stops (if any)
+count first when a bar reaches both; 128 strategy sets, the same 386 unseen sessions, after costs.
+
+| Variant | Total | Trades | Winning trades | Avg win / avg loss (bps) | vs strategy alone, bps/day (95% range) | Pairs worse |
+|---|---|---|---|---|---|---|
+| Strategy alone | −5.2% | 51,285 | 43% | +60.9 / −48.7 | | |
+| +2 bps, no stop | −69.2% | 267,711 | **85%** | +2.6 / −53.8 | −29.1 (−32.2 to −26.0) | 128 of 128 |
+| +10 bps, no stop | −51.2% | 171,041 | 76% | +10.3 / −55.0 | −17.2 (−19.7 to −14.7) | 127 |
+| +5 bps, stop 1x | −30.3% | 80,432 | 40% | +5.7 / −13.3 | −8.0 (−11.8 to −4.2) | 60 |
+| Dynamic (a quarter of the expected swing), stop 1x (best) | −25.3% | 87,449 | 48% | +23.9 / −30.4 | −6.2 (−9.7 to −2.8) | 47 |
+
+All 12 variants are clearly worse than the strategies alone; no pair is better anywhere. Reading: the
+small targets win 76-85% of the time, but each win is a few bps while the trades that miss carry the
+full loss, and every new set of boundaries pays the costs again (up to 5x the trades). This is the
+"win rate is not profit" trap the day-trader studies describe (Barber, Lee, Liu & Odean 2014; Chague,
+De-Losso & Giovannetti 2019).
