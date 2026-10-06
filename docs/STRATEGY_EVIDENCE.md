@@ -342,3 +342,28 @@ small targets win 76-85% of the time, but each win is a few bps while the trades
 full loss, and every new set of boundaries pays the costs again (up to 5x the trades). This is the
 "win rate is not profit" trap the day-trader studies describe (Barber, Lee, Liu & Odean 2014; Chague,
 De-Losso & Giovannetti 2019).
+
+## 14. Trading only when strategies agree (agreement test, 2026-10-07)
+
+The user's idea: combine strategies and trade only when several agree. `autobot/agreement_study.py`:
+the 11 five-minute strategies (4 families: trend 4, mean reversion 2, breakout 1, intraday 4), default
+settings, combined per symbol and bar; through no quick re-entry, after costs, flat before the close,
+the same 386 unseen sessions. Single strategies (121 pairs): −5.3%, −1.3 bps/day vs cash (not clear).
+
+| Combined signal | Total | In the market | Trades | vs single strategies, bps/day (95% range) | vs cash |
+|---|---|---|---|---|---|
+| ≥3 strategies agree, long | −4.4% | 74% | 6,716 | +0.4 (−3.2 to +4.0) | −0.9, not clear |
+| ≥5 agree, long | −10.4% | 37% | 6,269 | −1.3 (−4.1 to +1.4) | −2.7, not clear |
+| ≥7 agree, long | −0.8% | 5% | 2,594 | +1.2 (−1.4 to +3.8) | −0.2, not clear |
+| ≥2 families agree, long | −6.0% | 81% | 6,261 | +0.1 | −1.3, not clear |
+| ≥3 families agree, long | −11.1% | 35% | 6,408 | −1.6 | −2.9, not clear |
+| all 4 families agree, long | −0.5% | 0.1% | 76 | +1.2 | −0.1 |
+| any of the above with shorts | −10.4% to −37.4% | | 4,644-15,980 | −1.5 to −10.5, mostly clearly worse | clearly worse |
+
+Reading: agreement cuts the number of trades a lot, but none of the long-only versions is clearly
+better than the single strategies or than cash; the "best" ones are best mostly because they are
+almost never in the market (5% and 0.1% of the time). Agreement across families is rare (all four
+agree on 0.1% of bars) and does not carry an edge either. Adding shorts makes every version clearly
+worse. Combining signals that each have no edge after costs gives a combined signal without one,
+in line with the forecast-combination literature (Bates & Granger 1969; Timmermann 2006) and the
+trees in section 11.
