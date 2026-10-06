@@ -226,3 +226,58 @@ ways to draw the bands, each chosen walk-forward (60 / 20 sessions), plus a free
 Reading: anchoring the band to the day, or letting it adapt to the trend and the recent deviation,
 does not help; all three versions land within chance of no bands and slightly below it. The live
 bot keeps exits off (no bands).
+
+## 11. Machine learning: gradient-boosted trees and an LSTM (ML study, 2026-10-06)
+
+Question (the user's, 2026-10-06): can a model that combines everything we have (price, volume,
+indicators, the Markov reading, SPY, news; then the economy) see what rules can't, especially for
+exits? Code: `autobot/ml_features.py` (inputs), `ml_study.py` (trees), `ml_lstm.py` (LSTM),
+`ml_macro.py` (economy); results in `data/ml/`. Separate environment `.venv-ml` (the bot's is untouched).
+
+Set-up, fixed before any run:
+- **Inputs**: 35 per 5-minute bar, each only from what was known when the bar ended (tests cut off the
+  future and check that earlier rows do not change). News now covers all 11 symbols (keyword-scored;
+  the gold, silver and oil funds have very few stories).
+- **Targets**: the next hour's return and the next hour's swing (high minus low), never past the 15:55 close-out.
+- **Walk-forward**: one model for all 11 symbols, refit every 20 sessions on all earlier sessions,
+  scored on the next 20: 386 unseen sessions (March 2025 to September 2026). Costs as in every study.
+- **Three uses**: exit (sell a strategy's position early when the model expects the next hour below
+  -5 bps; back in only after the strategy goes flat), entry (a stand-alone strategy: buy when the
+  model expects more than +5 bps, sell when it turns negative), swing (forecast accuracy).
+
+| | Trees | LSTM (last 2 hours of bars) | Trees + economy |
+|---|---|---|---|
+| Next-hour direction right | 49.8% | 50.1% | 49.1% |
+| Exit, vs strategies alone (−5.4%) | −11.1%; −1.7 bps/day (−4.4 to +1.0) | −8.2%; −0.8 bps/day (−2.0 to +0.4) | −10.3%; −1.4 bps/day (−4.5 to +1.6) |
+| Exit, pairs clearly better / worse (128, luck ~3) | 2 / 2 | 0 / 3 | 1 / 1 |
+| Entry, vs cash 0 and holding open-to-close +5.0% | −10.2% | −2.2% | −12.0% |
+| Swing forecast error (% of price) | **0.246** | 0.250 | 0.248 |
+
+Swing, same rows: simple rule (average swing at this time of day, scaled by today's volatility) 0.330;
+straight-line forecast on the same inputs 0.267; trees 0.246 (better than the straight line on 88% of
+days, clearly). The LSTM is slightly worse than the trees (better on 44% of days), and the economy
+makes the trees slightly worse (48%). The trees lean on recent volatility (about 70%) and the time of day.
+
+Where the faint direction signal comes from (rank correlation of forecast and outcome, 95% range):
+
+| | Within one stock's day | Across stocks at the same time | One stock's good vs bad days |
+|---|---|---|---|
+| Trees | +0.07 (+0.06 to +0.08) | +0.004 | −0.09 |
+| Trees + economy | +0.13 | +0.008 | −0.22 |
+| LSTM | +0.14 (+0.13 to +0.15) | +0.008 | −0.26 |
+
+The within-day part holds on bars with a full hour ahead and when each forecast is compared only with
+its own average so far that day (+0.05 to +0.10, known at the time). But the forecasts' level is wrong
+from day to day (negative last column), which is why trading on them loses. A likely reason for the
+within-day part: the free IEX feed's 5-minute closes are noisy last trades, so a close that is too high
+tends to be followed by a lower one. That kind of pattern can't be traded at those prices after costs.
+
+Reading:
+- **Direction (entry, exit)**: no model beats costs; the exit makes strategies worse with all three.
+  This agrees with sections 5 to 10.
+- **Size of the next move**: predictable, and the trees do it best. This is the one result with a
+  possible use (position size or stop width scaled to the expected swing), which would need its own
+  test, shadow first.
+- **The economy**: adds nothing at a 1-hour horizon (over 2 years the monthly and annual figures took
+  only 3 to 23 different values). Its use stays the slow, years-long picture (sections 6 and the core holding).
+- Nothing changes in the live bot.
