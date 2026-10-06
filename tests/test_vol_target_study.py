@@ -33,10 +33,16 @@ def test_target_and_forecasts_use_the_past_only():
     idx = pd.bdate_range("2020-01-01", periods=1100)
     r = pd.Series(rng.normal(0, 0.01, len(idx)), index=idx)
     px = 100 * (1 + r).cumprod()
-    df = pd.DataFrame({"px": px, "r": r, "tbill": 0.0})
+    df = pd.DataFrame({"px": px, "r": r, "tbill": 0.0, "vix": 15 + 100 * r.abs().rolling(5, min_periods=1).mean()})
     w = vt.target_weight(vt.ewma_var(df.r))
     h = vt.har_forecast(df)
     df2 = df.copy()
     df2.iloc[900:, df2.columns.get_loc("r")] *= 5                        # a future shock
     pd.testing.assert_series_equal(vt.target_weight(vt.ewma_var(df2.r)).iloc[:900], w.iloc[:900])
     pd.testing.assert_series_equal(vt.har_forecast(df2).iloc[:900], h.iloc[:900])
+    hv = vt.har_forecast(df, True)
+    pd.testing.assert_series_equal(vt.har_forecast(df2, True).iloc[:900], hv.iloc[:900])
+
+
+def test_vix_is_turned_into_a_daily_variance():
+    assert abs(vt.vix_var(pd.Series([16.0])).iloc[0] - 0.16 ** 2 / 252) < 1e-12

@@ -22,6 +22,10 @@ to 15%-45%; 'normal' = median of the method's own forecasts so far):
   ewma      RiskMetrics: exponentially weighted variance of daily returns (lambda 0.94)
   har       Corsi's HAR: next week's realized variance from last day / week / month (refit yearly)
   trees     LightGBM on the past 1/5/20/60-day volatility, returns and drawdown (refit yearly)
+  vix       the VIX alone (the market's expected volatility for the next month, FRED VIXCLS; the
+            close of day t is used for the decision at day t's close)
+  har_vix   HAR with the VIX added as a fourth input
+  trees_vix the trees with the VIX and its 5-day change added
 Walk-forward: the first 750 trading days only train the models; all methods are scored on the same
 later days. Results are also shown scaled to the same average amount invested as hold_30.
 """
@@ -44,7 +48,7 @@ BAND, COST = 0.05, 0.0002
 DIV_YIELD = 0.014
 TRAIN, REFIT, H = 750, 250, 5
 LAMBDA = 0.94
-METHODS = ("hold_30", "ewma", "har", "trees")
+METHODS = ("hold_30", "ewma", "har", "trees", "vix", "har_vix", "trees_vix")
 CRISES = {"2020 Covid": ("2020-02-19", "2020-03-23"), "2022 bear": ("2022-01-03", "2022-10-12"),
           "2025 tariff drop": ("2025-02-19", "2025-04-08")}
 
@@ -58,7 +62,11 @@ def load() -> pd.DataFrame:
     tbs = pd.to_numeric(tb.iloc[:, 1], errors="coerce")
     tbs.index = pd.to_datetime(tb.iloc[:, 0]) + pd.offsets.MonthBegin(1)        # month M known from M+1
     tbill = tbs.reindex(px.index, method="ffill") / 100 / 252
-    return pd.DataFrame({"px": px, "r": px.pct_change(), "tbill": tbill})
+    v = pd.read_csv(DIR / "VIXCLS.csv")
+    vix = pd.to_numeric(v.iloc[:, 1], errors="coerce")
+    vix.index = pd.to_datetime(v.iloc[:, 0])
+    vix = vix.dropna().reindex(px.index, method="ffill")
+    return pd.DataFrame({"px": px, "r": px.pct_change(), "tbill": tbill, "vix": vix})
 
 
 # ----------------------------------------------------------------- volatility forecasts (variance of daily returns)
@@ -71,12 +79,20 @@ def ewma_var(r: pd.Series, lam: float = LAMBDA) -> pd.Series:
     return (r ** 2).ewm(alpha=1 - lam, adjust=False).mean()
 
 
-def har_inputs(r: pd.Series) -> pd.DataFrame:
+def har_inputs(r: pd.Series, vix: Optional[pd.Series] = None) -> pd.DataFrame:
     r2 = r ** 2
-    return pd.DataFrame({"d": r2, "w": r2.rolling(5).mean(), "m": r2.rolling(22).mean()})
+    out = pd.DataFrame({"d": r2, "w": r2.rolling(5).mean(), "m": r2.rolling(22).mean()})
+    if vix is not None:
+        out["vix"] = vix_var(vix)
+    return out
 
 
-def tree_inputs(df: pd.DataFrame) -> pd.DataFrame:
+def vix_var(vix: pd.Series) -> pd.Series:
+    """The VIX as a daily variance (it is quoted as a yearly volatility in %)."""
+    return (vix / 100) ** 2 / 252
+
+
+def tree_inputs(df: pd.DataFrame, with_vix: bool = False) -> pd.DataFrame:
     r = df.r
     out = pd.DataFrame(index=df.index)
     for n in (1, 5, 20, 60):
@@ -84,6 +100,9 @@ def tree_inputs(df: pd.DataFrame) -> pd.DataFrame:
         out[f"ret_{n}"] = df.px.pct_change(n)
     out["drawdown"] = df.px / df.px.cummax() - 1
     out["ewma"] = np.sqrt(ewma_var(r))
+    if with_vix:
+        out["vix"] = df.vix
+        out["vix_5d"] = df.vix.pct_change(5)
     return out
 
 
@@ -98,8 +117,8 @@ def walk(X: pd.DataFrame, y: pd.Series, fit_predict) -> pd.Series:
     return out
 
 
-def har_forecast(df: pd.DataFrame) -> pd.Series:
-    X, y = har_inputs(df.r), future_var(df.r)
+def har_forecast(df: pd.DataFrame, with_vix: bool = False) -> pd.Series:
+    X, y = har_inputs(df.r, df.vix if with_vix else None), future_var(df.r)
 
     def fp(Xt, yt, Xs):
         A = np.c_[np.ones(len(Xt)), Xt.to_numpy()]
@@ -109,9 +128,9 @@ def har_forecast(df: pd.DataFrame) -> pd.Series:
     return walk(X, y, fp)
 
 
-def tree_forecast(df: pd.DataFrame) -> pd.Series:
+def tree_forecast(df: pd.DataFrame, with_vix: bool = False) -> pd.Series:
     import lightgbm as lgb
-    X, y = tree_inputs(df), np.log(future_var(df.r) + 1e-10)
+    X, y = tree_inputs(df, with_vix), np.log(future_var(df.r) + 1e-10)
 
     def fp(Xt, yt, Xs):
         m = lgb.LGBMRegressor(n_estimators=300, learning_rate=0.03, num_leaves=7, min_child_samples=50,
@@ -198,7 +217,8 @@ def boot(a: pd.Series, b: pd.Series, n: int = 2000, block: int = 21, seed: int =
 
 def run(progress=print) -> Dict:
     df = load()
-    var = {"ewma": ewma_var(df.r), "har": har_forecast(df), "trees": tree_forecast(df)}
+    var = {"ewma": ewma_var(df.r), "har": har_forecast(df), "trees": tree_forecast(df),
+           "vix": vix_var(df.vix), "har_vix": har_forecast(df, True), "trees_vix": tree_forecast(df, True)}
     fv = future_var(df.r)
     start = df.index[TRAIN]
     T = df.index >= start

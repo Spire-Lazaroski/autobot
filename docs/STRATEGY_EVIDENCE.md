@@ -297,3 +297,27 @@ Reading: sizing by the swing forecast makes days calmer (13% to 26% smaller dail
 day smaller) but does not improve the result per unit of risk, and it does not beat the plain ATR
 versions clearly anywhere. For the strategies it is clearly worse: their calm hours are not better
 hours. Step B (a shadow test) was not started; the bot keeps fixed sizing.
+
+## 12. Volatility targeting for the core holding (2026-10-06)
+
+Question: should the core move between 15% and 45% of the account (30% normally) by a volatility
+forecast? `autobot/vol_target_study.py`; S&P 500 daily closes from FRED (10 years; scored from
+September 2019, after 750 training days), dividends 1.4% a year flat, cash earns 0, decided at the
+close and traded a day later, only when more than 5 points from the target, 2 bps costs.
+Forecasts: EWMA (RiskMetrics), HAR (Corsi), trees, the VIX (FRED VIXCLS), HAR + VIX, trees + VIX.
+
+| | Plain 30% | EWMA | HAR | Trees | VIX | HAR + VIX | Trees + VIX |
+|---|---|---|---|---|---|---|---|
+| Yearly, as traded | +5.2% | +4.0% | +4.3% | +4.4% | +3.8% | +4.9% | +4.4% |
+| Yearly, same average amount | +5.2% | +4.7% | +4.7% | +4.7% | +4.4% | +4.5% | +4.3% |
+| Worst drop of the account | −11.2% | −5.9% | −6.7% | −6.1% | −6.6% | −8.7% | −6.8% |
+| Covid 2020 / 2022 bear / 2025 tariffs | −11.0 / −7.6 / −6.1 | −5.8 / −4.9 / −4.6 | −6.6 / −6.2 / −5.2 | −5.9 / −5.1 / −4.2 | −6.5 / −6.0 / −4.7 | −6.3 / −8.4 / −5.2 | −5.8 / −6.4 / −5.0 |
+| Per risk vs plain (same amount, 95% range) | | +0.08 (−0.19 to +0.31) | +0.07 | +0.13 (−0.18 to +0.39) | +0.02 | +0.06 | +0.04 |
+| Trades a year | 1 | 11 | 44 | 68 | 14 | 43 | 60 |
+
+Reading: every version roughly halves the losses in the three crashes, at a cost of about half a
+point a year in normal times; the gain per unit of risk is small and within chance (as Cederburg et
+al. 2020 found). The VIX tracks next week's volatility best (correlation 0.73 vs 0.61 for EWMA) but
+runs above it (it includes a fear premium), and adding it to HAR or the trees does not help. The
+simple EWMA rule does as well as anything, with the fewest trades. Only 7 years and 3 crashes.
+Nothing changes in the live bot unless the user decides to.

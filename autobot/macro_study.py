@@ -41,7 +41,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DIR = ROOT / "data" / "macro"
 OUT = ROOT / "data" / "macro_study.json"
-FRED = ["TB3MS", "GS10", "BAA", "SAHMREALTIME", "USREC", "SP500"]   # SP500: daily, 10 years (autobot.core --sp500)
+FRED = ["TB3MS", "GS10", "BAA", "SAHMREALTIME", "USREC", "SP500", "VIXCLS"]   # SP500: daily, 10 years (autobot.core --sp500)
 GMD_VERSION = "2026_09"
 GMD_VARS = ["rGDP", "infl", "unemp", "strate", "ltrate", "BankingCrisis"]
 SWITCH_COST = 0.001
