@@ -203,3 +203,26 @@ Reading: the bands cut trades a lot (the profit band by about 40%) but the resul
 change beyond chance in either direction; the setting chosen on past days does no better than
 none. Volatility-scaled exits behave like the fixed-% ones (section 2 of the shorts / take-profit
 study): exits re-time a trade, they do not create an edge the entry lacks.
+
+## 10. Day-anchored and adaptive bands (band modes study, 2026-10-06)
+
+Same set-up and grid as section 9 (5-minute, long only, 11 symbols, 2 years, after costs), three
+ways to draw the bands, each chosen walk-forward (60 / 20 sessions), plus a free choice across all three:
+
+- **rolling**: 20-bar average of the close, width = 20-bar average true range (section 9).
+- **session**: the day's volume-weighted average price from the open; width blends today's bar
+  ranges with the previous 5 sessions' (today's weight grows as the day goes on: bars / (bars + 20)).
+- **adaptive**: Kaufman adaptive average (follows fast in a clear trend, slow in chop); width = an
+  exponentially weighted true range, so recent bars count more and the width reacts to the deviation.
+
+| | rolling | session | adaptive | free choice |
+|---|---|---|---|---|
+| Walk-forward (no bands: −9.7%) | −11.1% | −12.4% | −12.5% | −11.9% |
+| Daily difference, bps (95% range) | −0.42 (−2.88 to +2.04) | −0.75 (−2.92 to +1.43) | −0.77 (−2.92 to +1.39) | −0.62 (−3.09 to +1.84) |
+| Pairs clearly better / worse (luck ~3) | 1 / 2 | 1 / 2 | 1 / 3 | 1 / 2 |
+| Best setting in hindsight (none: −11.8%) | profit avg + 2 ATR: −10.5% | profit avg + 2 ATR: −10.8% | none | rolling profit avg + 2 ATR |
+| Chosen most often | none (18%) | none (17%) | none (19%) | session profit (10%) |
+
+Reading: anchoring the band to the day, or letting it adapt to the trend and the recent deviation,
+does not help; all three versions land within chance of no bands and slightly below it. The live
+bot keeps exits off (no bands).
