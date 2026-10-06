@@ -17,6 +17,8 @@ Per job in config.yaml (validated by liveconfig.validate_live through validate()
     band_profit: 2           dynamic take-profit: sell if a bar CLOSES above the band_period-bar
                              moving average plus this many ATRs
     band_period: 20          bars for the moving average and the ATR (both end at the current bar)
+    band_mode: rolling       rolling | session (today's VWAP, width blended with recent days) |
+                             adaptive (Kaufman adaptive average, exponentially weighted width); band_lines
                              each level is off unless present; any one switches the layer on
     reentry: both            fresh_cross | new_high | both | cooldown
     cooldown_bars: 6         only for "cooldown"
@@ -93,7 +95,9 @@ def validate(cfg, where: str = "exit") -> List[str]:
     n = cfg.get("no_entry_last_min", DEFAULTS["no_entry_last_min"])
     if not isinstance(n, (int, float)) or not 0 <= n <= 390:
         errs.append(f"{where}.no_entry_last_min must be between 0 and 390")
-    unknown = set(cfg) - set(DEFAULTS) - set(LEVELS) - {"enabled", "band_period"}
+    if cfg.get("band_mode", "rolling") not in BAND_MODES:
+        errs.append(f"{where}.band_mode must be one of {', '.join(BAND_MODES)}")
+    unknown = set(cfg) - set(DEFAULTS) - set(LEVELS) - {"enabled", "band_period", "band_mode"}
     if unknown:
         errs.append(f"{where}: unknown settings {', '.join(sorted(unknown))}")
     return errs
@@ -104,6 +108,54 @@ def _minutes_to_close(df: pd.DataFrame) -> np.ndarray:
     step = pd.Series(df.index).diff().median() if len(df) > 1 else pd.Timedelta(minutes=5)
     ny = (df.index + step).tz_convert("America/New_York")
     return 16 * 60 - np.asarray(ny.hour * 60 + ny.minute)
+
+
+BAND_MODES = ("rolling", "session", "adaptive")
+
+
+def band_lines(df: pd.DataFrame, mode: str = "rolling", n: int = 20):
+    """(centre, width) arrays for the dynamic bands, each using bars up to t only.
+    rolling   the last n bars' average close and average true range (ATR)
+    session   today's volume-weighted average price since the open (VWAP); the width is today's
+              average true range so far, blended with the previous 5 sessions' (weight of today =
+              bars today / (bars today + n)), so the early session leans on recent days
+    adaptive  Kaufman's adaptive moving average (10-bar efficiency ratio, speeds 2 / 30): fast in
+              clean moves, slow in chop; the width is an exponentially weighted true range
+              (0.06 per bar, about the last 30 bars) that reacts at once to a jump in deviation"""
+    prev_c = df.close.shift(1)
+    tr = pd.concat([df.high - df.low, (df.high - prev_c).abs(), (df.low - prev_c).abs()], axis=1).max(axis=1)
+    if mode == "rolling":
+        return df.close.rolling(n).mean().to_numpy(float), tr.rolling(n).mean().to_numpy(float)
+    day = pd.Series(np.asarray(df.index.tz_convert("America/New_York").date), index=df.index)
+    if mode == "session":
+        first = day != day.shift(1)
+        tr = tr.where(~first, df.high - df.low)                       # no overnight gap in the first bar's range
+        typ = (df.high + df.low + df.close) / 3
+        vol = df.volume.where(df.volume > 0, 1.0) if "volume" in df else pd.Series(1.0, index=df.index)
+        vwap = (typ * vol).groupby(day).cumsum() / vol.groupby(day).cumsum()
+        k = tr.groupby(day).cumcount() + 1
+        today = tr.groupby(day).cumsum() / k
+        per_day = tr.groupby(day).mean()
+        prev = per_day.rolling(5, min_periods=1).mean().shift(1)         # the previous 5 sessions, today excluded
+        prev = day.map(prev)
+        w = k / (k + n)
+        width = (w * today + (1 - w) * prev).where(prev.notna(), today)
+        return vwap.to_numpy(float), width.to_numpy(float)
+    if mode == "adaptive":
+        c = df.close.to_numpy(float)
+        er_n, fast, slow = 10, 2 / 3, 2 / 31
+        kama = np.full(len(c), np.nan)
+        for i in range(len(c)):
+            if i < er_n:
+                continue
+            change = abs(c[i] - c[i - er_n])
+            noise = np.abs(np.diff(c[i - er_n:i + 1])).sum()
+            er = change / noise if noise > 0 else 0.0
+            sc = (er * (fast - slow) + slow) ** 2
+            kama[i] = c[i] if np.isnan(kama[i - 1]) else kama[i - 1] + sc * (c[i] - kama[i - 1])
+        width = tr.ewm(alpha=0.06, adjust=False, min_periods=n).mean()
+        return kama, width.to_numpy(float)
+    raise ValueError(f"band_mode must be one of {', '.join(BAND_MODES)}")
 
 
 def exit_states(signal: pd.Series, df: pd.DataFrame, cfg: Optional[Dict], crypto: Optional[bool] = None) -> pd.DataFrame:
@@ -126,12 +178,8 @@ def exit_states(signal: pd.Series, df: pd.DataFrame, cfg: Optional[Dict], crypto
     sl = float(cfg.get("stop_pct") or 0) / 100
     ka = float(cfg.get("atr_stop") or 0)
     kb = float(cfg.get("band_profit") or 0)
-    if ka or kb:   # causal: the moving average and ATR of the last band_period bars, ending at bar t
-        bpn = int(cfg.get("band_period", 20))
-        prev_c = df.close.shift(1)
-        tr = pd.concat([df.high - df.low, (df.high - prev_c).abs(), (df.low - prev_c).abs()], axis=1).max(axis=1)
-        atr = tr.rolling(bpn).mean().to_numpy(dtype=float)
-        ma = df.close.rolling(bpn).mean().to_numpy(dtype=float)
+    if ka or kb:   # causal: centre line and width from bars up to t (band_lines)
+        ma, atr = band_lines(df, cfg.get("band_mode", "rolling"), int(cfg.get("band_period", 20)))
     mode = c["reentry"]
     cool = int(c["cooldown_bars"])
     if crypto is None:

@@ -2,7 +2,8 @@
 Dynamic-band exit study: do volatility-scaled sell levels help the bot as it runs today?
 Diagnosis only: nothing here changes the bot.
 
-    python -m autobot.band_study         # data/band_study.json (2 workers)
+    python -m autobot.band_study           # data/band_study.json (2 workers)
+    python -m autobot.band_study --modes   # 5-minute bars, rolling vs session vs adaptive bands: data/band_study_modes.json
 
 The user's idea (2026-10-06): instead of fixed % levels, a LOWER boundary (sell when it falls) and
 an UPPER boundary (take the profit) that adjust themselves to how jumpy the stock is:
@@ -40,19 +41,99 @@ STOPS, PROFITS = [None, 2, 3, 4], [None, 2, 3]
 RULES = {"no_quick_reentry": True}
 
 
-def combos() -> List[Optional[Dict]]:
-    out = []
-    for a in STOPS:
-        for b in PROFITS:
-            out.append(None if a is None and b is None else {k: v for k, v in (("atr_stop", a), ("band_profit", b)) if v is not None})
+MODES = ("rolling", "session", "adaptive")
+OUT_MODES = ROOT / "data" / "band_study_modes.json"
+
+
+def combos(modes=("rolling",)) -> List[Optional[Dict]]:
+    out: List[Optional[Dict]] = [None]
+    for m in modes:
+        for a in STOPS:
+            for b in PROFITS:
+                if a is None and b is None:
+                    continue
+                c = {k: v for k, v in (("atr_stop", a), ("band_profit", b)) if v is not None}
+                if m != "rolling" or len(modes) > 1:
+                    c["band_mode"] = m
+                out.append(c)
     return out
 
 
 def label(c: Optional[Dict]) -> str:
     if not c:
         return "none"
-    return " · ".join(x for x in (f"stop {c['atr_stop']:g} ATR" if "atr_stop" in c else "",
-                                  f"profit avg+{c['band_profit']:g} ATR" if "band_profit" in c else "") if x)
+    s = " · ".join(x for x in (f"stop {c['atr_stop']:g} ATR" if "atr_stop" in c else "",
+                               f"profit avg+{c['band_profit']:g} ATR" if "band_profit" in c else "") if x)
+    return f"{c['band_mode']}: {s}" if "band_mode" in c else s
+
+
+def _walk(D: pd.DataFrame, cols: List[str]):
+    wf, base_t, chosen = [], [], []
+    for a in range(TRAIN, len(D) - 1, TEST):
+        best = ((1 + D[cols].iloc[a - TRAIN:a]).prod() - 1).idxmax()
+        chosen.append(best)
+        wf.append(D.iloc[a:a + TEST][best])
+        base_t.append(D.iloc[a:a + TEST]["none"])
+    return wf, base_t, chosen
+
+
+def _modes_symbol(sym: str, closes, as_of, cfg: Dict) -> List[Dict]:
+    """5-minute bars, every mode's combos on identical days; one walk-forward per mode and one
+    choosing freely among all modes (each a separate row, side = 'long <group>')."""
+    data = cs.Data([sym], closes=closes, as_of=as_of)
+    r = rc.settings(cfg)
+    fm = int(r["flatten_min"]) or 5
+    costs = rc.costs_for(sym, r)
+    df = data.bars(sym, "5Min")
+    d0 = data.start(sym, int(r["warmup_days"]))
+    pairs = [(n, STRATEGIES[n].defaults, "default") for n in cs.strategies_for("5Min", r)]
+    pairs += [(j["strategy"], j.get("params") or {}, f"live job {j['name']}") for j in cfg["live"].get("jobs") or []
+              if j.get("enabled", True) and j["symbols"][0] == sym]
+    rows = []
+    grid = combos(MODES)
+    for name, params, kind in pairs:
+        try:
+            base = tr.apply(get_signal(name, df, params, False), df, RULES)
+        except Exception:  # noqa: BLE001
+            continue
+        daily, full, trades = {}, {}, {}
+        for c in grid:
+            sig = base if c is None else exits.apply_exit_layer(base, df, {**c, "reentry": "fresh_cross", "no_entry_last_min": 0}, crypto=False)
+            f = cs._period(cs.sim(df, data.cal[sym], name, params, costs, "5Min", fm, signal=sig)["frame"], d0)
+            lab = label(c)
+            daily[lab] = cs._daily(f.ret)
+            full[lab] = round(float(((1 + f.ret).prod() - 1) * 100), 3)
+            trades[lab] = int(len(cs.round_trips(f)))
+        D = pd.DataFrame(daily).fillna(0.0)
+        for group in list(MODES) + ["all"]:
+            cols = [c for c in D.columns if c == "none" or group == "all" or c.startswith(group + ":")]
+            wf, base_t, chosen = _walk(D, cols)
+            if not wf:
+                continue
+            wf_s, none_s = pd.concat(wf), pd.concat(base_t)
+            rows.append({"symbol": sym, "timeframe": "5Min", "strategy": name, "family": STRATEGIES[name].family, "kind": kind,
+                         "side": f"long {group}", "full_return_%": {k: full[k] for k in cols}, "trades": {k: trades[k] for k in cols},
+                         "test_days": [str(d) for d in wf_s.index], "wf": wf_s.round(8).tolist(), "none": none_s.round(8).tolist(),
+                         "fixed_test": {k: D.loc[wf_s.index, k].round(8).tolist() for k in cols}, "chosen": chosen})
+    return rows
+
+
+def run_modes(cfg: Dict, workers: int = 2) -> Dict:
+    syms = cached_symbols()
+    data = cs.Data(syms)
+    rows: List[Dict] = []
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for part in ex.map(_modes_symbol, syms, [data.closes] * len(syms), [data.as_of] * len(syms), [cfg] * len(syms)):
+            rows += part
+    summ = {}
+    for group in list(MODES) + ["all"]:
+        sel = [dict(x, side="long") for x in rows if x["side"] == f"long {group}"]
+        summ[group] = exits_summary(sel)["5Min long"]
+    res = {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "as_of": str(data.as_of), "symbols": syms,
+           "grid": {"atr_stop": STOPS, "band_profit": PROFITS, "band_period": 20, "modes": MODES}, "summary": summ}
+    res["lines"] = lines(res)
+    OUT_MODES.write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+    return res
 
 
 def _symbol(sym: str, closes, as_of, cfg: Dict) -> List[Dict]:
@@ -74,7 +155,7 @@ def _symbol(sym: str, closes, as_of, cfg: Dict) -> List[Dict]:
             except Exception:  # noqa: BLE001
                 continue
             daily, full, trades = {}, {}, {}
-            for c in combos():
+            for c in combos():  # rolling only (the first study)
                 sig = base if c is None else exits.apply_exit_layer(base, df, {**c, "reentry": "fresh_cross", "no_entry_last_min": 0}, crypto=False)
                 f = cs._period(cs.sim(df, data.cal[sym], name, params, costs, tf, fm, signal=sig)["frame"], d0)
                 lab = label(c)
@@ -145,6 +226,11 @@ def main():
     import yaml
     sys.stdout.reconfigure(encoding="utf-8")
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    if "--modes" in sys.argv:
+        res = run_modes(cfg)
+        print("\n".join(res["lines"]))
+        print("saved", OUT_MODES)
+        return
     res = run(cfg)
     print("\n".join(res["lines"]))
     print("saved", OUT)

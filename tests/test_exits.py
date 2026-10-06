@@ -286,3 +286,35 @@ def test_band_validation():
         "exit.atr_stop must be between 0 and 20 (ATRs)", "exit.band_profit must be between 0 and 20 (ATRs)",
         "exit.band_period must be a whole number from 2 to 500"]
     assert exits.validate({"atr_stop": 3, "band_profit": 2, "band_period": 20}) == [] and exits.enabled({"atr_stop": 3})
+
+
+@pytest.mark.parametrize("mode", ["session", "adaptive"])
+def test_new_band_modes_have_no_look_ahead(mode):
+    df = synthetic_bars(["X"], "5Min", 30, seed=4)["X"]
+    centre, width = exits.band_lines(df, mode, 20)
+    cut = len(df) * 2 // 3
+    wild = df.copy()
+    wild.iloc[cut:, :4] *= 1.5
+    c2, w2 = exits.band_lines(wild, mode, 20)
+    np.testing.assert_allclose(centre[:cut], c2[:cut], equal_nan=True)
+    np.testing.assert_allclose(width[:cut], w2[:cut], equal_nan=True)
+    sig = rc.flat_before_close(get_signal("ema_cross", df, {}), df, 5)
+    cfg = {"atr_stop": 2, "band_profit": 2, "band_mode": mode, "reentry": "fresh_cross"}
+    full = exits.apply_exit_layer(sig, df, cfg, crypto=False)
+    assert (full != sig).any()
+    pd.testing.assert_series_equal(exits.apply_exit_layer(sig.iloc[:cut], df.iloc[:cut], cfg, crypto=False), full.iloc[:cut], check_names=False)
+
+
+def test_session_band_leans_on_recent_days_early_and_on_today_later():
+    df = synthetic_bars(["X"], "5Min", 12, seed=7)["X"]
+    centre, width = exits.band_lines(df, "session", 20)
+    day = np.asarray(df.index.tz_convert("America/New_York").date)
+    starts = np.flatnonzero(np.r_[True, day[1:] != day[:-1]])
+    k = starts[-1]                                         # the last session's first bar
+    prev_c = df.close.shift(1)
+    tr = pd.concat([df.high - df.low, (df.high - prev_c).abs(), (df.low - prev_c).abs()], axis=1).max(axis=1)
+    tr.iloc[starts] = (df.high - df.low).iloc[starts]
+    prev5 = pd.Series(tr.to_numpy()).groupby(day).mean().iloc[-6:-1].mean()
+    assert width[k] == pytest.approx((1 / 21) * tr.iloc[k] + (20 / 21) * prev5)
+    assert centre[k] == pytest.approx(((df.high + df.low + df.close) / 3).iloc[k])   # VWAP of the first bar is its typical price
+    assert exits.validate({"atr_stop": 2, "band_mode": "weird"}) == ["exit.band_mode must be one of rolling, session, adaptive"]
