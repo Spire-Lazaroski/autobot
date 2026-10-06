@@ -38,3 +38,38 @@ def test_entry_and_exit_rules():
     base = pd.Series([1, 1, 1, 0, 1, 1], index=idx, dtype=float)
     pred = pd.Series([0.0, -0.06, 0.05, 0.0, 0.0, 0.0], index=idx)
     assert ms.exit_overlay(base, pred).tolist() == [1, 0, 0, 0, 1, 1]       # out until the strategy goes flat itself
+
+
+def _panel(days=50, seed=0):
+    from autobot import ml_features as mf
+    parts = []
+    for k, s in enumerate(["AAA", "BBB"]):
+        df = bars(days=days, seed=seed + k)
+        f = mf.build(df, None, None, with_turbulence=False)
+        p = f.join(ms.targets(df))
+        p["naive_swing"] = ms.naive_swing(f, p.fwd_swing)
+        p["symbol"] = s
+        parts.append(p)
+    return pd.concat(parts).rename_axis("t").reset_index()
+
+
+def test_linear_and_lstm_predict_only_unseen_windows(monkeypatch):
+    import pytest
+    pytest.importorskip("torch")
+    from autobot import ml_features as mf, ml_lstm as ml
+    monkeypatch.setattr(ms, "START", 30)
+    monkeypatch.setattr(ms, "STEP", 10)
+    monkeypatch.setattr(ml, "MAX_EPOCHS", 1)
+    P = _panel()
+    first = sorted(P.day.unique())[30]
+    lin = ml.linear_predict(P, "fwd_swing", mf.COLUMNS)
+    L, info = ml.lstm_predict(P, mf.COLUMNS, progress=lambda *a: None)
+    early = (P.day < first).to_numpy()
+    assert lin[early].isna().all() and L[early].isna().all().all()
+    assert lin[~early].notna().mean() > 0.8 and L.lstm_swing[~early].notna().mean() > 0.8
+    # a future shock in the targets must not change the first window's predictions (trained on earlier days only)
+    P2 = P.copy()
+    late = (P2.day >= sorted(P.day.unique())[40]).to_numpy()
+    P2.loc[late, "fwd_swing"] *= 10
+    w1 = ((P.day >= first) & (P.day < sorted(P.day.unique())[40])).to_numpy()
+    np.testing.assert_allclose(ml.linear_predict(P2, "fwd_swing", mf.COLUMNS)[w1], lin[w1])

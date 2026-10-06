@@ -183,33 +183,14 @@ def _daily_on(frame: pd.DataFrame, days: set) -> pd.Series:
     return d[d.index.isin(days)]
 
 
-def run(cfg: Dict, symbols: Optional[List[str]] = None, progress=print) -> Dict:
-    syms, data, P = panel(symbols)
-    cols = mf.COLUMNS
-    progress(f"{len(P):,} bars, {len(syms)} symbols, {P.day.nunique()} sessions")
-    P["pred_ret"] = walk_predict(P, "fwd_ret", cols, progress)
-    P["pred_swing"] = walk_predict(P, "fwd_swing", cols, progress)
-    days = sorted(P.day.unique())
-    test_days = {d for a, b in windows(days) for d in days if a <= d <= b}
-    T = P[P.day.isin(test_days)]
-
-    # 2. swing: trees vs the simple rule, same rows
-    sw = T[T.fwd_swing.notna() & T.naive_swing.notna()]
-    swing = {"trees": forecast_scores(sw.fwd_swing, sw.pred_swing, sw.day),
-             "simple_rule": forecast_scores(sw.fwd_swing, sw.naive_swing, sw.day),
-             "trees_error_lower_%": round(float((1 - (sw.fwd_swing - sw.pred_swing).abs().mean() / (sw.fwd_swing - sw.naive_swing).abs().mean()) * 100), 1),
-             "importance": importance(P, "fwd_swing", cols)}
-    progress(f"swing: trees MAE {swing['trees']['mae']} vs simple rule {swing['simple_rule']['mae']}")
-    ret_scores = forecast_scores(T.fwd_ret, T.pred_ret, T.day)
-    ret_scores["importance"] = importance(P, "fwd_ret", cols)
-
-    # 1. exit and 3. entry: replayed like the bot, with costs
+def trade_tests(P: pd.DataFrame, data, cfg: Dict, syms: List[str], test_days: set, col: str = "pred_ret", progress=print):
+    """1. exit and 3. entry, replayed like the bot with costs, from the return predictions in P[col]."""
     r = rc.settings(cfg)
     fm = int(r["flatten_min"]) or 5
     entry_rows, exit_rows = [], []
     for s in syms:
         df = data.bars(s, "5Min")
-        pred = P[P.symbol == s].set_index("t").pred_ret.reindex(df.index)
+        pred = P[P.symbol == s].set_index("t")[col].reindex(df.index)
         test = np.isin(np.asarray(df.index.tz_convert(NY).date), list(test_days))
         costs = rc.costs_for(s, r)
         sim = lambda sig: cs.sim(df, data.cal[s], "ml", {}, costs, "5Min", fm, signal=sig)["frame"]  # noqa: E731
@@ -252,6 +233,32 @@ def run(cfg: Dict, symbols: Optional[List[str]] = None, progress=print) -> Dict:
              "pairs_clearly_worse": sum(p["significant"] and p["mean_bps"] < 0 for p in ex_pair),
              "expected_by_luck": round(0.025 * len(exit_rows), 1),
              "trades_base": sum(e["trades_base"] for e in exit_rows), "trades_ml": sum(e["trades_ml"] for e in exit_rows)}
+    return entry, exit_
+
+
+def run(cfg: Dict, symbols: Optional[List[str]] = None, progress=print) -> Dict:
+    syms, data, P = panel(symbols)
+    cols = mf.COLUMNS
+    progress(f"{len(P):,} bars, {len(syms)} symbols, {P.day.nunique()} sessions")
+    P["pred_ret"] = walk_predict(P, "fwd_ret", cols, progress)
+    P["pred_swing"] = walk_predict(P, "fwd_swing", cols, progress)
+    days = sorted(P.day.unique())
+    test_days = {d for a, b in windows(days) for d in days if a <= d <= b}
+    T = P[P.day.isin(test_days)]
+
+    # 2. swing: trees vs the simple rule, same rows
+    sw = T[T.fwd_swing.notna() & T.naive_swing.notna()]
+    swing = {"trees": forecast_scores(sw.fwd_swing, sw.pred_swing, sw.day),
+             "simple_rule": forecast_scores(sw.fwd_swing, sw.naive_swing, sw.day),
+             "trees_error_lower_%": round(float((1 - (sw.fwd_swing - sw.pred_swing).abs().mean() / (sw.fwd_swing - sw.naive_swing).abs().mean()) * 100), 1),
+             "importance": importance(P, "fwd_swing", cols)}
+    progress(f"swing: trees MAE {swing['trees']['mae']} vs simple rule {swing['simple_rule']['mae']}")
+    ret_scores = forecast_scores(T.fwd_ret, T.pred_ret, T.day)
+    ret_scores["importance"] = importance(P, "fwd_ret", cols)
+
+    # 1. exit and 3. entry: replayed like the bot, with costs
+    P[["symbol", "t", "pred_ret", "pred_swing"]].to_pickle(mf.OUT_DIR / "pred_trees.pkl.gz")
+    entry, exit_ = trade_tests(P, data, cfg, syms, test_days, "pred_ret", progress)
     res = {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "as_of": str(data.as_of), "symbols": syms,
            "model": "LightGBM " + json.dumps(PARAMS), "horizon_bars": H, "entry_bps": ENTRY_BPS, "exit_bps": EXIT_BPS,
            "test_sessions": len(test_days), "first_test_day": str(min(test_days)),
