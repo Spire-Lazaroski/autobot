@@ -110,3 +110,86 @@ def test_switching_the_core_on_takes_effect_at_the_next_bar(env):  # noqa: F811
     _rewrite(env, lambda l: l.__setitem__("core", dict(CORE)))
     bot.reload_config()
     assert bot.core["enabled"] and any("core.enabled: None -> True" in c["change"] for c in bot.changes)
+
+
+# ----------------------------------------------------------------- volatility targeting (option B, 2026-10-06)
+VOL = {"enabled": True, "min_pct": 15, "max_pct": 45, "lambda": 0.94, "normal_years": 5}
+
+
+def daily_closes(n=1400, calm_sd=0.01, last_sd=None, last_n=40, seed=1):
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    r = rng.normal(0, calm_sd, n)
+    if last_sd is not None:
+        r[-last_n:] = rng.normal(0, last_sd, last_n)
+    idx = pd.bdate_range("2021-01-04", periods=n, tz="America/New_York")
+    return pd.Series(100 * np.cumprod(1 + r), index=idx)
+
+
+def test_vol_target_rule():
+    cfg = {**CORE, "vol_target": VOL}
+    normal = core.vol_target(daily_closes(), cfg)
+    assert 20 <= normal["target_pct"] <= 40 and 0.67 < normal["ratio"] < 1.5      # ordinary days: near the normal 30%
+    rough = core.vol_target(daily_closes(last_sd=0.03), cfg)            # 3x as jumpy lately: smaller core, at the floor
+    assert rough["target_pct"] == 15 and "jumpier than normal" in rough["reason"]
+    calm = core.vol_target(daily_closes(last_sd=0.004), cfg)            # much calmer: bigger core, at the ceiling
+    assert calm["target_pct"] == 45 and "calmer than normal" in calm["reason"]
+    assert core.vol_target(daily_closes(n=100), cfg) is None            # too little history: plain 30% applies
+    c = daily_closes()
+    assert core.vol_target(c.iloc[:-1], cfg) == core.vol_target(c.iloc[:-1].copy(), cfg)   # uses only what it is given
+
+
+def test_vol_target_validation():
+    live_cfg = yaml.safe_load(yaml.safe_dump(BASE))["live"]
+    live_cfg["core"] = {**CORE, "vol_target": VOL}
+    assert validate_live(live_cfg) == []
+    live_cfg["core"] = {**CORE, "vol_target": {**VOL, "min_pct": 40, "max_pct": 20, "lambda": 1.0, "normal_years": 0, "x": 1}}
+    errs = " | ".join(validate_live(live_cfg))
+    assert "min_pct and max_pct" in errs and "lambda" in errs and "normal_years" in errs and "unknown settings x" in errs
+    live_cfg["core"] = {**CORE, "allocation_pct": 50, "vol_target": VOL}
+    assert any("must lie between" in e for e in validate_live(live_cfg))
+
+
+def test_rebalance_uses_the_days_target():
+    o = core.rebalance(0, 500, 100_000, CORE, True, target_pct=20, why_target="markets are jumpier than normal")
+    assert o["qty"] == 40 and "up to 20% of the account" in o["reason"] and "jumpier" in o["reason"]
+    assert core.rebalance(60, 500, 100_000, CORE, True, target_pct=27) is None          # 30% held vs 27%: inside the band
+    o = core.rebalance(60, 500, 100_000, CORE, True, target_pct=15)                     # 30% held vs 15%: sell to 15%
+    assert o["qty"] == -30 and "above its 15% target" in o["reason"]
+
+
+def test_bot_sizes_the_core_by_the_days_volatility(env, monkeypatch):  # noqa: F811
+    import pandas as pd
+    calm_bars = live._download()
+    closes = daily_closes(last_sd=0.03)                                 # markets jumpy: target at the 15% floor
+    daily = pd.DataFrame({"open": closes, "high": closes, "low": closes, "close": closes, "volume": 1.0})
+    daily.index = daily.index.tz_convert("UTC")
+    monkeypatch.setattr(live, "_download", lambda sym, tf, *a, **k: daily if tf == "1Day" else calm_bars)
+    cfg = cfg_with_core(env, vol_target=VOL)
+    cfg["live"]["risk"]["max_position_usd"] = 1e9
+    tc = CoreTC()
+    bot = live.Bot(cfg, tc=tc)
+    bot.step_once()
+    st = json.loads((live.LOGS / "status.json").read_text())
+    voo = [o for o in tc.orders if o.symbol == "VOO"]
+    assert st["core"]["vol_target"]["target_pct"] == 15
+    assert len(voo) == 1 and float(voo[0].qty) == int(15_000 // st["core"]["price"])
+    decs = [json.loads(l) for l in (live.LOGS / "decisions.jsonl").read_text().splitlines()]
+    assert any(d.get("job") == "core" and "jumpier than normal" in d["reason"] for d in decs)
+
+
+def test_no_daily_history_falls_back_to_the_plain_share(env, monkeypatch):  # noqa: F811
+    bars = live._download()
+    def dl(sym, tf, *a, **k):
+        if tf == "1Day":
+            raise RuntimeError("no data")
+        return bars
+    monkeypatch.setattr(live, "_download", dl)
+    cfg = cfg_with_core(env, vol_target=VOL)
+    cfg["live"]["risk"]["max_position_usd"] = 1e9
+    tc = CoreTC()
+    live.Bot(cfg, tc=tc).step_once()
+    st = json.loads((live.LOGS / "status.json").read_text())
+    voo = [o for o in tc.orders if o.symbol == "VOO"]
+    assert "vol_target" not in st["core"] and float(voo[0].qty) == int(30_000 // st["core"]["price"])

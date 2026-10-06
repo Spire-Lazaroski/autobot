@@ -90,3 +90,18 @@ weight is more than 5 points from 30% (checked once per trading day). SGOV and t
 are not used. Everything else above (exemptions, sizing, Stop tick box, never a job) applies.
 The daily loss limit and profit lock measure the day's P&L without the core position's move
 today (Alpaca's unrealized_intraday_pl), still as % of the whole account's starting equity.
+
+## Volatility targeting (option B, built 2026-10-06)
+
+Evidence: `docs/STRATEGY_EVIDENCE.md` section 12 (core 15-45% by EWMA volatility roughly halved the
+losses in the 2020, 2022 and 2025 drops, about half a point a year less in normal years). Settings:
+
+    core: {enabled: true, symbol: VOO, allocation_pct: 30, rebalance_band_pct: 5,
+           vol_target: {enabled: true, min_pct: 15, max_pct: 45, lambda: 0.94, normal_years: 5}}
+
+Each trading morning (first tick after the open) the bot reads VOO's daily closes of completed
+sessions, computes the exponentially weighted volatility and its 5-year median, and sets the
+day's target = 30% x normal / today's volatility, kept between 15% and 45%. The 5-point band rule
+is unchanged. Trading jobs are sized into what the day's target leaves under risk.max_gross_pct.
+If the daily data can't be read, the plain 30% applies (logged). The Live page shows the target
+and the reason; each rebalance carries the reason in the decision log and the daily report.
