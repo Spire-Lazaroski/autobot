@@ -572,3 +572,23 @@ nothing useful for these 19 stocks. The one consistent result: getting out of st
 average exposure for 75-150 years, with half the worst drop, and it points the same way on real 2016-2026
 closes. It still makes less than simply holding (it is in stocks only about half the time): a risk reducer,
 like the core's volatility targeting, not a return booster.
+
+## 22. Option B plus an inflation / rate filter (2026-10-07)
+
+`autobot/core_combo_study.py`: the live core rule B (EWMA volatility target, 15-45%), with its target halved
+(never below 10%) while CPI inflation is rising (used from two months later) and/or while the 10-year yield is
+above its 12-month average (from the next day). Same data, days (September 2019 on), band and costs as section 12.
+
+| | Avg weight | As traded, per year | Worst drop | Same amount as B: per year / per risk | vs B, per risk (95%) |
+|---|---|---|---|---|---|
+| B (live) | 26% | +4.0% | −5.9% | +4.0% / 0.97 | |
+| B + inflation | 19% | +3.3% | −4.0% | +4.5% / 1.05 | +0.08 (−0.11 to +0.27) |
+| B + rates | 17% | +2.7% | −5.9% | +4.0% / 0.87 | −0.10 (−0.33 to +0.18) |
+| B + either | 16% | +2.5% | −4.0% | +4.3% / 0.97 | 0.00 (−0.16 to +0.18) |
+| plain 30% + either | 18% | +3.4% | −5.3% | +4.9% / 1.01 | +0.04 (−0.23 to +0.34) |
+
+Reading: in these 7 years inflation was "rising" on 57% of days, rates on 67%, one or the other on 87%, so the
+filters mostly just hold less. They lower the worst drop and the crisis losses (2022: B −4.9%, B + rates −2.5%)
+only in proportion to the smaller amount held; at the same average amount none is clearly better than B, and the
+rate filter is slightly worse. The filters overlap with volatility targeting rather than adding to it. The live
+core stays on B alone.
