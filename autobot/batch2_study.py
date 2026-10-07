@@ -190,7 +190,7 @@ def part_long(progress=print) -> Dict:
 # ----------------------------------------------------------------- insider purchases and sales
 def insider_trades(tickers: List[str], progress=print) -> pd.DataFrame:
     """Open-market purchases (P) and sales (S) by officers / directors of these issuers, from the SEC data sets."""
-    cache = SEC / "insider_ps.pkl.gz"
+    cache = SEC / "insider_ps_v3.pkl.gz"
     if cache.exists():
         return pd.read_pickle(cache)
     rows = []
@@ -210,9 +210,9 @@ def insider_trades(tickers: List[str], progress=print) -> pd.DataFrame:
         rel = own.groupby("ACCESSION_NUMBER").RPTOWNER_RELATIONSHIP.agg(lambda x: ",".join(x.dropna()))
         tr = tr.merge(sub, on="ACCESSION_NUMBER").assign(rel=lambda d: d.ACCESSION_NUMBER.map(rel).fillna(""))
         tr = tr[tr.rel.str.contains("Officer|Director", case=False)]
-        usd = pd.to_numeric(tr.TRANS_SHARES, errors="coerce") * pd.to_numeric(tr.TRANS_PRICEPERSHARE, errors="coerce")
         rows.append(pd.DataFrame({"symbol": tr.ISSUERTRADINGSYMBOL.str.upper(), "filed": pd.to_datetime(tr.FILING_DATE, format="%d-%b-%Y", errors="coerce"),
-                                  "code": tr.TRANS_CODE, "usd": usd}).dropna())
+                                  "code": tr.TRANS_CODE, "shares": pd.to_numeric(tr.TRANS_SHARES, errors="coerce"),
+                                  "price": pd.to_numeric(tr.TRANS_PRICEPERSHARE, errors="coerce")}).dropna())
         progress(f"  {z.name}: {len(rows[-1])} officer/director purchases and sales")
     T = pd.concat(rows, ignore_index=True)
     T.to_pickle(cache)
@@ -235,8 +235,13 @@ def part_insider(progress=print) -> Dict:
     px.index = px.index.tz_convert("America/New_York").tz_localize(None)
     R = px.groupby(px.index.to_period("M")).last().pct_change().iloc[1:]
     months = R.index
-    T = T[T.filed.notna()]
+    T = T[T.filed.notna()].copy()
     T["month"] = T.filed.dt.to_period("M")
+    # the filing's own price (unadjusted, right for that day); a few filings carry impossible values, dropped:
+    # a price above $10,000 a share or a single trade above $3 billion
+    T["usd"] = T.shares * T.price
+    bad = (T.price <= 0) | (T.price > 10_000) | (T.usd > 3e9)
+    T = T[~bad]
     net = (T.assign(s=np.where(T.code == "P", T.usd, -T.usd)).groupby(["month", "symbol"]).s.sum().unstack().reindex(months).fillna(0.0))
     buys = (T[T.code == "P"].groupby(["month", "symbol"]).usd.sum().unstack().reindex(months).fillna(0.0))
     net3, buy3 = net.rolling(3).sum(), buys.rolling(3).sum()
@@ -249,7 +254,7 @@ def part_insider(progress=print) -> Dict:
     ws = worst.astype(float).div(3)
     r_eq, r_b, r_s = mix_returns(R[cols], eq, ETF_COST), mix_returns(R[cols], wb, ETF_COST), mix_returns(R[cols], ws, ETF_COST)
     have = wb.shift(1).reindex(R.index).sum(axis=1) > 0                # months with at least one buyer stock
-    res = {"stocks": cols, "officer_director_trades": {"purchases": int((T.code == "P").sum()), "sales": int((T.code == "S").sum()),
+    res = {"stocks": cols, "dropped_impossible_rows": int(bad.sum()), "officer_director_trades": {"purchases": int((T.code == "P").sum()), "sales": int((T.code == "S").sum()),
                                                        "purchases_usd_m": round(float(T[T.code == "P"].usd.sum() / 1e6), 1),
                                                        "sales_usd_m": round(float(T[T.code == "S"].usd.sum() / 1e6), 1)},
            "months_with_a_buyer_stock": int(have.sum()), "months": int(len(R) - 1),

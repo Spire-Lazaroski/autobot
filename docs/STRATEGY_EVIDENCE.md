@@ -529,3 +529,46 @@ Reading: not confirmed. On 8 new years the rule is about break-even after costs 
 inside chance), with good and bad years alternating; the +24 bps of the long side in batch 1 shrinks to
 +2 bps. The batch 1 result was the expected lucky one among about 40 tries. Even with a symbol list that
 favours long rules (chosen in 2026), nothing is left after costs.
+
+## 21. Batch 2: inflation, interest rates, sentiment and insiders (2026-10-07)
+
+`autobot/batch2_study.py`; monthly decisions; every input only from when it was public (daily FRED from the
+next day, CPI and consumer sentiment from the end of the following month); each rule compared with a fixed mix
+holding the same average amount, so holding less can't look like skill. Downloads approved by the user: FRED
+UMCSENT, CPIAUCSL, T5YIE, DGS10, DFII10; SEC Form 3/4/5 data sets 2016 Q1 to 2026 Q1.
+
+**Inflation / rates, ETFs 2016-2026 (128 months, 2 bps per switch):**
+
+| Rule | Per year | vs its benchmark (% a year, 95%) |
+|---|---|---|
+| 60/40 SPY/TLT (benchmark) / SPY / GLD | 8.7% / 15.7% / 11.5% | |
+| A: CPI inflation rising → TIP+GLD+DBC, else 60/40 | 8.0% | −0.8 (−6.3 to +4.8) vs 60/40 |
+| B: expected inflation above its 6-month average → basket, else 60/40 | 8.9% | +0.1 (−5.3 to +5.4) |
+| C: 10-year yield rising → 60% SPY / 40% IEF, else 60/40 | 9.3% | +0.5 (−1.0 to +1.9) |
+| D: gold only when the real yield is below its 12-month average | 7.0% | −4.6 (−10.9 to +1.6) vs GLD |
+
+**Index vs bills, long history (monthly S&P since 1872 / 1948; "a month later" = the cautious version):**
+
+| Rule | Period | Per year (a month later) | Fixed mix, same amount | Hold | Difference vs fixed (a month later) | Worst drop rule / hold |
+|---|---|---|---|---|---|---|
+| L1: stocks while inflation isn't rising, else bills | 1948-2026 | 9.9% | 8.2% | 11.9% | **+1.6 (+0.3 to +3.0), clear** | −22% / −49% |
+| L2: stocks while the 10-year yield is below its 12-month average | 1872-2026 | 8.9% | 7.0% | 9.4% | **+2.2 (+1.1 to +3.3), clear** | −49% / −82% |
+| L3: consumer sentiment low → 100% stocks, else 50% (contrarian) | 1980-2026 | 10.0% | 10.4% | 12.3% | −0.3 (−1.2 to +0.6) | |
+| L4: VIX in its top 20% → 100% stocks, else 60% (buy fear) | 1995-2026 | 9.6% | 9.0% | 11.5% | +0.7 (−0.3 to +1.7) | |
+
+L1 and L2 on REAL month-end closes, SPY 2016-2026: +1.4 / +2.6 (L1) and +1.6 / +1.9 (L2) % a year vs the
+fixed mix (all ranges include zero over only 10 years), while holding SPY made 15% a year against their 8-11%.
+
+**Insiders (19 universe stocks, 2016-2026):** officers and directors made only 312 open-market purchases
+($1.2 billion) against 19,362 sales ($151 billion; 2 rows with impossible prices dropped). Holding the stocks
+with net insider buying over the last 3 months (in the 102 months with any): +1.9% a year vs holding all equally
+(−8.6 to +12.5); the 3 heaviest net sellers: +2.4% (−7.9 to +12.6), not worse. In these mega-caps insiders sell
+for diversification and buy rarely; the published insider-purchase effect lives mostly in smaller companies.
+
+Reading: none of the ETF rotations beat their simple benchmark; gold timed by real yields lost to holding gold.
+Sentiment (consumer mood, buying fear) adds nothing beyond the same average amount in stocks. Insider data says
+nothing useful for these 19 stocks. The one consistent result: getting out of stocks while inflation is rising
+(L1) or while long-term rates are rising (L2) has paid about 1.5-2 points a year over a fixed mix with the same
+average exposure for 75-150 years, with half the worst drop, and it points the same way on real 2016-2026
+closes. It still makes less than simply holding (it is in stocks only about half the time): a risk reducer,
+like the core's volatility targeting, not a return booster.
