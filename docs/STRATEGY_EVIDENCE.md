@@ -508,3 +508,24 @@ Reading: with about 40 rule-and-side results, one or two would look good by luck
 is not clear beyond chance on 2 years and 11 symbols. Everything else, including every short side, loses
 after costs. The option seller's premium is real but belongs to a different kind of trading (options, with
 crash risk), not to the bot's stock jobs.
+
+## 20. Gap-and-go confirmation on 8 earlier years and 24 symbols (2026-10-07)
+
+`autobot/gap_long_study.py`: the exact batch 1 rule (gap of 1% or more, the first 5-minute bar follows
+through, stop beyond that bar, out at 15:50, 2 bps per side), fixed before the run, on data it had never
+seen: Alpaca SIP 5-minute bars (split- and dividend-adjusted), October 2016 to 20 September 2024 (2,005
+sessions, the period before the 2-year window), the 24 stock and ETF symbols of the universe settings.
+
+| | Trades | Win rate | Net bps per trade (95%) |
+|---|---|---|---|
+| All | 3,787 | 30% | +1.3 (−5.3 to +7.9); per day vs cash +0.1 (−0.4 to +0.6) |
+| Long | 2,061 | 29% | +2.3 (−5.8 to +10.4) |
+| Short | 1,726 | 31% | +0.1 (−10.8 to +11.0) |
+| Tech / index ETFs | 1,978 / 196 | 32% / 27% | +5.7 / +6.3 (both ranges include zero) |
+| Staples / health / commodity ETFs | 331 / 448 / 834 | | −12.2 / −4.5 / −1.8 |
+| Single years | | | from −11.1 (2023) to +22.8 (2016), sign changing year to year |
+
+Reading: not confirmed. On 8 new years the rule is about break-even after costs (+1.3 bps a trade, far
+inside chance), with good and bad years alternating; the +24 bps of the long side in batch 1 shrinks to
++2 bps. The batch 1 result was the expected lucky one among about 40 tries. Even with a symbol list that
+favours long rules (chosen in 2026), nothing is left after costs.
