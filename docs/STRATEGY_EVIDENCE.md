@@ -626,3 +626,32 @@ Santa-Clara 2015): about the market's return with half its volatility and a thir
 better per unit of risk. Since publication the edge is smaller and not clear, and in the last 10 years of sector
 ETFs it did not beat simply holding SPY. It is the strongest candidate found so far for a slow, long-only sleeve,
 but not proven for the near future.
+
+## 24. Combining and contrasting: industry rotation variants and mixes (2026-10-07)
+
+Follow-up to section 23 in `autobot/rs_study.py` (`combine`): selection variants (12-month vs an average rank of
+3-, 6- and 12-month returns; top 3 vs top 5; all with the trend filter and volatility sizing) and monthly-rebalanced
+mixes with the market. Same data and costs.
+
+| French 10 industries, 1927-2026 | Per year | Volatility | Worst drop | Sharpe | vs market at its volatility (95%) |
+|---|---|---|---|---|---|
+| Market | +10.3% | 18.4% | −84% | 0.45 | |
+| Market, volatility-sized (like the core's B) | +9.2% | 12.5% | −46% | 0.51 | +1.2 (−0.4 to +2.7) |
+| Rotation, 12 months, top 3 (section 23) | +10.0% | 9.8% | −28% | 0.69 | +4.5 (+1.6 to +7.5) |
+| Rotation, 12 months, top 5 | +9.7% | 9.0% | −26% | **0.71** | **+4.9 (+2.1 to +7.8)** |
+| Rotation, 3+6+12 months, top 3 / top 5 | +9.5% / +9.4% | 10.0% / 9.1% | −30% / −26% | 0.63 / 0.67 | +3.4 / +4.2 |
+| Half market + half rotation | +10.1% | 13.1% | −64% | 0.55 | +2.0 (+0.9 to +3.0) |
+| Half B-like market + half rotation | +9.4% | 10.7% | −37% | 0.59 | +2.7 (+0.7 to +4.6) |
+
+After 1999: market +9.1% (drop −50%), rotation top 3 +7.7% (−13%), half market + half rotation +8.3% (−33%).
+The rotation moves with the market (correlation 0.68), but in the market's worst 10% of months it lost 3.2% on
+average against the market's 9.0%: its value is that it steps aside in bad stretches.
+
+Sector ETFs 2017-2026: nothing beats SPY (+15.2%, drop −24%); half SPY + half rotation +10.2% (−17%); the
+3+6+12-month ranking was clearly worse than SPY at the same volatility (−8.2% a year).
+
+Reading: dynamically including and excluding industries is the strongest component over a century, mostly as
+protection (a third of the market's worst drop). Averaging several lookbacks did not help; holding 5 instead of 3
+was marginally better. Mixing it with the market gives in-between results: half market + half rotation kept
+almost the market's return over 100 years with clearly smaller drops. But in the last decade every version and mix
+trailed simply holding SPY, by 5 to 7 points a year for the rotation alone and 5 points for the half-half mix.

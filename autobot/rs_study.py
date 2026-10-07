@@ -65,18 +65,23 @@ def french() -> Dict[str, pd.DataFrame]:
     return {"R": ind.loc[idx], "market": (fac["Mkt-RF"] + fac["RF"]).loc[idx], "cash": fac["RF"].loc[idx]}
 
 
-def weights(R: pd.DataFrame, version: str) -> pd.DataFrame:
-    """Target weights decided at the end of each month t (applied in month t+1)."""
+def weights(R: pd.DataFrame, version: str, top_n: int = TOP, lookbacks=(12,)) -> pd.DataFrame:
+    """Target weights decided at the end of each month t (applied in month t+1). With several lookbacks
+    the assets are ranked on each (months t-L .. t-1) and the average rank decides."""
     tri = (1 + R.fillna(0)).cumprod().where(R.notna())
-    mom = tri.shift(1) / tri.shift(12) - 1                         # months t-12 .. t-1
-    rank = mom.rank(axis=1, ascending=False, method="first")
-    top = (rank <= TOP) & mom.notna()
+    ranks = []
+    for L in lookbacks:
+        mom = tri.shift(1) / tri.shift(L) - 1
+        ranks.append(mom.rank(axis=1, ascending=False))
+    avg = sum(ranks) / len(ranks)
+    rank = avg.rank(axis=1, method="first")
+    top = (rank <= top_n) & avg.notna()
     if version in ("dual", "full"):
         top &= tri > tri.rolling(TREND_M).mean()
-    w = top.astype(float) / TOP
+    w = top.astype(float) / top_n
     if version == "full":
         vol = R.rolling(12).std() * math.sqrt(12)
-        w = (w * (VOL_TARGET / vol)).clip(upper=1 / TOP).where(top, 0.0)
+        w = (w * (VOL_TARGET / vol)).clip(upper=1 / top_n).where(top, 0.0)
     return w.fillna(0.0)
 
 
@@ -149,6 +154,47 @@ def evaluate(R: pd.DataFrame, market: pd.Series, cash: pd.Series, cost: float, s
     return res
 
 
+def blend(parts: Dict[str, pd.DataFrame], mix: Dict[str, float]) -> pd.DataFrame:
+    """Monthly-rebalanced mix of strategies' results (each keeps its own trading inside)."""
+    idx = None
+    for k in mix:
+        idx = parts[k].index if idx is None else idx.intersection(parts[k].index)
+    ret = sum(parts[k].ret.reindex(idx) * w for k, w in mix.items())
+    inv = sum(parts[k].invested.reindex(idx) * w for k, w in mix.items())
+    return pd.DataFrame({"ret": ret, "invested": inv})
+
+
+def combine(R: pd.DataFrame, market: pd.Series, cash: pd.Series, cost: float, start: str, periods: Dict) -> Dict:
+    """Contrast selection variants and mixes of the strategies that worked (section 23 follow-up)."""
+    s = {"rotation 12m top 3 (section 23)": replay(R, weights(R, "full"), cash, cost),
+         "rotation 3+6+12m top 3": replay(R, weights(R, "full", 3, (3, 6, 12)), cash, cost),
+         "rotation 12m top 5": replay(R, weights(R, "full", 5), cash, cost),
+         "rotation 3+6+12m top 5": replay(R, weights(R, "full", 5, (3, 6, 12)), cash, cost),
+         "market": pd.DataFrame({"ret": market, "invested": 1.0}),
+         "market, vol-sized (like B)": replay(pd.DataFrame({"m": market}), pd.DataFrame({"m": market_vol_sized(market)}), cash, cost)}
+    rot = "rotation 3+6+12m top 3"
+    s["half B-like market + half rotation"] = blend(s, {"market, vol-sized (like B)": 0.5, rot: 0.5})
+    s["half market + half rotation"] = blend(s, {"market": 0.5, rot: 0.5})
+    s = {k: f[f.index >= pd.Period(start, "M")] for k, f in s.items()}
+    common = s[rot].dropna().index
+    for k in s:
+        s[k] = s[k].reindex(common).dropna()
+    mk = s["market"].ret
+    out = {"whole": {k: stats(f.ret, cash, f.invested) for k, f in s.items()},
+           "vs_market_same_vol": {k: diff(same_vol(f.ret, mk, cash), mk) for k, f in s.items() if k != "market"},
+           "correlation": {"rotation vs market": round(float(s[rot].ret.corr(mk)), 2),
+                           "rotation vs B-like market": round(float(s[rot].ret.corr(s["market, vol-sized (like B)"].ret)), 2),
+                           "rotation vs market in the market's worst 10% of months": round(float(
+                               s[rot].ret[mk <= mk.quantile(0.1)].mean() * 100), 2),
+                           "market's worst 10% of months, average %": round(float(mk[mk <= mk.quantile(0.1)].mean() * 100), 2)},
+           "periods": {}}
+    for name, (a, b) in periods.items():
+        sl = {k: f[(f.index >= pd.Period(a, "M")) & (f.index <= pd.Period(b, "M"))] for k, f in s.items()}
+        if len(sl[rot]) >= 24:
+            out["periods"][name] = {k: stats(f.ret, cash, f.invested) for k, f in sl.items()}
+    return out
+
+
 def etfs() -> Dict:
     from autobot.data import _download
     cache = ROOT / "data" / "rs_sector_daily.pkl.gz"
@@ -182,9 +228,27 @@ def run(progress=print) -> Dict:
     e = etfs()
     res["etf"] = evaluate(e["R"], e["market"], e["cash"], 0.0002, "2017-01", {})
     progress("sector ETFs done")
-    res["lines"] = lines(res)
+    res["combine_french"] = combine(f["R"], f["market"], f["cash"], 0.001, "1927-07", PERIODS)
+    res["combine_etf"] = combine(e["R"], e["market"], e["cash"], 0.0002, "2017-01", {})
+    progress("combinations done")
+    res["lines"] = lines(res) + combine_lines(res)
     OUT.write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
     return res
+
+
+def combine_lines(res: Dict) -> List[str]:
+    out = []
+    for key, title in (("combine_french", "Combinations, French 10 industries"), ("combine_etf", "Combinations, sector ETFs")):
+        c = res[key]
+        out.append(f"{title}:")
+        for k, st in c["whole"].items():
+            d = c["vs_market_same_vol"].get(k)
+            tail = f" | vs market at its volatility {d['%_per_year']:+.2f}%/yr ({d['ci95'][0]:+.2f} to {d['ci95'][1]:+.2f})" if d else ""
+            out.append(_row(k, st) + tail)
+        out.append(f"    {c['correlation']}")
+        for name, p in c["periods"].items():
+            out.append(f"  {name}: " + "; ".join(f"{k} {v['yearly_%']:+.1f}% (drop {v['worst_drop_%']}%)" for k, v in p.items()))
+    return out
 
 
 def _row(k: str, s: Dict) -> str:
