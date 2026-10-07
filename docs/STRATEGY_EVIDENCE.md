@@ -466,3 +466,129 @@ attributes to prices bouncing between bid and ask and to noisy prints (the free 
 small and unstable to forecast: ARMA fitted on past days does worse than predicting zero, its forecasts are a
 fraction of a basis point, and trading them loses to costs whichever way. Same conclusion as sections 11
 and 17, from the classical side.
+
+## 19. Batch 1 of the user's strategy list (2026-10-07)
+
+`autobot/batch1_study.py`; 11 symbols, 5-minute bars, the same 386 unseen sessions, costs 2 bps per side
+(2x at the opening bar and the close-out), flat at every close, one trade at a time per symbol and rule,
+stop counted first when a bar reaches both. Net bps per trade with 95% ranges clustered by day.
+
+| Rule | Trades | Win rate | Net bps per trade (95%) | Per day vs cash | Verdict |
+|---|---|---|---|---|---|
+| Fibonacci 38.2% / 50% / 61.8% (long and short) | 3,176-4,344 | 40-54% | −6.1 to −6.9 (all clearly negative) | clearly worse | ✗ |
+| 0.5 : 2 risk / reward on the bot's entries | 44,302 | 22% | −3.4 (−4.1 to −2.7) | vs the strategies' own exits −1.3: clearly worse | ✗ |
+| 1 : 2 risk / reward | 43,327 | 34% | −4.0 (−5.0 to −3.0) | clearly worse | ✗ |
+| Gap fill, 0.2-1% gaps | 1,893 | 48% | −7.1 (−10.0 to −4.1) | clearly worse | ✗ |
+| Gap fill, gaps over 1% | 1,556 | 47% | −9.8 (−23.7 to +4.0); short side −18.0, clearly | not clear | ✗ |
+| **Gap and go, gaps over 1%** | 741 | 28% | **+10.2 (−6.8 to +27.2)**; long side **+24.3 (−2.8 to +51.4)** | +1.8 bps/day (−1.2 to +4.7), not clear | the only positive one; not proven |
+| Stop hunt at yesterday's high / low | 2,190 | 33% | −6.0 (−9.4 to −2.6) | clearly worse | ✗ |
+| Stop hunt at the first 30 minutes' range | 4,265 | 34% | −4.0 (−5.5 to −2.5) | clearly worse | ✗ |
+| Volume profile, 80% rule | 1,211 | 53% | −5.3 (−12.1 to +1.4) | not clear | ✗ |
+| Volume profile, value-area breakout | 1,278 | 42% | +1.5 (−6.3 to +9.3); long +7.9 (−4.2 to +20.1) | not clear | ~ |
+| Market profile (time at price), 80% rule / breakout | 1,283 / 1,102 | 59% / 41% | −4.4 / +0.7 | not clear | ✗ |
+| Overbought short fade (RSI > 80, above the band) | 285 | 24% | −3.3 (−14.4 to +7.9) | not clear | ✗ |
+| Residual reversal vs SPY + QQQ (hedged) | 2,555 | | | −3.4 bps/day, clearly worse | ✗ |
+| Trees on the residuals (nonlinear stat-arb) | 5,163 | | | −5.4 bps/day, clearly worse | ✗ |
+
+Short side, every rule: worse than the long side in all 9 rules that trade both ways (gap fill short −8.6 /
+−18.0, Fibonacci short −7.4 to −8.2, stop-hunt short −5.1 / −5.3, profile breakouts short −5 / −6 bps).
+
+News events (daily, held from the next open, vs SPY, after costs): earnings stories traded in the direction of
+their keyword tone, 138 events: −10 bps after 1 day (−49 to +28), −97 after 5 days (−215 to +21), +27 after 20
+(−181 to +234): no edge (the keyword tone is a weak reading of an earnings report). Dividend raises or
+initiations: only 6 events, far too few to judge.
+
+The option seller's premium (S&P 500 and VIX, 119 months, 2016-2026): the VIX was above the volatility that
+followed in 85% of months, by 3.8 points on average (18.8 vs 15.0). A one-month variance-swap seller earned
++2.2 vega a month on average (median +4.1) and +265 over the 10 years, but lost −58 and −49 in February and
+March 2020 and −32 in March 2025, with a worst drawdown of −106: a real premium, paid for by rare large losses.
+
+Reading: with about 40 rule-and-side results, one or two would look good by luck. Gap-and-go on large gaps
+(long side) is the closest to a real edge and matches the research (large news gaps tend to continue), but it
+is not clear beyond chance on 2 years and 11 symbols. Everything else, including every short side, loses
+after costs. The option seller's premium is real but belongs to a different kind of trading (options, with
+crash risk), not to the bot's stock jobs.
+
+## 20. Gap-and-go confirmation on 8 earlier years and 24 symbols (2026-10-07)
+
+`autobot/gap_long_study.py`: the exact batch 1 rule (gap of 1% or more, the first 5-minute bar follows
+through, stop beyond that bar, out at 15:50, 2 bps per side), fixed before the run, on data it had never
+seen: Alpaca SIP 5-minute bars (split- and dividend-adjusted), October 2016 to 20 September 2024 (2,005
+sessions, the period before the 2-year window), the 24 stock and ETF symbols of the universe settings.
+
+| | Trades | Win rate | Net bps per trade (95%) |
+|---|---|---|---|
+| All | 3,787 | 30% | +1.3 (−5.3 to +7.9); per day vs cash +0.1 (−0.4 to +0.6) |
+| Long | 2,061 | 29% | +2.3 (−5.8 to +10.4) |
+| Short | 1,726 | 31% | +0.1 (−10.8 to +11.0) |
+| Tech / index ETFs | 1,978 / 196 | 32% / 27% | +5.7 / +6.3 (both ranges include zero) |
+| Staples / health / commodity ETFs | 331 / 448 / 834 | | −12.2 / −4.5 / −1.8 |
+| Single years | | | from −11.1 (2023) to +22.8 (2016), sign changing year to year |
+
+Reading: not confirmed. On 8 new years the rule is about break-even after costs (+1.3 bps a trade, far
+inside chance), with good and bad years alternating; the +24 bps of the long side in batch 1 shrinks to
++2 bps. The batch 1 result was the expected lucky one among about 40 tries. Even with a symbol list that
+favours long rules (chosen in 2026), nothing is left after costs.
+
+## 21. Batch 2: inflation, interest rates, sentiment and insiders (2026-10-07)
+
+`autobot/batch2_study.py`; monthly decisions; every input only from when it was public (daily FRED from the
+next day, CPI and consumer sentiment from the end of the following month); each rule compared with a fixed mix
+holding the same average amount, so holding less can't look like skill. Downloads approved by the user: FRED
+UMCSENT, CPIAUCSL, T5YIE, DGS10, DFII10; SEC Form 3/4/5 data sets 2016 Q1 to 2026 Q1.
+
+**Inflation / rates, ETFs 2016-2026 (128 months, 2 bps per switch):**
+
+| Rule | Per year | vs its benchmark (% a year, 95%) |
+|---|---|---|
+| 60/40 SPY/TLT (benchmark) / SPY / GLD | 8.7% / 15.7% / 11.5% | |
+| A: CPI inflation rising → TIP+GLD+DBC, else 60/40 | 8.0% | −0.8 (−6.3 to +4.8) vs 60/40 |
+| B: expected inflation above its 6-month average → basket, else 60/40 | 8.9% | +0.1 (−5.3 to +5.4) |
+| C: 10-year yield rising → 60% SPY / 40% IEF, else 60/40 | 9.3% | +0.5 (−1.0 to +1.9) |
+| D: gold only when the real yield is below its 12-month average | 7.0% | −4.6 (−10.9 to +1.6) vs GLD |
+
+**Index vs bills, long history (monthly S&P since 1872 / 1948; "a month later" = the cautious version):**
+
+| Rule | Period | Per year (a month later) | Fixed mix, same amount | Hold | Difference vs fixed (a month later) | Worst drop rule / hold |
+|---|---|---|---|---|---|---|
+| L1: stocks while inflation isn't rising, else bills | 1948-2026 | 9.9% | 8.2% | 11.9% | **+1.6 (+0.3 to +3.0), clear** | −22% / −49% |
+| L2: stocks while the 10-year yield is below its 12-month average | 1872-2026 | 8.9% | 7.0% | 9.4% | **+2.2 (+1.1 to +3.3), clear** | −49% / −82% |
+| L3: consumer sentiment low → 100% stocks, else 50% (contrarian) | 1980-2026 | 10.0% | 10.4% | 12.3% | −0.3 (−1.2 to +0.6) | |
+| L4: VIX in its top 20% → 100% stocks, else 60% (buy fear) | 1995-2026 | 9.6% | 9.0% | 11.5% | +0.7 (−0.3 to +1.7) | |
+
+L1 and L2 on REAL month-end closes, SPY 2016-2026: +1.4 / +2.6 (L1) and +1.6 / +1.9 (L2) % a year vs the
+fixed mix (all ranges include zero over only 10 years), while holding SPY made 15% a year against their 8-11%.
+
+**Insiders (19 universe stocks, 2016-2026):** officers and directors made only 312 open-market purchases
+($1.2 billion) against 19,362 sales ($151 billion; 2 rows with impossible prices dropped). Holding the stocks
+with net insider buying over the last 3 months (in the 102 months with any): +1.9% a year vs holding all equally
+(−8.6 to +12.5); the 3 heaviest net sellers: +2.4% (−7.9 to +12.6), not worse. In these mega-caps insiders sell
+for diversification and buy rarely; the published insider-purchase effect lives mostly in smaller companies.
+
+Reading: none of the ETF rotations beat their simple benchmark; gold timed by real yields lost to holding gold.
+Sentiment (consumer mood, buying fear) adds nothing beyond the same average amount in stocks. Insider data says
+nothing useful for these 19 stocks. The one consistent result: getting out of stocks while inflation is rising
+(L1) or while long-term rates are rising (L2) has paid about 1.5-2 points a year over a fixed mix with the same
+average exposure for 75-150 years, with half the worst drop, and it points the same way on real 2016-2026
+closes. It still makes less than simply holding (it is in stocks only about half the time): a risk reducer,
+like the core's volatility targeting, not a return booster.
+
+## 22. Option B plus an inflation / rate filter (2026-10-07)
+
+`autobot/core_combo_study.py`: the live core rule B (EWMA volatility target, 15-45%), with its target halved
+(never below 10%) while CPI inflation is rising (used from two months later) and/or while the 10-year yield is
+above its 12-month average (from the next day). Same data, days (September 2019 on), band and costs as section 12.
+
+| | Avg weight | As traded, per year | Worst drop | Same amount as B: per year / per risk | vs B, per risk (95%) |
+|---|---|---|---|---|---|
+| B (live) | 26% | +4.0% | −5.9% | +4.0% / 0.97 | |
+| B + inflation | 19% | +3.3% | −4.0% | +4.5% / 1.05 | +0.08 (−0.11 to +0.27) |
+| B + rates | 17% | +2.7% | −5.9% | +4.0% / 0.87 | −0.10 (−0.33 to +0.18) |
+| B + either | 16% | +2.5% | −4.0% | +4.3% / 0.97 | 0.00 (−0.16 to +0.18) |
+| plain 30% + either | 18% | +3.4% | −5.3% | +4.9% / 1.01 | +0.04 (−0.23 to +0.34) |
+
+Reading: in these 7 years inflation was "rising" on 57% of days, rates on 67%, one or the other on 87%, so the
+filters mostly just hold less. They lower the worst drop and the crisis losses (2022: B −4.9%, B + rates −2.5%)
+only in proportion to the smaller amount held; at the same average amount none is clearly better than B, and the
+rate filter is slightly worse. The filters overlap with volatility targeting rather than adding to it. The live
+core stays on B alone.
