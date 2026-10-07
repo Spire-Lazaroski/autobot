@@ -442,3 +442,27 @@ VIX by 1.5 points the same day, still −1.2 after 20 days; a VIX jump beyond wh
 explains is followed by −22 bps (± 9) in the S&P over 5 days and −17 (± 7) over 20; a yield-curve shock
 has no lasting effect. The fear-shock result fits volatility targeting (less exposure when fear rises),
 though as an in-sample fit it is not a tested trading rule (the VIX did not improve the core in section 12).
+
+## 18. ARIMA and autocorrelation on 5-minute price changes (2026-10-07)
+
+`autobot/arima_study.py`: each symbol's 5-minute log-price changes inside the session (the overnight move
+left out), 2 years; ARMA walk-forward (order by AIC among 5 small models on the previous 60 sessions,
+refit every 20) on the same 386 unseen sessions; costs 2 bps per side.
+
+| | Result |
+|---|---|
+| Lag-1 autocorrelation | −0.020 to +0.009 (95% band ±0.010); 6 of 11 slightly negative beyond the band |
+| Ljung-Box over 12 lags | a pattern exists in all 11 (p from 0.0004 down to 10^-26) |
+| Variance ratio over 30 min / 1 hour | 0.84-0.99 / 0.77-0.97: moves partly reverse within the hour (stocks most, gold/silver/oil least) |
+| ARMA forecast vs a forecast of zero | worse in all 11 (out-of-sample R² −0.14% to −0.60%; one MSFT window blew up) |
+| Signs right | 47.8% to 50.3% |
+| Typical forecast size | 0.2 to 0.7 bps (a round trip costs about 4 bps) |
+| Trading the forecast's side every bar | before costs +12% (+3.1 bps/day, −2.9 to +9.1, not clear); after costs −99% |
+| Only when the forecast exceeds the round-trip cost | −15% (−4.2 bps/day, −6.8 to −1.6, clearly worse) |
+
+Reading: the price changes are not a pure random walk: there is a small, statistically real tendency to
+partly undo moves within the hour (variance ratios below 1), the pattern market-microstructure research
+attributes to prices bouncing between bid and ask and to noisy prints (the free IEX feed). But it is far too
+small and unstable to forecast: ARMA fitted on past days does worse than predicting zero, its forecasts are a
+fraction of a basis point, and trading them loses to costs whichever way. Same conclusion as sections 11
+and 17, from the classical side.
