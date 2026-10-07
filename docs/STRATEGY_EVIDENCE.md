@@ -367,3 +367,24 @@ agree on 0.1% of bars) and does not carry an edge either. Adding shorts makes ev
 worse. Combining signals that each have no edge after costs gives a combined signal without one,
 in line with the forecast-combination literature (Bates & Granger 1969; Timmermann 2006) and the
 trees in section 11.
+
+## 15. GARCH-family volatility models for the core (2026-10-07)
+
+Added to the section 12 test (same data, days, rules and costs): GARCH(1,1), GJR-GARCH and EGARCH, all
+with Student-t errors (`arch` package), parameters refit yearly on earlier days and run forward day by day.
+
+| | EWMA (live) | GARCH | GJR-GARCH | EGARCH | VIX |
+|---|---|---|---|---|---|
+| Forecast error, next week's daily volatility | 0.400% | 0.367% | 0.344% | **0.338%** | 0.462% |
+| Correlation with what followed | 0.61 | 0.70 | **0.74** | 0.73 | 0.73 |
+| Worst drop of the account (same amount) | −6.9% | −6.3% | −6.4% | **−6.2%** | −7.8% |
+| Covid 2020 / 2022 bear / 2025 tariffs | −5.8 / −4.9 / −4.6 | −6.1 / −5.6 / −5.0 | −6.0 / **−4.5** / −4.8 | −5.8 / −4.7 / −4.9 | −6.5 / −6.0 / −4.7 |
+| Per risk vs plain 30% (95% range) | +0.08 (−0.19 to +0.31) | +0.10 | +0.08 | +0.10 (−0.20 to +0.37) | +0.02 |
+| Trades a year | **11** | 36 | 42 | 38 | 14 |
+
+Reading: as the literature says (Hansen & Lunde 2005), the models where volatility rises more after
+drops (GJR, EGARCH) forecast volatility best, about 15% less error than EWMA. But the portfolio barely
+changes: worst drops and crisis losses are within a point of EWMA, the per-risk difference is far inside
+chance, and they trade 3-4 times as often (their targets differ from EWMA's by about 6 points on an
+average day). A better volatility forecast does not translate into a clearly better core here. The
+live core keeps the EWMA rule (simpler, no extra library in the bot, fewest trades).

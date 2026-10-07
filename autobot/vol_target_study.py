@@ -26,6 +26,11 @@ to 15%-45%; 'normal' = median of the method's own forecasts so far):
             close of day t is used for the decision at day t's close)
   har_vix   HAR with the VIX added as a fourth input
   trees_vix the trees with the VIX and its 5-day change added
+  garch     GARCH(1,1) with Student-t errors (Bollerslev 1986), refit yearly, next day's variance
+  gjr       GJR-GARCH(1,1,1): volatility rises more after drops (Glosten, Jagannathan & Runkle 1993)
+  egarch    EGARCH(1,1,1): the same asymmetry on a log scale (Nelson 1991)
+            (the `arch` package; parameters fitted on all earlier days, then held fixed and run
+            forward day by day, so each forecast uses returns up to that close only)
 Walk-forward: the first 750 trading days only train the models; all methods are scored on the same
 later days. Results are also shown scaled to the same average amount invested as hold_30.
 """
@@ -48,7 +53,7 @@ BAND, COST = 0.05, 0.0002
 DIV_YIELD = 0.014
 TRAIN, REFIT, H = 750, 250, 5
 LAMBDA = 0.94
-METHODS = ("hold_30", "ewma", "har", "trees", "vix", "har_vix", "trees_vix")
+METHODS = ("hold_30", "ewma", "har", "trees", "vix", "har_vix", "trees_vix", "garch", "gjr", "egarch")
 CRISES = {"2020 Covid": ("2020-02-19", "2020-03-23"), "2022 bear": ("2022-01-03", "2022-10-12"),
           "2025 tariff drop": ("2025-02-19", "2025-04-08")}
 
@@ -126,6 +131,27 @@ def har_forecast(df: pd.DataFrame, with_vix: bool = False) -> pd.Series:
         p = np.c_[np.ones(len(Xs)), Xs.fillna(0).to_numpy()] @ b
         return np.maximum(p, 1e-8)
     return walk(X, y, fp)
+
+
+def garch_forecast(df: pd.DataFrame, kind: str = "garch") -> pd.Series:
+    """Next day's variance (fraction^2) from a GARCH-family model, walk-forward: fitted every REFIT
+    days on all earlier returns, then run forward with those parameters held fixed."""
+    from arch import arch_model
+    r = (df.r * 100).dropna()                                      # % returns (the scale arch expects)
+    spec = {"garch": dict(vol="GARCH", p=1, o=0, q=1), "gjr": dict(vol="GARCH", p=1, o=1, q=1),
+            "egarch": dict(vol="EGARCH", p=1, o=1, q=1)}[kind]
+    out = pd.Series(np.nan, index=df.index)
+    pos = {t: i for i, t in enumerate(df.index)}
+    for a in range(TRAIN, len(df), REFIT):
+        b = min(a + REFIT, len(df))
+        fit_r = r[r.index < df.index[a]]
+        res = arch_model(fit_r, mean="Constant", dist="t", **spec).fit(disp="off", show_warning=False)
+        run_r = r[r.index < df.index[b - 1] + pd.Timedelta(days=1)]
+        fixed = arch_model(run_r, mean="Constant", dist="t", **spec).fix(res.params)
+        f = fixed.forecast(horizon=1, start=df.index[a], reindex=False).variance.iloc[:, 0]
+        f = f[(f.index >= df.index[a]) & (f.index <= df.index[b - 1])]
+        out.iloc[[pos[t] for t in f.index]] = f.to_numpy() / 1e4
+    return out
 
 
 def tree_forecast(df: pd.DataFrame, with_vix: bool = False) -> pd.Series:
@@ -218,7 +244,8 @@ def boot(a: pd.Series, b: pd.Series, n: int = 2000, block: int = 21, seed: int =
 def run(progress=print) -> Dict:
     df = load()
     var = {"ewma": ewma_var(df.r), "har": har_forecast(df), "trees": tree_forecast(df),
-           "vix": vix_var(df.vix), "har_vix": har_forecast(df, True), "trees_vix": tree_forecast(df, True)}
+           "vix": vix_var(df.vix), "har_vix": har_forecast(df, True), "trees_vix": tree_forecast(df, True),
+           "garch": garch_forecast(df, "garch"), "gjr": garch_forecast(df, "gjr"), "egarch": garch_forecast(df, "egarch")}
     fv = future_var(df.r)
     start = df.index[TRAIN]
     T = df.index >= start
