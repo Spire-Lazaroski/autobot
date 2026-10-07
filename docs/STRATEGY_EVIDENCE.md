@@ -388,3 +388,27 @@ changes: worst drops and crisis losses are within a point of EWMA, the per-risk 
 chance, and they trade 3-4 times as often (their targets differ from EWMA's by about 6 points on an
 average day). A better volatility forecast does not translate into a clearly better core here. The
 live core keeps the EWMA rule (simpler, no extra library in the bot, fewest trades).
+
+## 16. Pairs trading with cointegration (VECM / Johansen, 2026-10-07)
+
+`autobot/pairs_study.py`: each of the 55 pairs of our 11 symbols, 5-minute log prices, flat before the
+close. In each window a pair is traded only if, on the previous 60 sessions, the Johansen trace test finds
+a long-run relation at the 1% level (stricter than 5%: random unrelated prices passed the 5% test up to 17%
+of the time in a check) and its gaps halve in 30 minutes to 2 days. Traded on the next 20 sessions: enter
+when the gap reaches 1.5 / 2 / 2.5 of its usual size (buy the cheap one, short the dear one), out when it
+closes, at 4x, or before the close. After costs on both legs (borrowing costs for the short leg left out),
+the same 386 unseen sessions.
+
+| | Enter at 1.5x | 2x | 2.5x |
+|---|---|---|---|
+| Total (9 pairs ever selected, equal weight) | −2.0% | −1.4% | −1.6% |
+| vs cash, bps/day (95% range) | −0.5 (−1.3 to +0.3) | −0.4 (−1.2 to +0.5) | −0.4 (−1.2 to +0.4) |
+| Trades | 277 | 239 | 194 |
+| Pairs clearly positive / negative | 0 / 0 | 0 / 1 | 0 / 0 |
+
+Only 10 of 1,100 pair-windows (0.9%) passed the tests, about what chance alone gives at the 1% level:
+our 11 symbols do not hold steady long-run relations on 5-minute bars (gold-silver passed twice). The
+best pairs (META-NVDA +7%, AMD-MSFT +5%) were each selected once and are offset by NVDA-TSLA (−9%) and
+others. No result is clearly different from cash. Classic pairs trading needs many candidates (hundreds
+of stocks, often within one industry) and holds for days to weeks; neither fits a bot that is flat at
+every close with 11 symbols.
