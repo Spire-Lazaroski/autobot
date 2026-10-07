@@ -46,3 +46,20 @@ def test_target_and_forecasts_use_the_past_only():
 
 def test_vix_is_turned_into_a_daily_variance():
     assert abs(vt.vix_var(pd.Series([16.0])).iloc[0] - 0.16 ** 2 / 252) < 1e-12
+
+
+
+def test_garch_forecasts_use_the_past_only():
+    import pytest
+    pytest.importorskip("arch")
+    rng = np.random.default_rng(1)
+    idx = pd.bdate_range("2020-01-01", periods=1100)
+    r = pd.Series(rng.standard_t(5, len(idx)) * 0.008, index=idx)
+    df = pd.DataFrame({"px": 100 * (1 + r).cumprod(), "r": r, "tbill": 0.0, "vix": 20.0})
+    df2 = df.copy()
+    df2.iloc[900:, df2.columns.get_loc("r")] *= 5                        # a future shock
+    for kind in ("garch", "gjr", "egarch"):
+        g, g2 = vt.garch_forecast(df, kind), vt.garch_forecast(df2, kind)
+        assert g.iloc[:vt.TRAIN].isna().all() and g.iloc[vt.TRAIN:].notna().mean() > 0.99
+        pd.testing.assert_series_equal(g.iloc[:900], g2.iloc[:900])     # forecasts before day 900 don't see it
+        assert g2.iloc[901] > g.iloc[901]                                # and the day after the shock reacts

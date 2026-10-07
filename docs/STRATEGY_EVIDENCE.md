@@ -367,3 +367,102 @@ agree on 0.1% of bars) and does not carry an edge either. Adding shorts makes ev
 worse. Combining signals that each have no edge after costs gives a combined signal without one,
 in line with the forecast-combination literature (Bates & Granger 1969; Timmermann 2006) and the
 trees in section 11.
+
+## 15. GARCH-family volatility models for the core (2026-10-07)
+
+Added to the section 12 test (same data, days, rules and costs): GARCH(1,1), GJR-GARCH and EGARCH, all
+with Student-t errors (`arch` package), parameters refit yearly on earlier days and run forward day by day.
+
+| | EWMA (live) | GARCH | GJR-GARCH | EGARCH | VIX |
+|---|---|---|---|---|---|
+| Forecast error, next week's daily volatility | 0.400% | 0.367% | 0.344% | **0.338%** | 0.462% |
+| Correlation with what followed | 0.61 | 0.70 | **0.74** | 0.73 | 0.73 |
+| Worst drop of the account (same amount) | −6.9% | −6.3% | −6.4% | **−6.2%** | −7.8% |
+| Covid 2020 / 2022 bear / 2025 tariffs | −5.8 / −4.9 / −4.6 | −6.1 / −5.6 / −5.0 | −6.0 / **−4.5** / −4.8 | −5.8 / −4.7 / −4.9 | −6.5 / −6.0 / −4.7 |
+| Per risk vs plain 30% (95% range) | +0.08 (−0.19 to +0.31) | +0.10 | +0.08 | +0.10 (−0.20 to +0.37) | +0.02 |
+| Trades a year | **11** | 36 | 42 | 38 | 14 |
+
+Reading: as the literature says (Hansen & Lunde 2005), the models where volatility rises more after
+drops (GJR, EGARCH) forecast volatility best, about 15% less error than EWMA. But the portfolio barely
+changes: worst drops and crisis losses are within a point of EWMA, the per-risk difference is far inside
+chance, and they trade 3-4 times as often (their targets differ from EWMA's by about 6 points on an
+average day). A better volatility forecast does not translate into a clearly better core here. The
+live core keeps the EWMA rule (simpler, no extra library in the bot, fewest trades).
+
+## 16. Pairs trading with cointegration (VECM / Johansen, 2026-10-07)
+
+`autobot/pairs_study.py`: each of the 55 pairs of our 11 symbols, 5-minute log prices, flat before the
+close. In each window a pair is traded only if, on the previous 60 sessions, the Johansen trace test finds
+a long-run relation at the 1% level (stricter than 5%: random unrelated prices passed the 5% test up to 17%
+of the time in a check) and its gaps halve in 30 minutes to 2 days. Traded on the next 20 sessions: enter
+when the gap reaches 1.5 / 2 / 2.5 of its usual size (buy the cheap one, short the dear one), out when it
+closes, at 4x, or before the close. After costs on both legs (borrowing costs for the short leg left out),
+the same 386 unseen sessions.
+
+| | Enter at 1.5x | 2x | 2.5x |
+|---|---|---|---|
+| Total (9 pairs ever selected, equal weight) | −2.0% | −1.4% | −1.6% |
+| vs cash, bps/day (95% range) | −0.5 (−1.3 to +0.3) | −0.4 (−1.2 to +0.5) | −0.4 (−1.2 to +0.4) |
+| Trades | 277 | 239 | 194 |
+| Pairs clearly positive / negative | 0 / 0 | 0 / 1 | 0 / 0 |
+
+Only 10 of 1,100 pair-windows (0.9%) passed the tests, about what chance alone gives at the 1% level:
+our 11 symbols do not hold steady long-run relations on 5-minute bars (gold-silver passed twice). The
+best pairs (META-NVDA +7%, AMD-MSFT +5%) were each selected once and are offset by NVDA-TSLA (−9%) and
+others. No result is clearly different from cash. Classic pairs trading needs many candidates (hundreds
+of stocks, often within one industry) and holds for days to weeks; neither fits a bot that is flat at
+every close with 11 symbols.
+
+## 17. Structural VAR impulse responses: how news and market shocks travel (2026-10-07)
+
+Explanation, not a trading rule. `autobot/svar_study.py` (statsmodels VAR, recursive identification).
+5-minute bars, 7 symbols with enough news, about 38,000 bars each, 12 lags (1 hour); variables in order:
+news tone received in the bar, SPY's return, the stock's return, its jumpiness vs normal for that time.
+
+| Stock | News tone shock: price same bar (bps ± 95%) | after 2 hours | added after the first bar | News predicts jumpiness? (p) | Market shock (SPY +8.9 bps): stock same bar | added after the first bar |
+|---|---|---|---|---|---|---|
+| SPY | +0.03 ± 0.09 | −0.17 ± 0.34 | −0.2 | yes (0.03) | | |
+| QQQ | −0.08 ± 0.12 | −0.20 ± 0.42 | −0.1 | yes (0.001) | | |
+| AAPL | −0.10 ± 0.15 | −0.07 ± 0.56 | +0.0 | yes (<0.001) | +9.2 | −0.5 |
+| NVDA | −0.33 ± 0.23 | −1.03 ± 0.95 | −0.7 | no (0.26) | +16.3 | −0.5 |
+| TSLA | +0.43 ± 0.30 | +0.85 ± 1.13 | +0.4 | no (0.20) | +17.9 | +0.1 |
+| META | −0.13 ± 0.19 | +0.02 ± 0.78 | +0.1 | yes (<0.001) | +11.5 | +0.6 |
+| AMD | −0.18 ± 0.29 | −0.02 ± 1.07 | +0.2 | no (0.10) | +17.4 | +1.1 |
+
+News never predicts the direction (all p > 0.24) and ordering news after the return changes nothing.
+Reading: (1) a market move reaches each stock within the same 5-minute bar (in proportion to its beta) and
+less than ±1.1 bps follows afterwards, far below the ~4.5 bps a round trip costs; (2) news tone moves
+prices by fractions of a basis point, mostly within the first bar, never clearly in the next two hours;
+(3) news does predict jumpiness for SPY, QQQ, AAPL and META. Prices adjust within minutes; what is left
+afterwards is volatility, not direction. This is why every 5-minute direction test failed and the
+volatility forecasts worked.
+
+Daily, S&P 500 / VIX / yield curve (FRED, 2016-2026, 5 lags, in-sample): a 1-sd S&P rise (+1.1%) lowers the
+VIX by 1.5 points the same day, still −1.2 after 20 days; a VIX jump beyond what the same day's S&P move
+explains is followed by −22 bps (± 9) in the S&P over 5 days and −17 (± 7) over 20; a yield-curve shock
+has no lasting effect. The fear-shock result fits volatility targeting (less exposure when fear rises),
+though as an in-sample fit it is not a tested trading rule (the VIX did not improve the core in section 12).
+
+## 18. ARIMA and autocorrelation on 5-minute price changes (2026-10-07)
+
+`autobot/arima_study.py`: each symbol's 5-minute log-price changes inside the session (the overnight move
+left out), 2 years; ARMA walk-forward (order by AIC among 5 small models on the previous 60 sessions,
+refit every 20) on the same 386 unseen sessions; costs 2 bps per side.
+
+| | Result |
+|---|---|
+| Lag-1 autocorrelation | −0.020 to +0.009 (95% band ±0.010); 6 of 11 slightly negative beyond the band |
+| Ljung-Box over 12 lags | a pattern exists in all 11 (p from 0.0004 down to 10^-26) |
+| Variance ratio over 30 min / 1 hour | 0.84-0.99 / 0.77-0.97: moves partly reverse within the hour (stocks most, gold/silver/oil least) |
+| ARMA forecast vs a forecast of zero | worse in all 11 (out-of-sample R² −0.14% to −0.60%; one MSFT window blew up) |
+| Signs right | 47.8% to 50.3% |
+| Typical forecast size | 0.2 to 0.7 bps (a round trip costs about 4 bps) |
+| Trading the forecast's side every bar | before costs +12% (+3.1 bps/day, −2.9 to +9.1, not clear); after costs −99% |
+| Only when the forecast exceeds the round-trip cost | −15% (−4.2 bps/day, −6.8 to −1.6, clearly worse) |
+
+Reading: the price changes are not a pure random walk: there is a small, statistically real tendency to
+partly undo moves within the hour (variance ratios below 1), the pattern market-microstructure research
+attributes to prices bouncing between bid and ask and to noisy prints (the free IEX feed). But it is far too
+small and unstable to forecast: ARMA fitted on past days does worse than predicting zero, its forecasts are a
+fraction of a basis point, and trading them loses to costs whichever way. Same conclusion as sections 11
+and 17, from the classical side.
