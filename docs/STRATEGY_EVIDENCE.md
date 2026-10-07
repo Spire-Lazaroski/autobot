@@ -412,3 +412,33 @@ best pairs (META-NVDA +7%, AMD-MSFT +5%) were each selected once and are offset 
 others. No result is clearly different from cash. Classic pairs trading needs many candidates (hundreds
 of stocks, often within one industry) and holds for days to weeks; neither fits a bot that is flat at
 every close with 11 symbols.
+
+## 17. Structural VAR impulse responses: how news and market shocks travel (2026-10-07)
+
+Explanation, not a trading rule. `autobot/svar_study.py` (statsmodels VAR, recursive identification).
+5-minute bars, 7 symbols with enough news, about 38,000 bars each, 12 lags (1 hour); variables in order:
+news tone received in the bar, SPY's return, the stock's return, its jumpiness vs normal for that time.
+
+| Stock | News tone shock: price same bar (bps ± 95%) | after 2 hours | added after the first bar | News predicts jumpiness? (p) | Market shock (SPY +8.9 bps): stock same bar | added after the first bar |
+|---|---|---|---|---|---|---|
+| SPY | +0.03 ± 0.09 | −0.17 ± 0.34 | −0.2 | yes (0.03) | | |
+| QQQ | −0.08 ± 0.12 | −0.20 ± 0.42 | −0.1 | yes (0.001) | | |
+| AAPL | −0.10 ± 0.15 | −0.07 ± 0.56 | +0.0 | yes (<0.001) | +9.2 | −0.5 |
+| NVDA | −0.33 ± 0.23 | −1.03 ± 0.95 | −0.7 | no (0.26) | +16.3 | −0.5 |
+| TSLA | +0.43 ± 0.30 | +0.85 ± 1.13 | +0.4 | no (0.20) | +17.9 | +0.1 |
+| META | −0.13 ± 0.19 | +0.02 ± 0.78 | +0.1 | yes (<0.001) | +11.5 | +0.6 |
+| AMD | −0.18 ± 0.29 | −0.02 ± 1.07 | +0.2 | no (0.10) | +17.4 | +1.1 |
+
+News never predicts the direction (all p > 0.24) and ordering news after the return changes nothing.
+Reading: (1) a market move reaches each stock within the same 5-minute bar (in proportion to its beta) and
+less than ±1.1 bps follows afterwards, far below the ~4.5 bps a round trip costs; (2) news tone moves
+prices by fractions of a basis point, mostly within the first bar, never clearly in the next two hours;
+(3) news does predict jumpiness for SPY, QQQ, AAPL and META. Prices adjust within minutes; what is left
+afterwards is volatility, not direction. This is why every 5-minute direction test failed and the
+volatility forecasts worked.
+
+Daily, S&P 500 / VIX / yield curve (FRED, 2016-2026, 5 lags, in-sample): a 1-sd S&P rise (+1.1%) lowers the
+VIX by 1.5 points the same day, still −1.2 after 20 days; a VIX jump beyond what the same day's S&P move
+explains is followed by −22 bps (± 9) in the S&P over 5 days and −17 (± 7) over 20; a yield-curve shock
+has no lasting effect. The fear-shock result fits volatility targeting (less exposure when fear rises),
+though as an in-sample fit it is not a tested trading rule (the VIX did not improve the core in section 12).
