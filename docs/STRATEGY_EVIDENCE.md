@@ -592,3 +592,66 @@ filters mostly just hold less. They lower the worst drop and the crisis losses (
 only in proportion to the smaller amount held; at the same average amount none is clearly better than B, and the
 rate filter is slightly worse. The filters overlap with volatility targeting rather than adding to it. The live
 core stays on B alone.
+
+## 23. A new strategy from the differences: risk-managed relative strength (2026-10-07)
+
+What worked in sections 1-22 was long only, slow, comparing assets with each other and sizing by risk.
+`autobot/rs_study.py` combines them, fixed before the run: each month hold the 3 assets with the best return
+over months t-12..t-1 (plain), only if each is above its own 10-month average, else cash (dual), and size each
+by 12% target volatility / its own 12-month volatility, at most a third each (full). Costs 0.1% per switch
+(index data) or 2 bps (ETFs). Data downloaded with the user's OK: Kenneth French's 10 industry portfolios and
+market / T-bill returns (monthly, 1926-2026); sector ETFs from Alpaca (2016-2026).
+
+**French 10 industries, July 1927 to August 2026 (1,190 months):**
+
+| | Per year | Volatility | Worst drop | Sharpe | Invested | vs market at the market's volatility (% a year, 95%) |
+|---|---|---|---|---|---|---|
+| Market | +10.3% | 18.4% | −84% | 0.45 | 100% | |
+| Equal mix of the 10 | +11.0% | 17.9% | −82% | 0.49 | 100% | |
+| Market, volatility-sized | +9.2% | 12.5% | −46% | 0.51 | 81% | +1.2 (−0.4 to +2.7) |
+| Plain top 3 | **+12.9%** | 18.4% | −74% | 0.58 | 100% | **+2.4 (+0.9 to +3.9)** |
+| Dual | +11.8% | 15.0% | −65% | 0.61 | 82% | +2.9 (+0.2 to +5.6) |
+| **Full (dual + volatility sizing)** | +10.0% | **9.8%** | **−28%** | **0.69** | 61% | **+4.5 (+1.6 to +7.5)** |
+
+By period, full vs market: 1927-49 +8.0% vs +5.7% (drop −28% vs −84%); 1950-98 +12.3% vs +13.2% (−18% vs −47%);
+1999-2026, after the industry-momentum paper: +7.7% vs +9.1% (−13% vs −50%), at the same volatility +2.6% a year
+(−2.2 to +7.4, not clear). Plain top 3 after 1999: +11.5% vs +9.1%.
+
+**Sector ETFs, 2017-2026 (118 months):** market (SPY) +15.2% a year (drop −24%); plain top 3 +14.7% (−16%); dual
++12.1% (−11%); full +8.0% (−10%). No version beats SPY, even at the same volatility (full −3.3% a year, −10.2 to +3.7):
+a decade led by a few mega-cap tech stocks, which a sector rotation dilutes.
+
+Reading: over a century the combination works as the research says (Moskowitz & Grinblatt 1999; Barroso &
+Santa-Clara 2015): about the market's return with half its volatility and a third of its worst drop, clearly
+better per unit of risk. Since publication the edge is smaller and not clear, and in the last 10 years of sector
+ETFs it did not beat simply holding SPY. It is the strongest candidate found so far for a slow, long-only sleeve,
+but not proven for the near future.
+
+## 24. Combining and contrasting: industry rotation variants and mixes (2026-10-07)
+
+Follow-up to section 23 in `autobot/rs_study.py` (`combine`): selection variants (12-month vs an average rank of
+3-, 6- and 12-month returns; top 3 vs top 5; all with the trend filter and volatility sizing) and monthly-rebalanced
+mixes with the market. Same data and costs.
+
+| French 10 industries, 1927-2026 | Per year | Volatility | Worst drop | Sharpe | vs market at its volatility (95%) |
+|---|---|---|---|---|---|
+| Market | +10.3% | 18.4% | −84% | 0.45 | |
+| Market, volatility-sized (like the core's B) | +9.2% | 12.5% | −46% | 0.51 | +1.2 (−0.4 to +2.7) |
+| Rotation, 12 months, top 3 (section 23) | +10.0% | 9.8% | −28% | 0.69 | +4.5 (+1.6 to +7.5) |
+| Rotation, 12 months, top 5 | +9.7% | 9.0% | −26% | **0.71** | **+4.9 (+2.1 to +7.8)** |
+| Rotation, 3+6+12 months, top 3 / top 5 | +9.5% / +9.4% | 10.0% / 9.1% | −30% / −26% | 0.63 / 0.67 | +3.4 / +4.2 |
+| Half market + half rotation | +10.1% | 13.1% | −64% | 0.55 | +2.0 (+0.9 to +3.0) |
+| Half B-like market + half rotation | +9.4% | 10.7% | −37% | 0.59 | +2.7 (+0.7 to +4.6) |
+
+After 1999: market +9.1% (drop −50%), rotation top 3 +7.7% (−13%), half market + half rotation +8.3% (−33%).
+The rotation moves with the market (correlation 0.68), but in the market's worst 10% of months it lost 3.2% on
+average against the market's 9.0%: its value is that it steps aside in bad stretches.
+
+Sector ETFs 2017-2026: nothing beats SPY (+15.2%, drop −24%); half SPY + half rotation +10.2% (−17%); the
+3+6+12-month ranking was clearly worse than SPY at the same volatility (−8.2% a year).
+
+Reading: dynamically including and excluding industries is the strongest component over a century, mostly as
+protection (a third of the market's worst drop). Averaging several lookbacks did not help; holding 5 instead of 3
+was marginally better. Mixing it with the market gives in-between results: half market + half rotation kept
+almost the market's return over 100 years with clearly smaller drops. But in the last decade every version and mix
+trailed simply holding SPY, by 5 to 7 points a year for the rotation alone and 5 points for the half-half mix.
