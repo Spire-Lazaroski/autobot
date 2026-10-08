@@ -31,6 +31,26 @@ live:
       max_pct: 45
       lambda: 0.94
       normal_years: 5
+  rotation:
+    enabled: true
+    allocation_pct: 40
+    top_n: 5
+    lookback_months: 12
+    trend_months: 10
+    vol_target_pct: 12
+    rebalance_band_pct: 1
+    symbols:
+    - XLK
+    - XLV
+    - XLE
+    - XLF
+    - XLI
+    - XLY
+    - XLP
+    - XLU
+    - XLB
+    - XLRE
+    - XLC
   risk:
     max_daily_loss_pct: 2.0
     max_position_usd: 10000
