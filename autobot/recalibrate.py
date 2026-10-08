@@ -460,7 +460,9 @@ def run(as_of: Optional[date] = None, cfg: Optional[Dict] = None, fetch: Optiona
     listed = list(symbols or (uni["selected"] if uni else []))
     core_cfg = (cfg.get("live") or {}).get("core") or {}
     core_sym = core_cfg.get("symbol", "VOO") if core_cfg.get("enabled") else None
-    todo = [s for s in listed if (take or s not in hand_of) and s != core_sym]   # the core holding is never a job
+    rot_cfg = (cfg.get("live") or {}).get("rotation") or {}
+    rot_syms = set(rot_cfg.get("symbols") or []) if rot_cfg.get("enabled") else set()
+    todo = [s for s in listed if (take or s not in hand_of) and s != core_sym and s not in rot_syms]   # long-term holdings are never jobs
     hand = set(hand_of) if not take else set()
     removed = [s for s in auto if s not in listed and not symbols]
     fetch = fetch or (lambda syms, tf, days: fetch_bars(syms, tf, days, rth_only=True))
