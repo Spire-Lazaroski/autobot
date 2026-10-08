@@ -78,18 +78,19 @@ live:
   - name: auto_TSLA
     strategy: regime_switch
     params:
-      trend_strategy: rsi_reversion
-      range_strategy: vwap_reversion
+      trend_strategy: bollinger_reversion
+      range_strategy: rsi_reversion
       high_vol_strategy: flat
       confirm_bars: 3
       candidate_params:
+        bollinger_reversion:
+          period: 20
+          num_std: 1.5
         rsi_reversion:
           period: 7
           oversold: 30
           overbought: 70
           exit_level: 60
-        vwap_reversion:
-          band_pct: 0.5
     symbols:
     - TSLA
     allocation_pct: 10
@@ -123,10 +124,12 @@ live:
     allocation_pct: 10
     enabled: true
   - name: auto_SPY
-    strategy: donchian_breakout
+    strategy: rsi_reversion
     params:
-      entry: 40
-      exit: 20
+      period: 14
+      oversold: 10
+      overbought: 70
+      exit_level: 60
     symbols:
     - SPY
     allocation_pct: 10
@@ -134,19 +137,19 @@ live:
   - name: auto_QQQ
     strategy: regime_switch
     params:
-      trend_strategy: noise_area
-      range_strategy: rsi_reversion
+      trend_strategy: rsi_reversion
+      range_strategy: momentum
       high_vol_strategy: flat
       confirm_bars: 3
       candidate_params:
-        noise_area:
-          lookback: 14
-          band_mult: 1.2
         rsi_reversion:
           period: 14
           oversold: 10
           overbought: 70
           exit_level: 60
+        momentum:
+          lookback: 10
+          threshold: 0.5
     symbols:
     - QQQ
     allocation_pct: 10
@@ -230,6 +233,23 @@ live:
       exit_level: 60
     symbols:
     - COST
+    allocation_pct: 10
+    enabled: true
+  - name: auto_META
+    strategy: regime_switch
+    params:
+      trend_strategy: bollinger_reversion
+      range_strategy: vwap_reversion
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        bollinger_reversion:
+          period: 10
+          num_std: 1.5
+        vwap_reversion:
+          band_pct: 0.5
+    symbols:
+    - META
     allocation_pct: 10
     enabled: true
 news:
