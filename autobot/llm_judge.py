@@ -68,7 +68,7 @@ def settings(cfg: Optional[Dict]) -> Dict:
 
 # ----------------------------------------------------------------- which records are signals
 def is_signal(rec: Dict) -> bool:
-    return (rec.get("type") == "decision" and rec.get("action") in ("buy", "sell") and rec.get("job") != "core"
+    return (rec.get("type") == "decision" and rec.get("action") in ("buy", "sell") and rec.get("job") not in ("core", "rotation")
             and float(rec.get("qty") or 0) > 0)
 
 
@@ -287,7 +287,7 @@ def outcomes(recs: List[Dict]) -> Dict[str, Dict]:
     out: Dict[str, Dict] = {}
     open_: Dict[str, Dict] = {}
     for r in recs:
-        if r.get("type") != "decision" or r.get("job") == "core":
+        if r.get("type") != "decision" or r.get("job") in ("core", "rotation"):
             continue
         sym = r.get("symbol")
         px = float(r.get("fill_price") or r.get("price") or 0)
@@ -338,7 +338,7 @@ def jobs_vs_hold(recs: List[Dict], days: List[str], fills=None) -> List[Dict]:
     """Per job and day, from the broker's actual fills: the strategy's dollars (realized, plus any
     position left open valued at the 15:55 close-out) against simply buying at the open and
     holding to the close-out with the largest position the job held that day."""
-    job_of = {r["symbol"]: r["job"] for r in recs if r.get("type") == "decision" and r.get("job") and r.get("job") != "core"}
+    job_of = {r["symbol"]: r["job"] for r in recs if r.get("type") == "decision" and r.get("job") and r.get("job") not in ("core", "rotation")}
     fills = fills or broker_fills
     rows = []
     for day in days:

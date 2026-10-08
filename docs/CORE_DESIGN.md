@@ -105,3 +105,18 @@ day's target = 30% x normal / today's volatility, kept between 15% and 45%. The 
 is unchanged. Trading jobs are sized into what the day's target leaves under risk.max_gross_pct.
 If the daily data can't be read, the plain 30% applies (logged). The Live page shows the target
 and the reason; each rebalance carries the reason in the decision log and the daily report.
+
+## Rotation sleeve (option 3, built 2026-10-09)
+
+Evidence: `docs/STRATEGY_EVIDENCE.md` sections 23-24. Next to the core, 40% of the account rotates monthly among the
+11 sector funds (`autobot/rotation.py`, config `live.rotation`):
+
+    rotation: {enabled: true, allocation_pct: 40, top_n: 5, lookback_months: 12, trend_months: 10,
+               vol_target_pct: 12, rebalance_band_pct: 1, symbols: [XLK, XLV, XLE, XLF, XLI, XLY, XLP, XLU, XLB, XLRE, XLC]}
+
+At the first open tick of each month (and at once after a start or switch-on) the bot ranks the funds by the return
+from 12 month-ends ago to 1 month-end ago, keeps the top 5 that are above their 10-month average, and sizes each at
+8% x min(1, 12% / its yearly volatility); the rest of the sleeve stays in cash. It trades a fund only beyond a
+1-point band. Like the core it is kept overnight and by Stop (unless "also sell the long-term holdings" is ticked),
+and the daily loss limit and profit lock ignore it; the trading jobs are sized into what the core's day target and
+the sleeve leave under risk.max_gross_pct (option 3: core about 30%, sleeve 40%, jobs about 30%, kept as a live check).

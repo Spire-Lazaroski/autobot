@@ -26,6 +26,7 @@ interface Snapshot {
     jobs?: Row[]; config_changes?: { time: string; change: string }[];
     symbols: Record<string, SymView>;
     core?: CoreView;
+    rotation?: RotationView;
   };
   trades: Row[];
   log: string[];
@@ -44,6 +45,14 @@ interface Trigger {
   source?: "strategy" | "trail" | "re-entry" | "take-profit" | "stop";   // with an exit layer: which rule the level comes from
 }
 interface Peak { peak: number; gave_back_pct: number; since: string }
+/** The rotation sleeve (autobot/rotation.py, config live.rotation): monthly sector funds, held long term. */
+interface RotationView {
+  enabled: boolean; allocation_pct: number; top_n: number; symbols: string[]; held: Record<string, number>;
+  target?: { as_of: string | null; invested_pct?: number; "invested_%": number; weights: Record<string, number>; reasons: Record<string, string>;
+    ranking: { rank: number; symbol: string; "momentum_%": number; above_trend: boolean; "volatility_%": number }[] };
+  last_actions?: { time: string; symbol: string; qty: number; reason: string }[];
+}
+
 /** The core holding (autobot/core.py, config live.core): held long term, outside the trading jobs. */
 interface CoreView {
   enabled: boolean; symbol: string; allocation_pct: number; rebalance_band_pct: number; qty: number;
@@ -142,6 +151,8 @@ export function Live() {
 
   const bot = d?.bot;
   const st = d?.status;
+  const longTerm = [st?.core?.enabled ? `${st.core.symbol} (core, ${fmt(st.core.qty, 0)} shares)` : "",
+    ...Object.entries(st?.rotation?.enabled ? st.rotation.held : {}).map(([k, v]) => `${k} ${fmt(v, 0)}`)].filter(Boolean).join(", ");
   const alive = !!bot && (bot.running || !!bot.unresponsive);
   const state = !bot ? "…" : bot.stop_requested && alive ? "stopping" : bot.unresponsive ? "unresponsive"
     : bot.running ? (st?.halted ? "halted" : "running") : "stopped";
@@ -196,6 +207,7 @@ export function Live() {
 
           <div className="grid grid-cols-1 gap-3">{/* one table per row: side by side they needed a sideways scroll */}
             <CorePanel core={st?.core} positions={d.positions} />
+            <RotationPanel rot={st?.rotation} />
             <Panel title="Positions">
               {d.positions.length ? (
                 <SortTable rows={d.positions} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }}
@@ -300,11 +312,11 @@ export function Live() {
           onCancel={() => { setConfirmStop(false); setSellCore(false); }} onConfirm={() => call("/live/stop", { confirm: true, include_core: sellCore })}>
           The bot will <b className="text-fg">close all open positions in the paper account</b> (market orders, open orders cancelled)
           and exit within a few seconds. This includes positions it didn't open
-          {st?.core?.enabled ? <>, <b className="text-fg">except the core holding ({st.core.symbol})</b> unless you tick the box below.</> : "."}
-          {st?.core?.enabled && (
+          {longTerm ? <>, <b className="text-fg">except the long-term holdings ({longTerm})</b> unless you tick the box below.</> : "."}
+          {longTerm && (
             <label className="flex items-center gap-2 mt-3 text-fg">
               <input type="checkbox" checked={sellCore} onChange={(e) => setSellCore(e.target.checked)} />
-              Also sell the core holding ({st.core.symbol}, {fmt(st.core.qty, 0)} shares)
+              Also sell the long-term holdings ({longTerm})
             </label>)}
         </Confirm>
       )}
@@ -339,6 +351,33 @@ function CorePanel({ core, positions }: { core?: CoreView; positions: Row[] }) {
         {core.last_action ? `Last action ${ts(core.last_action.time)}: ${core.last_action.reason}. ` : "No core order since the bot started. "}
         Held long term: not sold before the close or by the daily loss limit or profit lock, which count the trading jobs only.
         Checked once a day at the first tick after the open.</p>
+    </Panel>);
+}
+
+/** The rotation sleeve: this month's ranking, what it holds and why. */
+function RotationPanel({ rot }: { rot?: RotationView }) {
+  if (!rot || !rot.enabled) return null;
+  const t = rot.target;
+  return (
+    <Panel title={`Rotation sleeve · ${rot.allocation_pct}% of the account, top ${rot.top_n} sector funds monthly`}>
+      {!t ? <p className="text-muted text-[12px]">Decides at the first tick after the next open (then once a month).</p> : (
+        <>
+          <p className="text-[12px] mb-2">From month-end closes up to {t.as_of}: holding {Object.keys(t.weights).length
+            ? Object.entries(t.weights).map(([k, v]) => `${k} ${fmt(v, 1)}%`).join(", ") : "nothing (all in cash)"}
+            {" "}= {fmt(t["invested_%"], 1)}% of the account; the rest of the sleeve stays in cash.</p>
+          <table className="w-full text-[12px]">
+            <thead><tr className="text-muted text-left"><th>Rank</th><th>Fund</th><th className="text-right">12-month return</th>
+              <th>Above its 10-month average</th><th className="text-right">Volatility</th><th className="text-right">Held</th></tr></thead>
+            <tbody>{t.ranking.map((r) => (
+              <tr key={r.symbol} className={t.weights[r.symbol] ? "font-semibold" : "text-muted"}>
+                <td>{r.rank}</td><td>{r.symbol}</td><td className="num text-right">{fmt(r["momentum_%"], 1)}%</td>
+                <td>{r.above_trend ? "yes" : "no"}</td><td className="num text-right">{fmt(r["volatility_%"], 0)}%</td>
+                <td className="num text-right">{rot.held[r.symbol] ? fmt(rot.held[r.symbol], 0) : "–"}</td></tr>))}</tbody>
+          </table>
+        </>)}
+      <p className="text-[11.5px] text-muted mt-2">
+        {rot.last_actions?.length ? `Last orders: ${rot.last_actions.map((a) => `${a.qty > 0 ? "buy" : "sell"} ${Math.abs(a.qty)} ${a.symbol}`).join(", ")}. ` : ""}
+        Held long term like the core: not sold before the close or by the daily loss limit or profit lock. Checked at the first tick of each month.</p>
     </Panel>);
 }
 

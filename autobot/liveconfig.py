@@ -89,8 +89,17 @@ def validate_live(live: Dict) -> List[str]:
             seen[s] = name
     from .trade_rules import validate as validate_rules
     errs += validate_rules(live.get("trade_rules"))
-    from .core import validate as validate_core
+    from .core import validate as validate_core, settings as core_settings, vol_settings
     errs += validate_core(live.get("core"), seen, float(risk.get("max_gross_pct", 100)))
+    from .rotation import validate as validate_rotation
+    cs = core_settings(live.get("core"))
+    if cs.get("enabled"):
+        v = vol_settings(live.get("core"))
+        core_max = float(v["max_pct"]) if v.get("enabled") else float(cs["allocation_pct"])
+    else:
+        core_max = 0.0
+    errs += validate_rotation(live.get("rotation"), seen, cs["symbol"] if cs.get("enabled") else None, core_max,
+                              float(risk.get("max_gross_pct", 100)))
     return errs
 
 

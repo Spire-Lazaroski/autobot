@@ -57,7 +57,7 @@ import pandas as pd
 import yaml
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, wait_for_network, with_timeout
-from autobot import core, exits, sizing, trade_rules, trigger
+from autobot import core, exits, rotation, sizing, trade_rules, trigger
 from autobot.exits import exit_view_of
 from autobot.recalibrate import flat_before_close
 from autobot.decisions import Context, Recorder
@@ -84,8 +84,16 @@ def stop_includes_core() -> bool:
         return False
 
 
-def flatten(tc, keep: str | None):
-    """Close every position, or every position except `keep` (the core holding)."""
+def _keep_set(keep) -> set:
+    if not keep:
+        return set()
+    return {keep} if isinstance(keep, str) else set(keep)
+
+
+def flatten(tc, keep):
+    """Close every position, or every position except those in `keep` (the long-term holdings: the core
+    and the rotation sleeve; a symbol or a collection of symbols)."""
+    keep = _keep_set(keep)
     if not keep:
         tc.close_all_positions(cancel_orders=True)
         return
@@ -94,18 +102,17 @@ def flatten(tc, keep: str | None):
     except Exception as e:  # noqa: BLE001  closing the positions matters more than the orders
         log.error("cancel orders failed: %s", e)
     for p in tc.get_all_positions():
-        if p.symbol != keep:
+        if p.symbol not in keep:
             tc.close_position(p.symbol)
 
 
-def core_intraday_pl(tc, sym: str | None) -> float:
-    """The core position's P&L today (Alpaca's unrealized_intraday_pl), 0 without a core."""
-    if not sym:
+def core_intraday_pl(tc, sym) -> float:
+    """The long-term holdings' P&L today (Alpaca's unrealized_intraday_pl), 0 without any; `sym` is a
+    symbol or a collection of symbols."""
+    syms = _keep_set(sym)
+    if not syms:
         return 0.0
-    for p in tc.get_all_positions():
-        if p.symbol == sym:
-            return float(getattr(p, "unrealized_intraday_pl", 0) or 0)
-    return 0.0
+    return sum(float(getattr(p, "unrealized_intraday_pl", 0) or 0) for p in tc.get_all_positions() if p.symbol in syms)
 
 
 def setup_logging():
@@ -134,10 +141,11 @@ def config_diff(old: dict, new: dict) -> list[str]:
             out.append(f"risk.{k}: {a} -> {b}")
     if (old.get("trade_rules") or {}) != (new.get("trade_rules") or {}):
         out.append(f"trade_rules: {old.get('trade_rules')} -> {new.get('trade_rules')}")
-    for k in sorted(set(old.get("core") or {}) | set(new.get("core") or {})):
-        a, b = (old.get("core") or {}).get(k), (new.get("core") or {}).get(k)
-        if a != b:
-            out.append(f"core.{k}: {a} -> {b}")
+    for sect in ("core", "rotation"):
+        for k in sorted(set(old.get(sect) or {}) | set(new.get(sect) or {})):
+            a, b = (old.get(sect) or {}).get(k), (new.get(sect) or {}).get(k)
+            if a != b:
+                out.append(f"{sect}.{k}: {a} -> {b}")
     oj = {j["name"]: j for j in old.get("jobs", [])}
     nj = {j["name"]: j for j in new.get("jobs", [])}
     for name in nj.keys() - oj.keys():
@@ -187,6 +195,9 @@ class Bot:
         self.day_peak_pnl = None   # profit lock: the day's best P&L % once armed
         self.core_day = None       # core holding: the trading day it was last checked
         self.core_vol = None       # core volatility target for today (autobot.core.vol_target), or None
+        self.rot_month = None      # rotation sleeve: the month it last decided (YYYY-MM)
+        self.rot_target = None     # rotation sleeve: this month's targets (autobot.rotation.targets)
+        self.rot_last = None       # rotation sleeve: the last orders it sent
         log.info("Paper account %s | equity $%s | jobs: %s", acct.account_number, acct.equity,
                  ", ".join(f"{j['name']}({j['strategy']}:{'/'.join(j['symbols'])})" for j in self.jobs))
 
@@ -204,6 +215,7 @@ class Bot:
         self.risk = live["risk"]
         self.jobs = enabled_jobs(live)
         self.core = core.settings(live.get("core"))
+        self.rotation = rotation.settings(live.get("rotation"))
         self.rules = live.get("trade_rules") or {}
 
     # ------------------------------------------------------------ hot reload
@@ -303,10 +315,19 @@ class Bot:
     def core_symbol(self) -> str | None:
         return self.core["symbol"] if self.core.get("enabled") else None
 
+    def long_term_symbols(self) -> set:
+        """Held long term, outside the trading jobs: the core and the rotation sleeve's funds."""
+        out = {self.core["symbol"]} if self.core.get("enabled") else set()
+        if self.rotation.get("enabled"):
+            out |= set(self.rotation["symbols"])
+        return out
+
     def flatten_all(self, why: str, include_core: bool = False):
-        keep = None if include_core else self.core_symbol()
-        log.warning("FLATTEN ALL: %s%s", why, f" (keeping the core holding {keep})" if keep else "")
-        self._safe(self.rec.event, "flatten", f"The bot closed every position{f' except the core holding {keep}' if keep else ''}: {why}.")
+        keep = set() if include_core else self.long_term_symbols()
+        held_keep = sorted(keep & set(self.positions())) if keep else []
+        kept = f" (keeping the long-term holdings {', '.join(held_keep)})" if held_keep else ""
+        log.warning("FLATTEN ALL: %s%s", why, kept)
+        self._safe(self.rec.event, "flatten", f"The bot closed every position{f' except the long-term holdings ' + ', '.join(held_keep) if held_keep else ''}: {why}.")
         flatten(self.tc, keep)
 
     def trading_pnl_pct(self, tc=None) -> float:
@@ -314,7 +335,7 @@ class Bot:
         (the daily loss limit and the profit lock apply to the trading jobs only)."""
         tc = tc or self.tc
         eq = float(tc.get_account().equity)
-        return (eq - core_intraday_pl(tc, self.core_symbol()) - self.day_start_equity) / self.day_start_equity * 100
+        return (eq - core_intraday_pl(tc, self.long_term_symbols()) - self.day_start_equity) / self.day_start_equity * 100
 
     # ------------------------------------------------------------ core
     def recent_bars(self, sym: str, job: dict) -> pd.DataFrame:
@@ -408,6 +429,8 @@ class Bot:
             atr = self._atr
         reserved = (float((self.core_vol or {}).get("target_pct") or self.core["allocation_pct"])
                     if self.core.get("enabled") else 0.0)
+        if self.rotation.get("enabled"):
+            reserved += float(self.rotation["allocation_pct"])
         return sizing.budgets(equity, syms, self.risk, atr, alloc, self.buckets, reserved)
 
     def near_close(self, clock) -> bool:
@@ -436,6 +459,7 @@ class Bot:
                                  round(self.day_peak_pnl * (1 - float(pl.get("giveback_pct", 50)) / 100), 3)}
         pending = []  # decision records, written after the display-only trigger is known
         self._safe(self.core_step, status, equity, held, clock)
+        self._safe(self.rotation_step, status, equity, held, clock)
         try:
             for job in self.jobs:
                 spec = STRATEGIES[job["strategy"]]
@@ -537,6 +561,53 @@ class Bot:
             log.warning("CORE volatility target unavailable (too little daily history); using %s%%", self.core["allocation_pct"])
         return out
 
+    def rotation_step(self, status: dict, equity: float, held: dict, clock):
+        """The rotation sleeve (autobot.rotation): this month's sector funds, decided once a month at the
+        first open tick (and at once after a start or a switch-on), traded beyond the band only. Kept
+        overnight like the core."""
+        c = self.rotation
+        view = {"enabled": bool(c.get("enabled")), "allocation_pct": c["allocation_pct"], "top_n": c["top_n"],
+                "symbols": c["symbols"], "held": {s: held.get(s, 0.0) for s in c["symbols"] if held.get(s)}}
+        if self.rot_target:
+            view["target"] = self.rot_target
+        if self.rot_last:
+            view["last_actions"] = self.rot_last
+        status["rotation"] = view
+        if not c.get("enabled") or not clock.is_open:
+            return
+        today = self._today(clock)
+        month = today[:7]
+        if self.rot_month == month:
+            return
+        self._progress = time.time()
+        start = datetime.now(timezone.utc) - timedelta(days=int(c["lookback_months"]) * 31 + 120)
+        daily = {}
+        for s in c["symbols"]:
+            try:
+                daily[s] = _download(s, "1Day", start, None, "iex").close
+            except Exception as e:  # noqa: BLE001  a fund without data is left out this month
+                log.warning("ROTATION no daily data for %s: %s", s, e)
+        tgt = rotation.targets(daily, c, today)
+        prices = {}
+        for s in set(c["symbols"]) & (set(tgt["weights"]) | {k for k, v in held.items() if v}):
+            b = _download(s, self.tf, datetime.now(timezone.utc) - timedelta(days=5), None, "iex")
+            prices[s] = float(b.close.iloc[-1])
+        acts = []
+        for o in rotation.orders({s: held.get(s, 0.0) for s in c["symbols"]}, prices, equity, tgt, c):
+            res = self.submit(o["symbol"], o["qty"], o["reason"], prices[o["symbol"]], "rotation")
+            acts.append({"time": datetime.now(timezone.utc).isoformat(), **o, "order_id": str(res.id) if res is not None else None})
+            self._safe(self.rec.write, {"type": "decision", "job": "rotation", "symbol": o["symbol"], "strategy": "rotation sleeve",
+                                        "bar_time": datetime.now(timezone.utc).isoformat(), "action": "buy" if o["qty"] > 0 else "sell",
+                                        "qty": abs(o["qty"]), "price": prices[o["symbol"]], "reason": o["reason"] + "."})
+        log.info("ROTATION %s: holding %s (%.1f%% of the account), %d orders", tgt["as_of"],
+                 ", ".join(f"{k} {v:.1f}%" for k, v in tgt["weights"].items()) or "nothing (all in cash)", tgt["invested_%"], len(acts))
+        self.rot_target, self.rot_month = tgt, month
+        if acts:
+            self.rot_last = acts
+        view["target"] = tgt
+        if acts:
+            view["last_actions"] = acts
+
     def core_step(self, status: dict, equity: float, held: dict, clock):
         """The core holding (autobot.core): bought up to its share, rebalanced only beyond the
         band, once per trading day at the first open tick. Never part of the jobs loop, so the
@@ -636,7 +707,7 @@ class Bot:
         if STOP_FILE.exists() and time.time() - STOP_FILE.stat().st_mtime > 10:
             log.warning("WATCHDOG: STOP file not handled by the main loop; flattening and exiting")
             state["wtc"] = state["wtc"] or self._watch_tc_factory()
-            flatten(state["wtc"], None if stop_includes_core() else self.core_symbol())
+            flatten(state["wtc"], None if stop_includes_core() else self.long_term_symbols())
             STOP_FILE.unlink(missing_ok=True)
             release_lock()
             self._exit(0)
@@ -647,12 +718,12 @@ class Bot:
             dd = self.trading_pnl_pct(state["wtc"])
             if dd <= -abs(self.risk["max_daily_loss_pct"]):
                 log.critical("WATCHDOG: main loop stuck and daily loss %.2f%% hit the limit; flattening", dd)
-                flatten(state["wtc"], self.core_symbol())
+                flatten(state["wtc"], self.long_term_symbols())
                 self.halted = True
             elif self.profit_lock_hit(dd):
                 log.critical("WATCHDOG: main loop stuck and the profit lock triggered (day P&L %.2f%%, peak %.2f%%); flattening",
                              dd, self.day_peak_pnl)
-                flatten(state["wtc"], self.core_symbol())
+                flatten(state["wtc"], self.long_term_symbols())
                 self._safe(self.rec.event, "profit_lock", f"Profit lock (watchdog): the day's gain fell from {self.day_peak_pnl:.2f}% "
                                                           f"to {dd:.2f}% while the bot was stuck; the watchdog sold everything.")
                 self.halted = True
