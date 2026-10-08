@@ -655,3 +655,26 @@ protection (a third of the market's worst drop). Averaging several lookbacks did
 was marginally better. Mixing it with the market gives in-between results: half market + half rotation kept
 almost the market's return over 100 years with clearly smaller drops. But in the last decade every version and mix
 trailed simply holding SPY, by 5 to 7 points a year for the rotation alone and 5 points for the half-half mix.
+
+## 25. The AI judges: Opus 5.5 and Haiku 4.5 vs the bot (2026-10-08)
+
+`python -m autobot.llm_judge --compare` (neutral prompt v2; 3 replayed days 1, 2 and 5 October plus 2 live shadow days
+6 and 7 October; result saved as `data/ml/judge_compare_2026-10-08.json`). The judges never placed orders; each of
+the bot's 84 trading-job signals was scored by what following the judge would have changed.
+
+| | Opus 5.5 (effort low) | Haiku 4.5 |
+|---|---|---|
+| Signals judged / skipped | 84 / 69% | 84 / 89% |
+| Entries taken: average result | 4 taken, −0.10% | 3 taken, −0.54% |
+| Entries skipped: average result (what was missed) | 38 skipped, +0.12% (14 would have lost) | 39 skipped, +0.15% (15 would have lost) |
+| Exits skipped (held instead to the close-out): average gain | 12, +0.24% | 28, +0.28% |
+| **Dollars vs the bot** | **−$129** | **+$143** |
+| API cost for the 5 days | $0.52 | $0.12 |
+
+They agreed on 73% of signals. Neither picked entries well: the few entries they took did worse than the many
+they skipped. Haiku's gain came almost entirely from refusing to sell (holding to the close), which paid on
+these mostly rising days; that is the market's drift, not judgement. 42 entries and 34 exits over 5 days are far
+too few to separate skill from luck.
+
+Strategy vs holding for the same jobs and days (from broker fills): the trading jobs made +$7 over 25 job-days;
+buying the same symbols at the open and holding to the close-out would have made +$705.
