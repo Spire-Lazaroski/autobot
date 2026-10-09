@@ -32,6 +32,8 @@ interface RotationLike {
 }
 
 const pct = (v: number, eq: number) => (eq > 0 ? (v / eq) * 100 : 0);
+/** Unix seconds as a New York wall-clock string, so chart axes show New York time like the rest of the page. */
+const nyStamp = (t: number) => new Date(t * 1000).toLocaleString("sv-SE", { timeZone: "America/New_York" });
 const GREYS = { core: chart.ink, rotInv: chart.soft, rotCash: chart.faint, jobs: brand.amber };   // theme.ts only
 
 /** Where the money is now, against the targets. */
@@ -123,15 +125,15 @@ export function JobsCard({ split, jobs, positions, jvh, rules }: { split?: Split
 /** Today's account value, with the long-term holdings' value and fills as markers. */
 export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: number; side: string }[] }) {
   if (rows.length < 2) return <Panel title="Account value today"><p className="text-muted text-[12px]">Builds up while the market is open (one point per bar).</p></Panel>;
-  const x = rows.map((r) => new Date(r.t * 1000));
+  const x = rows.map((r) => nyStamp(r.t));
   const near = (t: number) => rows.reduce((b, r) => (Math.abs(r.t - t) < Math.abs(b.t - t) ? r : b), rows[0]);
   const mk = (side: string) => {
     const f = fills.filter((q) => q.side === side && q.t >= rows[0].t && q.t <= rows[rows.length - 1].t);
-    return { type: "scatter", mode: "markers", name: side, x: f.map((q) => new Date(q.t * 1000)), y: f.map((q) => near(q.t).equity),
+    return { type: "scatter", mode: "markers", name: side, x: f.map((q) => nyStamp(q.t)), y: f.map((q) => near(q.t).equity),
       marker: { color: side === "buy" ? C.profit : C.loss, size: 6 }, hovertemplate: `${side}<extra></extra>` };
   };
   return (
-    <Panel title="Account value today · equity, long-term holdings, fills">
+    <Panel title="Account value today (New York time) · equity, long-term holdings, fills">
       <Plot height={220} layout={{ margin: { l: 56, r: 56, t: 8, b: 28 }, xaxis: { type: "date" },
         yaxis: { title: { text: "equity $" } }, yaxis2: { overlaying: "y", side: "right", showgrid: false, title: { text: "long-term $" } } }}
         data={[
