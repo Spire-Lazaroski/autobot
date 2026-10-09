@@ -6,7 +6,7 @@ import { Confirm } from "../components/Confirm";
 import { JobsEditor } from "../components/JobsEditor";
 import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
-import { CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, SplitBar,
+import { CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, ShareBar, Sparkline, SplitBar,
   type EquityRow, type JobsVsHold, type LogEntry, type Split } from "../components/LiveOverview";
 import { api, type Candles, type Fill, type Row } from "../lib/api";
 import { colorFor, fmt, nyTime, pnl, signed } from "../lib/format";
@@ -176,7 +176,7 @@ export function Live() {
   }, [st, d?.positions]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <div className="panel p-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${state === "running" ? "bg-up animate-pulse" : state === "stopped" ? "bg-dim" : "bg-warn"}`} />
@@ -207,15 +207,19 @@ export function Live() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
             <Kpi label={`Paper equity · ···${acct?.number_tail ?? ""}`} value={acct ? `$${fmt(acct.equity)}` : "–"} sub={acct?.status} />
-            <Kpi label="Day P&L" value={acct ? `${signed(acct.day_pnl)}` : "–"} tone={pnl(acct?.day_pnl)} sub={acct ? `${signed(acct.day_pnl_pct, 3)}%` : undefined} />
-            <Kpi label="Long-term today" value={st?.split ? signed(st.split.long_term_pl_today) : "–"} tone={pnl(st?.split?.long_term_pl_today)} sub="core + rotation" />
+            <Kpi label="Day P&L" value={acct ? `${signed(acct.day_pnl)}` : "–"} tone={pnl(acct?.day_pnl)} sub={acct ? `${signed(acct.day_pnl_pct, 3)}%` : undefined}
+              extra={<Sparkline values={(d.equity_today ?? []).map((r) => r.equity)} />} />
+            <Kpi label="Long-term today" value={st?.split ? signed(st.split.long_term_pl_today) : "–"} tone={pnl(st?.split?.long_term_pl_today)}
+              sub={st?.split ? `core + rotation · ${fmt((st.split.core_usd + st.split.rotation_usd) / st.split.equity * 100, 1)}% held` : "core + rotation"}
+              extra={st?.split ? <ShareBar now={(st.split.core_usd + st.split.rotation_usd) / st.split.equity * 100}
+                target={st.split["targets_%"].core + st.split["targets_%"].rotation} /> : undefined} />
             <Kpi label="Jobs today" value={st?.split ? signed(st.split.jobs_pl_today) : "–"} tone={pnl(st?.split?.jobs_pl_today)}
               sub={`${st?.jobs?.length ?? 0} jobs · realized + open`} />
             <Kpi label="Cash" value={acct ? `$${fmt(acct.cash, 0)}` : "–"} sub={acct && acct.equity ? `${fmt((acct.cash / acct.equity) * 100, 0)}% of equity` : undefined} />
           </div>
 
           <SplitBar split={st?.split} cash={acct?.cash} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <CoreCard core={st?.core} />
             <RotationCard rot={st?.rotation} />
             <JobsCard split={st?.split} jobs={st?.jobs?.length ?? 0} jvh={d.jobs_vs_hold}

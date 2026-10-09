@@ -50,7 +50,7 @@ export function SplitBar({ split, cash }: { split?: Split; cash?: number }) {
     { w: jobs, c: GREYS.jobs, label: `Jobs ${fmt(jobs, 1)}%` },
   ];
   return (
-    <Panel title="Account split · now vs target">
+    <Panel title={<Title icon="bi-columns-gap">Account split · now vs target</Title>}>
       <div className="flex h-3 rounded overflow-hidden bg-sunk">
         {parts.map((p, i) => <div key={i} style={{ width: `${p.w}%`, background: p.c }} title={p.label} />)}
       </div>
@@ -62,18 +62,48 @@ export function SplitBar({ split, cash }: { split?: Split; cash?: number }) {
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return <Panel title={title}><div className="text-[12px] flex flex-col gap-0.5">{children}</div></Panel>;
+/** Card header with a small icon (Bootstrap Icons, already loaded by the app). */
+export function Title({ icon, children }: { icon: string; children: React.ReactNode }) {
+  return <span className="inline-flex items-center gap-1.5"><i className={`bi ${icon} text-muted`} aria-hidden="true" />{children}</span>;
+}
+
+function Card({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+  return <Panel title={<Title icon={icon}>{title}</Title>}><div className="text-[12px] flex flex-col gap-1">{children}</div></Panel>;
+}
+
+/** A small grey area sparkline (style B), e.g. the account value through the day. */
+export function Sparkline({ values, height = 26 }: { values: number[]; height?: number }) {
+  if (values.length < 2) return <div style={{ height }} />;
+  const lo = Math.min(...values), hi = Math.max(...values), w = 120;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${hi === lo ? height / 2 : height - 2 - ((v - lo) / (hi - lo)) * (height - 4)}`);
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={`0,${height} ${pts.join(" ")} ${w},${height}`} fill={chart.ink} fillOpacity={0.1} />
+      <polyline points={pts.join(" ")} fill="none" stroke={chart.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+/** A thin bar: the current share against a target (marker), both in % of the account. */
+export function ShareBar({ now, target, max = 100 }: { now: number; target?: number; max?: number }) {
+  return (
+    <div className="relative h-1.5 rounded-full" style={{ background: chart.faint }}>
+      <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, (now / max) * 100)}%`, background: chart.ink }} />
+      {target !== undefined && <div className="absolute -top-0.5 h-2.5 w-0.5" style={{ left: `${Math.min(100, (target / max) * 100)}%`, background: brand.amber }}
+        title={`target ${fmt(target, 1)}%`} />}
+    </div>
+  );
 }
 
 export function CoreCard({ core }: { core?: CoreLike }) {
   if (!core) return null;
-  if (!core.enabled) return <Card title="Core holding"><span className="text-muted">Off (live.core.enabled in config.yaml).</span></Card>;
+  if (!core.enabled) return <Card title="Core holding" icon="bi-bullseye"><span className="text-muted">Off (live.core.enabled in config.yaml).</span></Card>;
   const tgt = core.vol_target?.target_pct ?? core.allocation_pct;
   const v = core.vol_target;
   return (
-    <Card title={`Core · ${core.symbol}`}>
+    <Card title={`Core · ${core.symbol}`} icon="bi-bullseye">
       <span className="num">{fmt(core.qty, 0)} shares · {core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</span>
+      {core["weight_%"] !== undefined && core["weight_%"] !== null && <ShareBar now={core["weight_%"]} target={tgt} max={50} />}
       <span className="num">{core["weight_%"] !== undefined && core["weight_%"] !== null ? `${fmt(core["weight_%"], 1)}%` : "–"}
         <span className="text-muted"> · target {fmt(tgt, 1)}% · band {fmt(tgt - core.rebalance_band_pct, 1)}–{fmt(tgt + core.rebalance_band_pct, 1)}%</span></span>
       {v && <span className="text-muted">{v.ratio < 0.9 ? "Calmer" : v.ratio > 1.1 ? "Jumpier" : "About as jumpy"} than normal: volatility {fmt(v.vol_pct, 1)}% vs {fmt(v.normal_pct, 1)}%</span>}
@@ -84,13 +114,14 @@ export function CoreCard({ core }: { core?: CoreLike }) {
 
 export function RotationCard({ rot }: { rot?: RotationLike }) {
   const [open, setOpen] = useState(false);
-  if (!rot || !rot.enabled) return <Card title="Rotation sleeve"><span className="text-muted">Off (live.rotation.enabled in config.yaml).</span></Card>;
+  if (!rot || !rot.enabled) return <Card title="Rotation sleeve" icon="bi-arrow-repeat"><span className="text-muted">Off (live.rotation.enabled in config.yaml).</span></Card>;
   const t = rot.target;
   const below = t ? t.ranking.filter((r) => r.rank <= rot.top_n && !r.above_trend).map((r) => r.symbol) : [];
   return (
-    <Card title={`Rotation · ${rot.allocation_pct}% sleeve, top ${rot.top_n} monthly`}>
+    <Card title={`Rotation · ${rot.allocation_pct}% sleeve, top ${rot.top_n} monthly`} icon="bi-arrow-repeat">
       {!t ? <span className="text-muted">Decides at the first tick after the next open.</span> : (<>
         <span className="num">{Object.keys(t.weights).length ? Object.entries(t.weights).map(([k, v]) => `${k} ${fmt(v, 1)}%`).join(" · ") : "All in cash"}</span>
+        <ShareBar now={t["invested_%"]} target={rot.allocation_pct} max={50} />
         <span className="text-muted">{below.length ? `${below.join(", ")} in the top ${rot.top_n} but below trend: cash` : `Invested ${fmt(t["invested_%"], 1)}% of the account`}</span>
         <span className="text-muted">As of {t.as_of} month-end closes ·{" "}
           <button className="underline" onClick={() => setOpen(!open)}>{open ? "hide ranking" : "show ranking"}</button></span>
@@ -111,7 +142,7 @@ export function RotationCard({ rot }: { rot?: RotationLike }) {
 
 export function JobsCard({ split, jobs, positions, jvh, rules }: { split?: Split; jobs: number; positions: number; jvh?: JobsVsHold | null; rules?: string }) {
   return (
-    <Card title="Trading jobs · live check">
+    <Card title="Trading jobs · live check" icon="bi-lightning-charge">
       <span className="num">{jobs} jobs · {positions} position{positions === 1 ? "" : "s"} open</span>
       <span className="num">Today <span className={pnl(split?.jobs_pl_today)}>{split ? signed(split.jobs_pl_today) : "–"}</span></span>
       <span className="text-muted">{jvh && !jvh.error && jvh.job_days
@@ -124,7 +155,7 @@ export function JobsCard({ split, jobs, positions, jvh, rules }: { split?: Split
 
 /** Today's account value, with the long-term holdings' value and fills as markers. */
 export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: number; side: string }[] }) {
-  if (rows.length < 2) return <Panel title="Account value today"><p className="text-muted text-[12px]">Builds up while the market is open (one point per bar).</p></Panel>;
+  if (rows.length < 2) return <Panel title={<Title icon="bi-graph-up">Account value today</Title>}><p className="text-muted text-[12px]">Builds up while the market is open (one point per bar).</p></Panel>;
   const x = rows.map((r) => nyStamp(r.t));
   const near = (t: number) => rows.reduce((b, r) => (Math.abs(r.t - t) < Math.abs(b.t - t) ? r : b), rows[0]);
   const mk = (side: string) => {
@@ -133,8 +164,8 @@ export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: nu
       marker: { color: side === "buy" ? C.profit : C.loss, size: 6 }, hovertemplate: `${side}<extra></extra>` };
   };
   return (
-    <Panel title="Account value today (New York time) · equity, long-term holdings, fills">
-      <Plot height={220} layout={{ margin: { l: 56, r: 56, t: 8, b: 28 }, xaxis: { type: "date" },
+    <Panel title={<Title icon="bi-graph-up">Account value today (New York time) · equity, long-term holdings, fills</Title>}>
+      <Plot height={220} area="main" layout={{ margin: { l: 56, r: 64, t: 8, b: 28 }, xaxis: { type: "date" },
         yaxis: { title: { text: "equity $" } }, yaxis2: { overlaying: "y", side: "right", showgrid: false, title: { text: "long-term $" } } }}
         data={[
           { type: "scatter", mode: "lines", name: "equity", x, y: rows.map((r) => r.equity), line: { color: C.navy, width: 2 } },
@@ -161,11 +192,11 @@ export function PositionsSplit({ positions, longTerm, extra }: { positions: Row[
   const jobCols = extra ? [...POS_COLS, { key: "note", label: "Note", align: "left" as const, render: (r: Row) => <span className="text-muted whitespace-nowrap">{extra(r) ?? "–"}</span> }] : POS_COLS;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-      <Panel title="Long-term positions · core and rotation">
+      <Panel title={<Title icon="bi-briefcase">Long-term positions · core and rotation</Title>}>
         {lt.length ? <SortTable rows={lt} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={POS_COLS} />
           : <p className="text-muted text-[12px]">None.</p>}
       </Panel>
-      <Panel title="Trading job positions · closed by 15:55">
+      <Panel title={<Title icon="bi-clock-history">Trading job positions · closed by 15:55</Title>}>
         {jobs.length ? <SortTable rows={jobs} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={jobCols} />
           : <p className="text-muted text-[12px]">No open job positions.</p>}
       </Panel>
@@ -178,7 +209,7 @@ export function LogPanel({ entries }: { entries: LogEntry[] }) {
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const shown = entries.slice(-40);
   return (
-    <Panel title="Bot log">
+    <Panel title={<Title icon="bi-terminal">Bot log</Title>}>
       <div className="num text-[10.5px] leading-snug max-h-60 overflow-y-auto text-muted">
         {shown.map((e, i) => {
           const tone = /ERROR|CRITICAL/.test(e.line) ? "text-down" : /WARNING|CONFIG|FLATTEN/.test(e.line) ? "text-warn" : /ORDER|ROTATION|CORE/.test(e.line) ? "text-fg" : "";

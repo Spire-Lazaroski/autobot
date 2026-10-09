@@ -60,7 +60,7 @@ export function AccountRules() {
             <p className="text-[11.5px] text-muted mt-1">{d.symbols.join(", ")} · {d.days} days · sizing {d.sizing} · loss limit {d.loss_limit_pct}% ·
               lock from {d.trigger_pct}%, give back {d.giveback_pct}%. A single period is a small sample: compare a few windows before switching it on.</p>
           </div>
-          <Plot height={260} data={Object.entries(d.results).map(([k, v], i) => ({
+          <Plot height={260} area="main" data={Object.entries(d.results).map(([k, v], i) => ({
             x: Object.keys(v.daily_equity), y: Object.values(v.daily_equity).map((e) => (e - 1) * 100), name: LABEL[k] ?? k,
             type: "scatter", mode: "lines", line: { color: [C.inkFaint, C.navy, C.gold][i % 3], width: 2 },
           }))} layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 10, t: 8, b: 36 }, legend: { orientation: "h" } }} />

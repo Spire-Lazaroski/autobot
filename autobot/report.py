@@ -618,7 +618,12 @@ def equity_chart(ri) -> str:
     plt = _mpl()
     fig, ax = plt.subplots(figsize=(9.2, 3.1))
     eq = ri.equity
-    ax.plot(range(len(eq)), (eq / eq.iloc[0] - 1) * 100, color=BRAND["chart"]["ink"], lw=2, label="The bot" if ri.kind == "live" else "The strategy")
+    y = (eq / eq.iloc[0] - 1) * 100
+    ax.fill_between(range(len(eq)), y, 0, color=BRAND["chart"]["ink"], alpha=0.12, lw=0)      # grey area (style B)
+    ax.plot(range(len(eq)), y, color=BRAND["chart"]["ink"], lw=2, label="The bot" if ri.kind == "live" else "The strategy")
+    if len(y):
+        ax.annotate(f"{y.iloc[-1]:+.2f}%", (len(y) - 1, y.iloc[-1]), xytext=(4, 0), textcoords="offset points", va="center", fontsize=8,
+                    color="white", bbox={"boxstyle": "round,pad=0.25", "fc": BRAND["chart"]["ink"], "ec": BRAND["chart"]["ink"]})
     if ri.benchmark is not None and len(ri.benchmark):
         bm = ri.benchmark.reindex(eq.index, method="ffill").bfill()
         ax.plot(range(len(bm)), (bm / bm.iloc[0] - 1) * 100, color=BRAND["benchmarkGrey"], lw=1.4, ls=(0, (2, 2)),
@@ -637,6 +642,11 @@ def price_chart(ri, sym: str) -> Optional[str]:
     plt = _mpl()
     fig, ax = plt.subplots(figsize=(9.2, 2.9))
     x = np.arange(len(df))
+    # grey sessions (style C): every other New York day gets a light grey background
+    days = np.asarray(df.index.tz_convert("America/New_York").date) if df.index.tz is not None else np.asarray(df.index.date)
+    starts = np.r_[0, np.flatnonzero(days[1:] != days[:-1]) + 1, len(df)]
+    for k in range(1, len(starts) - 1, 2):
+        ax.axvspan(starts[k] - 0.5, starts[k + 1] - 0.5, color=BRAND["chart"]["band"], lw=0, zorder=0)
     # regime bands
     regs = [(pd.Timestamp(r["bar_time"]), r.get("regime")) for r in ri.records
             if r["type"] == "decision" and r["symbol"] == sym and r.get("regime")]

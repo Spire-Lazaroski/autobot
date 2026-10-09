@@ -164,7 +164,7 @@ function Results({ res, onOpen }: { res: ShiftResult; onOpen: (symbol: string) =
           <button key={s} onClick={() => setSym(s)}
             className={`chip border num ${s === sym ? "tab-on" : "border-line-2 text-muted"}`}>{s}</button>
         ))}</div>}>
-        <Plot height={440} data={[...lineTraces, ...bandTraces]}
+        <Plot height={440} area="main" data={[...lineTraces, ...bandTraces]}
           layout={{
             barmode: "overlay", hovermode: "closest", margin: { l: 56, r: 12, t: 28, b: 32 },
             legend: { orientation: "h", x: 0, y: 1.01, yanchor: "bottom", font: { size: 10 } },

@@ -1,5 +1,5 @@
 import {
-  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart,
+  AreaSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart,
   createSeriesMarkers, type IChartApi, type IPriceLine, type ISeriesApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
@@ -81,6 +81,31 @@ export function CandleChart({ candles, priceLines, overlays = NO_OVERLAYS, panes
     });
     chartRef.current = chart;
     const t = candles.t;
+
+    // --- grey sessions and volume behind the candles (style C, approved 2026-10-09): every other New York
+    // day gets a light grey background, and volume sits as grey bars along the bottom of the price pane
+    const dayKey = (s: number) => nyFormat(s, { year: "numeric", month: "2-digit", day: "2-digit" });
+    let shade = false, prevDay = "";
+    const sessions = t.map((time) => {
+      const k = dayKey(time);
+      if (k !== prevDay) { shade = prevDay === "" ? false : !shade; prevDay = k; }
+      return { time: time as UTCTimestamp, value: shade ? 1 : 0 };
+    });
+    if (sessions.some((x) => x.value === 1)) {
+      // an area (not bars) so each shaded day is one even block, without the gaps between bars
+      const bg = chart.addSeries(AreaSeries, { priceScaleId: "sessions", priceLineVisible: false, lastValueVisible: false,
+        lineVisible: false, lineWidth: 1, topColor: C.sunk, bottomColor: C.sunk, crosshairMarkerVisible: false,
+        priceFormat: { type: "custom", formatter: () => "" },
+        autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }) });   // 1 = full height, 0 = none
+      bg.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+      bg.setData(sessions);
+    }
+    if (candles.v?.length) {
+      const vol = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceLineVisible: false, lastValueVisible: false, color: C.faint,
+        priceFormat: { type: "volume" } });
+      vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
+      vol.setData(t.map((time, i) => ({ time: time as UTCTimestamp, value: candles.v[i] ?? 0, color: candles.c[i] >= candles.o[i] ? `${C.faint}aa` : C.faint })));
+    }
 
     // --- price pane
     const price = chart.addSeries(CandlestickSeries, {
