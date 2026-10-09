@@ -121,6 +121,71 @@ def time_table(year: int, ny_hhmm: tuple) -> list:
 
 
 # ----------------------------------------------------------------- document model
+def long_term_line(L: dict) -> str:
+    c, r = L.get("core") or {}, L.get("rotation") or {}
+    parts = []
+    if c.get("enabled"):
+        v = c.get("vol_target") or {}
+        parts.append(f"a <b>core</b> holding of {c.get('symbol', 'VOO')}" + (
+            f" sized each morning between {v.get('min_pct', 15)}% and {v.get('max_pct', 45)}% of the account by how jumpy markets are"
+            if v.get("enabled") else f" at {c.get('allocation_pct', 30)}% of the account"))
+    if r.get("enabled"):
+        parts.append(f"a <b>rotation sleeve</b> of {r.get('allocation_pct', 40)}% that holds the strongest of {len(r.get('symbols') or [])} sector funds, decided once a month")
+    if not parts:
+        return "It holds nothing long term: every position belongs to a trading job and is closed before the close."
+    return ("Next to the trading jobs it keeps long-term holdings, overnight and through Stop: " + " and ".join(parts)
+            + " (section 8). The daily loss limit and the profit lock count the trading jobs only.")
+
+
+def rules_line(L: dict) -> str:
+    t = L.get("trade_rules") or {}
+    on = [n for n, k in (("no quick re-entry", "no_quick_reentry"), ("churn brake", "churn_brake")) if t.get(k)]
+    return (f"Every job's signal goes through the signal rules <b>{', '.join(on)}</b> before an order is sent "
+            "(after a sale it doesn't buy back the same session unless the price beats the position's best close). "
+            "The Lab and the nightly strategy check use the same rules, so their numbers compare directly." if on else
+            "No extra signal rules are switched on (config live.trade_rules).")
+
+
+def long_term_section(f: dict) -> list:
+    L = f["live"]
+    c, r = L.get("core") or {}, L.get("rotation") or {}
+    B = [("h2", "8. Long-term holdings: the core and the rotation sleeve")]
+    B += [("p", "Most of the account's result is meant to come from two long-term holdings. They are decided at the first tick after "
+                "the open, kept overnight, never sold by the close-of-day flatten, the daily loss limit or the profit lock, and kept by "
+                "<i>Stop + flatten</i> unless you tick <i>Also sell the long-term holdings</i>. The nightly strategy check never touches them.")]
+    if c.get("enabled"):
+        v = c.get("vol_target") or {}
+        B += [("h3", f"The core: {c.get('symbol', 'VOO')}")]
+        B += [("ul", [
+            f"Normally {c.get('allocation_pct', 30)}% of the account. " + (
+                f"Each morning the target becomes {c.get('allocation_pct', 30)}% x normal volatility / today's volatility, kept between "
+                f"{v.get('min_pct', 15)}% and {v.get('max_pct', 45)}%: calmer markets → a bigger core, jumpier markets → a smaller one "
+                "(volatility = an exponentially weighted average of daily moves; normal = its median over the last "
+                f"{v.get('normal_years', 5)} years)." if v.get("enabled") else "A fixed share."),
+            f"It trades only when its share is more than {c.get('rebalance_band_pct', 5)} points away from the target, about 10 times a year.",
+            "Why: in the backtests (2019-2026) this roughly halved the losses in the 2020, 2022 and 2025 drops for about half a point a "
+            "year less in normal years (docs/STRATEGY_EVIDENCE.md sections 12 and 15).",
+        ])]
+    if r.get("enabled"):
+        B += [("h3", f"The rotation sleeve: {r.get('allocation_pct', 40)}% in sector funds")]
+        B += [("ul", [
+            f"Once a month (first open tick of the month) it ranks the {len(r.get('symbols') or [])} sector funds "
+            f"({', '.join(r.get('symbols') or [])}) by their return from {r.get('lookback_months', 12)} month-ends ago to the last-but-one "
+            f"month-end, and holds the top {r.get('top_n', 5)}, but only those above their {r.get('trend_months', 10)}-month average.",
+            f"Each fund is sized by how jumpy it is (at most {r.get('allocation_pct', 40) / max(1, r.get('top_n', 5)):g}% of the account); "
+            "money not placed stays in cash. On the Live page amber chips mark funds in the top that are below their trend.",
+            f"It trades a fund only when it is more than {r.get('rebalance_band_pct', 1)} point(s) away from its target.",
+            "Why: over 1927-2026 industry rotation earned about the market's return with half the ups and downs and a third of the worst "
+            "drop; since 1999 the gain is smaller, and over 2017-2026 it trailed simply holding SPY (sections 23-24). It is a risk "
+            "reducer, not a promise of more return.",
+        ])]
+    B += [("h3", "How the daily report judges them")]
+    B += [("p", "The report's <b>Where the result came from</b> table compares each part with its fair yardstick: the core with "
+                "keeping the shares it had at the start, the rotation with an equal mix of all sector funds with the same money, "
+                "the trading jobs with holding the same symbols, and the whole account with SPY at the share actually invested.")]
+    return B
+
+
 # blocks: ("h2"|"h3"|"p"|"note"|"ol"|"ul"|"table"|"img"|"cards", ...)
 def build(f: dict) -> list:
     L, R = f["live"], f["risk"]
@@ -145,6 +210,8 @@ def build(f: dict) -> list:
            if f["auto"]["mode"] == "apply" else " A nightly check proposes better strategies; you decide on the Recalibrate page (section 7)."),
         f"It protects itself: if the account is down {R['max_daily_loss_pct']}% in a day it sells everything and stops for the day; no single symbol gets more than ${R['max_position_usd']:,}; stock positions are closed {fm} minutes before the US close.",
         "It writes down why it acted (logs/decisions.jsonl) and produces a plain-English report after every trading day.",
+        long_term_line(L),
+        rules_line(L),
     ])]
     B += [("p", "<b>What it can't do</b>")]
     B += [("ul", [
@@ -163,8 +230,9 @@ def build(f: dict) -> list:
     B += [("ol", [
         "Switch the PC on and make sure it won't sleep: Windows Settings → System → Power → <i>Sleep</i> = <b>Never</b> (when plugged in). The bot stops trading if the PC sleeps.",
         "Double-click <b>start_lab.bat</b> in E:\\autobot. Two windows open (\"autobot API\" and \"autobot web\") and the lab opens in the browser at http://127.0.0.1:5190. Leave both windows open all day.",
-        "Open the <b>Live</b> page. Check the small dot next to <i>live</i> is <b>green</b> (connected) and the header says <b>API</b> with a green dot and <b>paper only</b>.",
-        "Check <i>Paper equity</i> shows a dollar amount and the account status is ACTIVE.",
+        "Open the <b>Live</b> page. The dark band at the top shows the bot's state, the market, the account value and the day's result. "
+        "The header must say <b>API</b> with a green dot and <b>paper only</b>; if the band says <i>reconnecting…</i>, wait 10 seconds.",
+        "Check the band shows the account value (<i>Equity</i>) in dollars.",
         "Scroll to <b>Jobs · config.yaml</b> and check which jobs are switched <b>on</b> and on which symbols (below). Change nothing on the day unless it was tested in the Lab first.",
     ])]
     B += [("img", "img/live_top.png", "The Live page when everything is connected: green dots next to API and live, the paper-only badge, the account figures.")]
@@ -185,11 +253,25 @@ def build(f: dict) -> list:
     B += [("ol", [
         "On the <b>Live</b> page press <b>▶ Start bot</b> (top right), or double-click <b>start_bot.bat</b> "
         "(this one also restarts the bot after a crash).",
-        "Within a few seconds the status changes to <b>BOT RUNNING</b> with a green dot, a process number (pid) and <i>beat 1s ago</i>. The beat number must stay small (under 10 seconds).",
-        f"Wait for the first tick: within one {tf} bar, <i>Bot last tick</i> shows the current time and the <i>Bot view per symbol</i> table fills in.",
+        "Within a few seconds the band changes to <b>BOT RUNNING</b> with a green dot and <i>beat 1s</i>. The beat number must stay small (under 10 seconds).",
+        f"Wait for the first tick: within one {tf} bar, the band's <i>last tick</i> shows the current time and the <i>Bot view per symbol</i> table fills in.",
         "If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as <i>unresponsive</i>). Never start a second bot.",
     ])]
-    B += [("img", "img/live_state.png", "What 'running' looks like: BOT RUNNING, the pid, and a heartbeat a second or two old.")]
+    B += [("img", "img/live_state.png", "The status band when running: BOT RUNNING, the last tick, the heartbeat, the account value and the day's result.")]
+    B += [("h3", "Reading the Live page")]
+    B += [("ul", [
+        "<b>Tiles</b> under the band: <i>Long-term today</i> (the core and the rotation sleeve), <i>Jobs today</i> (the trading jobs), "
+        "<i>Cash</i>, and <i>Jobs since ...</i>: the trading jobs' result against simply holding the same symbols (the live check). "
+        "A green or red left edge says whether that part made or lost money today.",
+        "<b>Account split</b>: where the money is now (core, rotation invested and cash, jobs, free cash) against the targets.",
+        "<b>Three cards</b>: the core (its share against today's target, and whether markets are <i>calm</i> or <i>jumpy</i>), the rotation "
+        "sleeve (held funds; amber = in the top 5 but below its trend, so in cash; the next monthly check), and the trading jobs "
+        "(<i>ahead of hold</i> or <i>behind hold</i>).",
+        "<b>Account value today</b>: the day's equity (grey area) and the long-term holdings (dashed), with the fills.",
+        "<b>Positions</b> come in two groups: long-term (kept overnight) and trading jobs (closed before the close).",
+        "<b>Bot log</b>: errors fold into one line; <i>details</i> shows the full message.",
+    ])]
+    B += [("img", "img/live_holdings.png", "The three cards: the core, the rotation sleeve and the trading jobs.")]
     B += [("h3", "Reading the trigger and peak lines")]
     B += [("ul", [plain.LIVE_VIEW[k] for k in ("trigger", "already_past", "none", "peak", "display_only")])]
 
@@ -198,7 +280,9 @@ def build(f: dict) -> list:
     B += [("h3", "Normal stop")]
     B += [("ol", [
         "Live page → <b>⏹ Stop + flatten</b> (or double-click <b>stop_bot.bat</b>).",
-        "Read the confirmation and press <b>Stop + flatten</b>. The bot closes <b>every</b> open position in the paper account (including ones it didn't open) and exits within a few seconds.",
+        "Read the confirmation and press <b>Stop + flatten</b>. The bot closes every open position in the paper account (including ones it didn't open) "
+        "<b>except the long-term holdings</b> (the core and the rotation sleeve's funds), and exits within a few seconds. "
+        "Tick <i>Also sell the long-term holdings</i> only if you really mean to sell them too.",
         "Confirm all is flat (see below).",
     ])]
     B += [("img", "img/stop_dialog.png", "The confirmation dialog. Cancel changes nothing.")]
@@ -212,8 +296,8 @@ def build(f: dict) -> list:
                 f"That is usually <b>{common_flat}</b> in Skopje, but it shifts for a few weeks when the US and Europe change their clocks on different dates:")]
     B += [("table", [f"Dates in {f['year']}", "Close-of-day flatten, Skopje time"], time_table(f["year"], flat_ny))]
     B += [("h3", "How to confirm all is flat")]
-    B += [("ul", ["Live page → <b>Positions</b> says <i>No open positions</i>.",
-                  "The Alpaca website (paper account) shows no positions and no open orders.",
+    B += [("ul", ["Live page → <b>Trading job positions</b> says <i>No open job positions</i> (the long-term positions stay).",
+                  "The Alpaca website (paper account) shows only the long-term holdings and no open orders.",
                   "The status shows <b>BOT STOPPED</b> (unless you intend it to keep running)."])]
 
     # 5
@@ -242,7 +326,9 @@ def build(f: dict) -> list:
     B += auto_section(f)
 
     # 8
-    B += [("h2", "8. What to watch: daily checklist")]
+    B += long_term_section(f)
+
+    B += [("h2", "9. What to watch: daily checklist")]
     lim = R["max_daily_loss_pct"]
     B += [("p", "Look at the Live page a few times a day and read the daily report after the close. "
                 "<span class='dot green'></span>green = fine, <span class='dot amber'></span>amber = keep an eye on it, "
@@ -250,7 +336,7 @@ def build(f: dict) -> list:
     B += [("table", ["Check", "Green", "Amber", "Red: what to do"], [
         ["Day P&L vs the daily loss limit", f"above -{lim / 2:g}%", f"-{lim / 2:g}% to -{lim * 0.8:g}%",
          f"below -{lim * 0.8:g}% or the bot halted: the limit ({lim}%) will stop it; don't restart it the same day"],
-        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 10)"],
+        ["Deepest dip this week (weekly report)", f"less than {lim:g}%", f"{lim:g}% to {lim * 2:g}%", f"more than {lim * 2:g}%: review the strategies (section 11)"],
         ["Number of trades vs a normal day", "similar to the last 5 reports", "twice as many or none at all",
          "many times more: check the log and the jobs; stop the bot if unsure"],
         ["Errors in the bot log (Live page)", "none", "an occasional data error (the bot skips that bar)",
@@ -264,13 +350,18 @@ def build(f: dict) -> list:
         ["Nightly strategy check (Recalibrate page)", "the proposal date is the last trading day; status applied (or nothing to change)",
          "items <i>waiting to apply</i> for more than a day (a coin position that never closes)",
          "<i>Last automatic run failed</i>: read the message; the bot keeps yesterday's jobs. Press Run now once the cause is fixed"],
+        ["Long-term holdings (Live page cards)", "core share inside its band; rotation holdings as last month",
+         "the core outside its band for a whole day (it rebalances at the next open)",
+         "a long-term fund sold during the day, or held funds missing: check the log for CORE / ROTATION lines"],
+        ["Trading jobs vs holding (Jobs tile, report)", "about level with holding the same symbols", "behind holding for a week",
+         "far behind for several weeks: consider switching the jobs off (they are a live check, not the main return)"],
         ["News collector (News page, top)","<i>news collector running</i>, last story received within the hour during market hours",
          "nothing received for 1-2 hours while the market is open",
          "<i>stopped</i>, or the daily report says it wasn't receiving stories live: double-click <b>start_news.bat</b> (trading isn't affected)"],
     ])]
 
     # 9
-    B += [("h2", "9. Troubleshooting")]
+    B += [("h2", "10. Troubleshooting")]
     B += [("table", ["Symptom", "Likely cause", "What to do"], [
         ["Header shows <b>API down</b>", "The 'autobot API' window was closed or crashed", "Run start_lab.bat again. The bot keeps running on its own; check it on the Live page."],
         ["Live page says <i>reconnecting…</i>", "The API is restarting or not running", "Wait 10 seconds; if it stays, run start_lab.bat."],
@@ -297,10 +388,12 @@ def build(f: dict) -> list:
     ])]
 
     # 10
-    B += [("h2", "10. Weekly review")]
+    B += [("h2", "11. Weekly review")]
     B += [("ol", [
         "Reports page → <b>Last 7 days</b>. Read the headline, then the charts.",
-        "Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.",
+        "Check the report's <b>Where the result came from</b> table: the core against keeping its shares, the rotation against an equal mix "
+        "of all sector funds, the trading jobs against holding the same symbols, and the whole account against SPY at the share invested. "
+        "Then the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.",
         "Compare with the last few weeks' reports; one bad week alone says little.",
         "Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, <i>Earnings dates</i>).",
         "Recalibrate page: how many strategy changes happened this week and why (the reasons are on the page and in the daily reports). "
@@ -310,6 +403,7 @@ def build(f: dict) -> list:
     B += [("ul", [
         "It trailed simply holding SPY for three weeks in a row while trading a lot.",
         f"Its deepest dip in a week was more than {lim * 2:g}%.",
+        "Remember the Lab's backtests use the same signal rules as the live jobs (shown at the top of each Lab page), so they compare directly.",
         "The report keeps saying 'many small losses in a sideways market' for a trend strategy (or the reverse for a dip-buying strategy).",
         "It switches strategies more than 8 times a day on a symbol, week after week.",
     ])]

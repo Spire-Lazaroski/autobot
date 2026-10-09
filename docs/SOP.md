@@ -1,6 +1,6 @@
 # Operating procedure: Spire Analytics paper-trading bot
 
-Version generated 01 October 2026 22:40 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
+Version generated 09 October 2026 20:31 (Skopje) from the bot's code and config.yaml. If something here disagrees with the app, regenerate this document (see the end).
 
 ## 1. What the bot is, and what it isn't
 
@@ -8,6 +8,8 @@ Version generated 01 October 2026 22:40 (Skopje) from the bot's code and config.
 - It follows **jobs**: each job is one strategy on one or more symbols with a share of the account. It checks the market once per 5Min bar and sends market orders. Every night it re-checks which strategy each symbol should use and changes the jobs itself when something is clearly better (section 7).
 - It protects itself: if the account is down 2.0% in a day it sells everything and stops for the day; no single symbol gets more than $10,000; stock positions are closed 5 minutes before the US close.
 - It writes down why it acted (logs/decisions.jsonl) and produces a plain-English report after every trading day.
+- Next to the trading jobs it keeps long-term holdings, overnight and through Stop: a **core** holding of VOO sized each morning between 15% and 45% of the account by how jumpy markets are and a **rotation sleeve** of 40% that holds the strongest of 11 sector funds, decided once a month (section 8). The daily loss limit and the profit lock count the trading jobs only.
+- Every job's signal goes through the signal rules **no quick re-entry** before an order is sent (after a sale it doesn't buy back the same session unless the price beats the position's best close). The Lab and the nightly strategy check use the same rules, so their numbers compare directly.
 
 **What it can't do**
 
@@ -23,8 +25,8 @@ The US market opens at 09:30 New York time, which is usually **15:30** in Skopje
 
 1. Switch the PC on and make sure it won't sleep: Windows Settings → System → Power → *Sleep* = **Never** (when plugged in). The bot stops trading if the PC sleeps.
 2. Double-click **start_lab.bat** in E:\autobot. Two windows open ("autobot API" and "autobot web") and the lab opens in the browser at http://127.0.0.1:5190. Leave both windows open all day.
-3. Open the **Live** page. Check the small dot next to *live* is **green** (connected) and the header says **API** with a green dot and **paper only**.
-4. Check *Paper equity* shows a dollar amount and the account status is ACTIVE.
+3. Open the **Live** page. The dark band at the top shows the bot's state, the market, the account value and the day's result. The header must say **API** with a green dot and **paper only**; if the band says *reconnecting…*, wait 10 seconds.
+4. Check the band shows the account value (*Equity*) in dollars.
 5. Scroll to **Jobs · config.yaml** and check which jobs are switched **on** and on which symbols (below). Change nothing on the day unless it was tested in the Lab first.
 
 ![The Live page when everything is connected: green dots next to API and live, the paper-only badge, the account figures.](img/live_top.png)
@@ -38,8 +40,15 @@ The US market opens at 09:30 New York time, which is usually **15:30** in Skopje
 | auto_TSLA | on | regime_switch (switch by market mood) | TSLA | 10% |
 | auto_USO | on | regime_switch (switch by market mood) | USO | 10% |
 | auto_AAPL | on | rsi_reversion (buy the dip) | AAPL | 10% |
-| auto_SPY | on | donchian_breakout (buy the breakout) | SPY | 10% |
+| auto_SPY | on | rsi_reversion (buy the dip) | SPY | 10% |
 | auto_QQQ | on | regime_switch (switch by market mood) | QQQ | 10% |
+| auto_SPCX | on | regime_switch (switch by market mood) | SPCX | 10% |
+| auto_AMD | on | intraday_momentum (first half hour decides the last) | AMD | 10% |
+| auto_SLV | on | perf_rotation (back the recent winner) | SLV | 10% |
+| auto_PFE | on | rsi_reversion (buy the dip) | PFE | 10% |
+| auto_KO | on | bollinger_reversion (buy the stretch) | KO | 10% |
+| auto_COST | on | rsi_reversion (buy the dip) | COST | 10% |
+| auto_META | on | regime_switch (switch by market mood) | META | 10% |
 
 ![The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.](img/jobs_editor.png)
 *The Jobs editor. Switch a job on or off with its checkbox, then Save. The bot applies saved changes at its next bar.*
@@ -51,16 +60,28 @@ The bot and the lab can start by themselves 2 minutes after you log on to Window
 ## 3. Starting the bot
 
 1. On the **Live** page press **▶ Start bot** (top right), or double-click **start_bot.bat** (this one also restarts the bot after a crash).
-2. Within a few seconds the status changes to **BOT RUNNING** with a green dot, a process number (pid) and *beat 1s ago*. The beat number must stay small (under 10 seconds).
-3. Wait for the first tick: within one 5Min bar, *Bot last tick* shows the current time and the *Bot view per symbol* table fills in.
+2. Within a few seconds the band changes to **BOT RUNNING** with a green dot and *beat 1s*. The beat number must stay small (under 10 seconds).
+3. Wait for the first tick: within one 5Min bar, the band's *last tick* shows the current time and the *Bot view per symbol* table fills in.
 4. If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as *unresponsive*). Never start a second bot.
 
-![What 'running' looks like: BOT RUNNING, the pid, and a heartbeat a second or two old.](img/live_state.png)
-*What 'running' looks like: BOT RUNNING, the pid, and a heartbeat a second or two old.*
+![The status band when running: BOT RUNNING, the last tick, the heartbeat, the account value and the day's result.](img/live_state.png)
+*The status band when running: BOT RUNNING, the last tick, the heartbeat, the account value and the day's result.*
+
+### Reading the Live page
+
+- **Tiles** under the band: *Long-term today* (the core and the rotation sleeve), *Jobs today* (the trading jobs), *Cash*, and *Jobs since ...*: the trading jobs' result against simply holding the same symbols (the live check). A green or red left edge says whether that part made or lost money today.
+- **Account split**: where the money is now (core, rotation invested and cash, jobs, free cash) against the targets.
+- **Three cards**: the core (its share against today's target, and whether markets are *calm* or *jumpy*), the rotation sleeve (held funds; amber = in the top 5 but below its trend, so in cash; the next monthly check), and the trading jobs (*ahead of hold* or *behind hold*).
+- **Account value today**: the day's equity (grey area) and the long-term holdings (dashed), with the fills.
+- **Positions** come in two groups: long-term (kept overnight) and trading jobs (closed before the close).
+- **Bot log**: errors fold into one line; *details* shows the full message.
+
+![The three cards: the core, the rotation sleeve and the trading jobs.](img/live_holdings.png)
+*The three cards: the core, the rotation sleeve and the trading jobs.*
 
 ### Reading the trigger and peak lines
 
-- **Trigger** (Bot view per symbol, and the dashed line on the live chart): the price at which the bot's current strategy would change its mind at the next bar's close. Red 'sell < 762.70' means it would sell if a bar closes below 762.70; green 'buy > 745.10' means it would buy if a bar closes above 745.10. The percentage is how far that is from the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level. For a job with an exit layer the line shows whichever is nearer: the strategy's level or the trailing-exit level (marked 'trail'), or, after a trailing exit, the price that allows a re-entry (marked 're-entry').
+- **Trigger buy / Trigger sell** (Bot view per symbol, and the dashed lines on the live chart): the prices at which the bot's current strategy would change its mind at the next bar's close, one level below the price and one above, each where the strategy has one within 5%. Green 'buys below 330.30' means it would buy if a bar closes below 330.30; red 'sells below 768.96' means it would sell if a bar closes below 768.96. The percentage is how far that is from the last close, and '~3 bars if flat' how soon it changes anyway if the price just sits near that level. While the bot holds a position, the sell levels say what kind of exit they are: **take profit** (above the price, e.g. a mean-reversion job selling once the bounce is done), **stop** (below the price and the entry), or **locks profit** (below the price but above the entry: a trend job's exit level that has risen with the price). 'No profit target' means the strategy lets the trade run and only sells on the way down; 'no stop' means only the daily loss limit (and, for stocks, the close-out before the bell) would end a falling trade. For a short position everything is mirrored: the take profit is below the price and the stop above. For a job with an exit layer the trailing-exit level (marked 'trail') replaces the strategy's level on that side when it is nearer, and after a trailing exit the price that allows a re-entry (marked 're-entry') is the only buy level.
 - 'sells at the next close unless above X' means the change happens even if the price doesn't move (for example an old price drops out of a momentum look-back); only a close beyond X would prevent it.
 - '–' means no close within 5% of the last price would change the strategy's mind at the next bar.
 - **Peak since entry** (dotted line, and 'From peak' in Positions): the best price since the bot opened the position, and how much of it has been given back.
@@ -71,7 +92,7 @@ The bot and the lab can start by themselves 2 minutes after you log on to Window
 ### Normal stop
 
 1. Live page → **⏹ Stop + flatten** (or double-click **stop_bot.bat**).
-2. Read the confirmation and press **Stop + flatten**. The bot closes **every** open position in the paper account (including ones it didn't open) and exits within a few seconds.
+2. Read the confirmation and press **Stop + flatten**. The bot closes every open position in the paper account (including ones it didn't open) **except the long-term holdings** (the core and the rotation sleeve's funds), and exits within a few seconds. Tick *Also sell the long-term holdings* only if you really mean to sell them too.
 3. Confirm all is flat (see below).
 
 ![The confirmation dialog. Cancel changes nothing.](img/stop_dialog.png)
@@ -96,8 +117,8 @@ The bot closes all stock positions 5 minutes before the US close (15:55 New York
 
 ### How to confirm all is flat
 
-- Live page → **Positions** says *No open positions*.
-- The Alpaca website (paper account) shows no positions and no open orders.
+- Live page → **Trading job positions** says *No open job positions* (the long-term positions stay).
+- The Alpaca website (paper account) shows only the long-term holdings and no open orders.
 - The status shows **BOT STOPPED** (unless you intend it to keep running).
 
 ## 5. The strategies in plain words
@@ -276,7 +297,7 @@ The bot closes all stock positions 5 minutes before the US close (15:55 New York
 
 ## 6. News and earnings
 
-A separate program, the **news collector**, saves every Alpaca/Benzinga news story about SPY, QQQ, AAPL, NVDA, TSLA to data/news.db. It starts with start_lab.bat (window *autobot news*) or on its own with **start_news.bat**. It never trades, and the bot trades the same whether it runs or not; it only feeds the news sections of the reports and the News page.
+A separate program, the **news collector**, saves every Alpaca/Benzinga news story about SPY, QQQ, AAPL, NVDA, TSLA, META, AMD, MSFT, SLV, GLD, USO to data/news.db. It starts with start_lab.bat (window *autobot news*) or on its own with **start_news.bat**. It never trades, and the bot trades the same whether it runs or not; it only feeds the news sections of the reports and the News page.
 
 ### Checking it runs
 
@@ -300,12 +321,12 @@ Every story gets a **materiality** score from 1 (routine) to 5 (major) and a cat
 
 ### What we found
 
-- On days with news, prices moved **10-36% more than usual** by the close (stories on analyst ratings, guidance, the economy and other news).
+- On days with news, prices moved **13-31% more than usual** by the close (stories on analyst ratings, guidance, the economy and other news).
 - Whether a story sounded good or bad **did not tell which way the price would go**: 0 of 12 measurements were beyond chance, no more than luck alone gives.
 - After a big 15-minute move, the price kept going by the close 49% of the time with news and 49% without: about a coin flip either way.
 - Pausing trading around news (the *step aside for news* strategy) **did not do better than the strategy alone** beyond chance in a backtest from 2024-09-23 to 2026-09-30, and going flat around index-fund news did slightly worse. No live job uses it.
 
-From the news studies on the News page (2024-09-23 to 2026-09-30); this list is rebuilt from their latest results each time this document is generated.
+From the news studies on the News page (2024-09-30 to 2026-10-09); this list is rebuilt from their latest results each time this document is generated.
 
 ![The event study on the News page: how prices moved after news, with 95% ranges.](img/news_impact.png)
 *The event study on the News page: how prices moved after news, with 95% ranges.*
@@ -337,9 +358,11 @@ Every 7 days the bot ranks the candidates of each group on how much they trade a
 
 | Group | How many | Candidates |
 |---|---|---|
-| tech | 5-6 | NVDA, AAPL, MSFT, AMZN, META, TSLA, AMD |
+| tech | 5-7 | NVDA, AAPL, MSFT, AMZN, META, TSLA, AMD, SPCX |
 | index etf | 2 | QQQ, SPY |
 | commodity etf | 2-3 | USO, GLD, SLV |
+| health | 2-3 | LLY, UNH, JNJ, ABBV, MRK, PFE |
+| staples | 2-3 | WMT, COST, KO, PEP, PG, MCD |
 | crypto | 1-2 | BTC/USD, ETH/USD |
 
 A symbol already on the list stays until it drops more than 2 places below the cut, so the list doesn't change for small moves. The trading figures come from the free IEX feed, which sees only part of the market: they are only used to compare symbols with each other.
@@ -368,6 +391,7 @@ Every decision has a plain-English reason, shown on the Recalibrate page and in 
 **Now: off for every job.** An optional layer on top of any job's strategy, switched on per job in config.yaml (an `exit:` block under the job). While the bot holds a position it remembers the best closing price since it bought; if a 5-minute bar closes more than *trail_pct* % below that, it sells, even if the strategy still wants to hold.
 
 - After such a sale it stays out until the re-entry rule allows a new buy, and never on the very next bar: **fresh_cross** the strategy has to go out and back in; **new_high** a bar closes above the price it sold from while the strategy still wants in; **both** whichever comes first; **cooldown** wait a number of bars, then follow the strategy.
+- Two more optional rules, each measured from the price when the position was opened: `take_profit_pct` sells once a bar closes that % above it (takes the profit), `stop_pct` sells once a bar closes that % below it (cuts the loss). For a short both are mirrored. After either, the re-entry rule applies as after a trailing exit. Off unless set; any of the three switches the layer on.
 - *no_entry_last_min*: no new stock positions in the last N minutes before the close (positions already held are kept until the close).
 - The backtests, the Lab, the nightly check and the bot all use the same code for this, so the bot does exactly what was tested. Each sale or wait is explained in the decision log and the daily report, for example 'Sold: price 763.05 fell 0.29% from the 765.27 high since entry (trail 0.25%).'
 - Lab → *Exit rules* compares the jobs without the layer and with every setting on the last 90 days, including a walk-forward test on days the setting was not chosen on. Only switch it on if that walk-forward result beats 'none'.
@@ -379,29 +403,56 @@ To switch it on for a job, add under that job in config.yaml (the bot uses it fr
 
 ### Position size
 
-**Now: fixed.** Each symbol gets its job's share of the account, at most $10,000. The other mode is available in config.yaml (`risk: sizing`); compare it in the Lab first.
+**Now: fixed.** Each symbol gets its job's share of the account, at most $10,000. All jobs together never get more than 100% of the account (`risk: max_gross_pct`): if their shares add up to more, every symbol is scaled down alike, so the bot never trades on borrowed money. The other mode is available in config.yaml (`risk: sizing`); compare it in the Lab first.
+
+### Core holding
+
+**Now: on.** When on, the bot holds VOO long term as 30% of the account, outside the trading jobs: it buys up to that share at the first check of a trading day and trades it again only if its share drifts more than 5 points away. It is not sold before the close, and the daily loss limit and profit lock count and sell the trading jobs only. Stop + flatten keeps it unless you tick *Also sell the core holding*. Switched on or off in config.yaml (`live: core: enabled`); the bot picks the change up at its next bar. Why a plain hold and no timing rule: docs/CORE_DESIGN.md.
 
 ### Profit lock
 
 **Off.** When switched on (`risk: profit_lock: enabled: true`), once the day's gain reaches 1.5%, a fall of more than 50% from the day's best makes the bot sell everything and stop for the day. The Lab page (*Account rules*) shows what it would have done on recent prices.
 
-## 8. What to watch: daily checklist
+## 8. Long-term holdings: the core and the rotation sleeve
+
+Most of the account's result is meant to come from two long-term holdings. They are decided at the first tick after the open, kept overnight, never sold by the close-of-day flatten, the daily loss limit or the profit lock, and kept by *Stop + flatten* unless you tick *Also sell the long-term holdings*. The nightly strategy check never touches them.
+
+### The core: VOO
+
+- Normally 30% of the account. Each morning the target becomes 30% x normal volatility / today's volatility, kept between 15% and 45%: calmer markets → a bigger core, jumpier markets → a smaller one (volatility = an exponentially weighted average of daily moves; normal = its median over the last 5 years).
+- It trades only when its share is more than 5 points away from the target, about 10 times a year.
+- Why: in the backtests (2019-2026) this roughly halved the losses in the 2020, 2022 and 2025 drops for about half a point a year less in normal years (docs/STRATEGY_EVIDENCE.md sections 12 and 15).
+
+### The rotation sleeve: 40% in sector funds
+
+- Once a month (first open tick of the month) it ranks the 11 sector funds (XLK, XLV, XLE, XLF, XLI, XLY, XLP, XLU, XLB, XLRE, XLC) by their return from 12 month-ends ago to the last-but-one month-end, and holds the top 5, but only those above their 10-month average.
+- Each fund is sized by how jumpy it is (at most 8% of the account); money not placed stays in cash. On the Live page amber chips mark funds in the top that are below their trend.
+- It trades a fund only when it is more than 1 point(s) away from its target.
+- Why: over 1927-2026 industry rotation earned about the market's return with half the ups and downs and a third of the worst drop; since 1999 the gain is smaller, and over 2017-2026 it trailed simply holding SPY (sections 23-24). It is a risk reducer, not a promise of more return.
+
+### How the daily report judges them
+
+The report's **Where the result came from** table compares each part with its fair yardstick: the core with keeping the shares it had at the start, the rotation with an equal mix of all sector funds with the same money, the trading jobs with holding the same symbols, and the whole account with SPY at the share actually invested.
+
+## 9. What to watch: daily checklist
 
 Look at the Live page a few times a day and read the daily report after the close. 🟢 green = fine, 🟠 amber = keep an eye on it, 🔴 red = act now.
 
 | Check | Green | Amber | Red: what to do |
 |---|---|---|---|
 | Day P&L vs the daily loss limit | above -1% | -1% to -1.6% | below -1.6% or the bot halted: the limit (2.0%) will stop it; don't restart it the same day |
-| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 10) |
+| Deepest dip this week (weekly report) | less than 2% | 2% to 4% | more than 4%: review the strategies (section 11) |
 | Number of trades vs a normal day | similar to the last 5 reports | twice as many or none at all | many times more: check the log and the jobs; stop the bot if unsure |
 | Errors in the bot log (Live page) | none | an occasional data error (the bot skips that bar) | errors every bar, or CRITICAL/WATCHDOG lines: see troubleshooting |
 | Last tick / heartbeat | last tick within one 5Min bar; beat under 10 s | last tick 1-3 bars old | heartbeat over 90 s, status 'unresponsive', or last tick more than 3 bars old: stop and restart |
 | Strategy switching (reports, Shifting jobs) | 0-4 switches a day per symbol | 5-8 a day | more than 8 a day: switching costs money; test a larger confirm_bars in the Lab |
 | A symbol stuck in a position | positions change when signals change | an intraday strategy still holding late in the day | a position held with no job on that symbol: close it on the Live page or the Alpaca website |
 | Nightly strategy check (Recalibrate page) | the proposal date is the last trading day; status applied (or nothing to change) | items *waiting to apply* for more than a day (a coin position that never closes) | *Last automatic run failed*: read the message; the bot keeps yesterday's jobs. Press Run now once the cause is fixed |
+| Long-term holdings (Live page cards) | core share inside its band; rotation holdings as last month | the core outside its band for a whole day (it rebalances at the next open) | a long-term fund sold during the day, or held funds missing: check the log for CORE / ROTATION lines |
+| Trading jobs vs holding (Jobs tile, report) | about level with holding the same symbols | behind holding for a week | far behind for several weeks: consider switching the jobs off (they are a live check, not the main return) |
 | News collector (News page, top) | *news collector running*, last story received within the hour during market hours | nothing received for 1-2 hours while the market is open | *stopped*, or the daily report says it wasn't receiving stories live: double-click **start_news.bat** (trading isn't affected) |
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
@@ -422,10 +473,10 @@ Look at the Live page a few times a day and read the daily report after the clos
 | You want to undo a strategy change | The nightly check switched a job you preferred | Copy the newest file from data\recalibration\config_backups over config.yaml (the bot uses it from its next bar), then set `recalibration: mode: propose` so it isn't changed again tonight without your Apply. |
 | Account result in a report looks far too big | The broker's history counted a deposit (it does this in a paper account's first days) | The report leaves out jumps over 10% in 5 minutes and says so in a note at the top; if there is no note, check the Alpaca website. |
 
-## 10. Weekly review
+## 11. Weekly review
 
 1. Reports page → **Last 7 days**. Read the headline, then the charts.
-2. Check: the result against simply holding SPY, the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.
+2. Check the report's **Where the result came from** table: the core against keeping its shares, the rotation against an equal mix of all sector funds, the trading jobs against holding the same symbols, and the whole account against SPY at the share invested. Then the number of trades, the worst trade, the deepest dip, and the 'What didn't' list.
 3. Compare with the last few weeks' reports; one bad week alone says little.
 4. Earnings dates: if a company we trade has announced its next results date, add it to config.yaml (section 6, *Earnings dates*).
 5. Recalibrate page: how many strategy changes happened this week and why (the reasons are on the page and in the daily reports). Several changes on the same symbol week after week means no strategy works well there; consider leaving it out of the trading list.
@@ -434,6 +485,7 @@ Look at the Live page a few times a day and read the daily report after the clos
 
 - It trailed simply holding SPY for three weeks in a row while trading a lot.
 - Its deepest dip in a week was more than 4%.
+- Remember the Lab's backtests use the same signal rules as the live jobs (shown at the top of each Lab page), so they compare directly.
 - The report keeps saying 'many small losses in a sideways market' for a trend strategy (or the reverse for a dip-buying strategy).
 - It switches strategies more than 8 times a day on a symbol, week after week.
 
