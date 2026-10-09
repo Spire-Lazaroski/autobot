@@ -6,6 +6,8 @@ import { Confirm } from "../components/Confirm";
 import { JobsEditor } from "../components/JobsEditor";
 import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
+import { CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, SplitBar,
+  type EquityRow, type JobsVsHold, type LogEntry, type Split } from "../components/LiveOverview";
 import { api, type Candles, type Fill, type Row } from "../lib/api";
 import { colorFor, fmt, nyTime, pnl, signed } from "../lib/format";
 import { useLiveSocket } from "../lib/useLiveSocket";
@@ -27,9 +29,13 @@ interface Snapshot {
     symbols: Record<string, SymView>;
     core?: CoreView;
     rotation?: RotationView;
+    split?: Split;
   };
   trades: Row[];
   log: string[];
+  log_entries?: LogEntry[];
+  equity_today?: EquityRow[];
+  jobs_vs_hold?: JobsVsHold | null;
   ok: boolean;
   error?: string;
   account?: { number_tail: string; status: string; equity: number; last_equity: number; day_pnl: number; day_pnl_pct: number; cash: number; buying_power: number };
@@ -153,6 +159,8 @@ export function Live() {
   const st = d?.status;
   const longTerm = [st?.core?.enabled ? `${st.core.symbol} (core, ${fmt(st.core.qty, 0)} shares)` : "",
     ...Object.entries(st?.rotation?.enabled ? st.rotation.held : {}).map(([k, v]) => `${k} ${fmt(v, 0)}`)].filter(Boolean).join(", ");
+  const longTermSet = useMemo(() => new Set<string>([...(st?.core?.enabled ? [st.core.symbol] : []),
+    ...(st?.rotation?.enabled ? st.rotation.symbols : [])]), [st?.core, st?.rotation]);
   const alive = !!bot && (bot.running || !!bot.unresponsive);
   const state = !bot ? "…" : bot.stop_requested && alive ? "stopping" : bot.unresponsive ? "unresponsive"
     : bot.running ? (st?.halted ? "halted" : "running") : "stopped";
@@ -180,6 +188,7 @@ export function Live() {
         <span className="text-[12px] text-muted">market <b className={d?.market?.is_open ? "text-up" : "text-fg"}>{d?.market ? (d.market.is_open ? "open" : "closed") : "–"}</b>
           {d?.market && <span className="num text-dim"> · {d.market.is_open ? `closes ${nyTime(d.market.next_close)}` : `opens ${nyTime(d.market.next_open)}`}</span>}
         </span>
+        {st && <span className="text-[11px] text-muted num">last tick {ts(st.time)} · {st.timeframe ?? ""} bars · {st.jobs?.length ?? 0} jobs</span>}
         <span className="text-[11px] text-muted num flex items-center gap-1.5">
           <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-up" : "bg-down"}`} />
           {connected ? `live · ${lastAt ? new Date(lastAt).toLocaleTimeString() : ""}` : "reconnecting…"}
@@ -199,33 +208,24 @@ export function Live() {
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
             <Kpi label={`Paper equity · ···${acct?.number_tail ?? ""}`} value={acct ? `$${fmt(acct.equity)}` : "–"} sub={acct?.status} />
             <Kpi label="Day P&L" value={acct ? `${signed(acct.day_pnl)}` : "–"} tone={pnl(acct?.day_pnl)} sub={acct ? `${signed(acct.day_pnl_pct, 3)}%` : undefined} />
-            <Kpi label="Buying power" value={acct ? `$${fmt(acct.buying_power, 0)}` : "–"} sub={acct ? `cash $${fmt(acct.cash, 0)}` : undefined} />
-            <Kpi label="Open positions" value={d.positions.length}
-              sub={`unrealized ${signed(d.positions.reduce((a, p) => a + (p.unrealized_pl ?? 0), 0))}`} />
-            <Kpi label="Bot last tick" value={st ? ts(st.time) : "–"} sub={st ? `${st.timeframe ?? ""} bars · ${st.jobs?.length ?? 0} jobs` : "no status yet"} />
+            <Kpi label="Long-term today" value={st?.split ? signed(st.split.long_term_pl_today) : "–"} tone={pnl(st?.split?.long_term_pl_today)} sub="core + rotation" />
+            <Kpi label="Jobs today" value={st?.split ? signed(st.split.jobs_pl_today) : "–"} tone={pnl(st?.split?.jobs_pl_today)}
+              sub={`${st?.jobs?.length ?? 0} jobs · realized + open`} />
+            <Kpi label="Cash" value={acct ? `$${fmt(acct.cash, 0)}` : "–"} sub={acct && acct.equity ? `${fmt((acct.cash / acct.equity) * 100, 0)}% of equity` : undefined} />
           </div>
 
-          <div className="grid grid-cols-1 gap-3">{/* one table per row: side by side they needed a sideways scroll */}
-            <CorePanel core={st?.core} positions={d.positions} />
-            <RotationPanel rot={st?.rotation} />
-            <Panel title="Positions">
-              {d.positions.length ? (
-                <SortTable rows={d.positions} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }}
-                  cols={[
-                    { key: "symbol", label: "Symbol", render: (r) => <span className="num font-semibold">{r.symbol}</span> },
-                    { key: "qty", label: "Qty", digits: 4 },
-                    { key: "avg_entry_price", label: "Avg" },
-                    { key: "current_price", label: "Last" },
-                    { key: "market_value", label: "Value", digits: 0 },
-                    { key: "unrealized_pl", label: "P&L $", tone: true },
-                    { key: "unrealized_plpc", label: "P&L %", tone: true },
-                    { key: "unrealized_intraday_pl", label: "Today $", tone: true },
-                    { key: "from_peak", label: "From peak", align: "left", title: "Best price since the bot opened this position (display only)",
-                      render: (r) => { const pk = peakOf(st?.symbols, r.symbol);
-                        return <span className="num whitespace-nowrap text-muted">{pk ? `gave back ${fmt(pk.gave_back_pct, 2)}% from ${fmt(pk.peak, 2)}` : "–"}</span>; } },
-                  ]} />
-              ) : <p className="text-muted text-[12px]">No open positions.</p>}
-            </Panel>
+          <SplitBar split={st?.split} cash={acct?.cash} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <CoreCard core={st?.core} />
+            <RotationCard rot={st?.rotation} />
+            <JobsCard split={st?.split} jobs={st?.jobs?.length ?? 0} jvh={d.jobs_vs_hold}
+              positions={d.positions.filter((p) => !longTermSet.has(p.symbol)).length} rules="No quick re-entry on · daily loss limit applies" />
+          </div>
+          <EquityChart rows={d.equity_today ?? []} fills={d.orders.filter((o) => o.status === "filled" && o.submitted_at)
+            .map((o) => ({ t: Date.parse(String(o.submitted_at)) / 1000, side: String(o.side) }))} />
+          <PositionsSplit positions={d.positions} longTerm={longTermSet}
+            extra={(r) => { const pk = peakOf(st?.symbols, r.symbol); return pk ? `gave back ${fmt(pk.gave_back_pct, 2)}% from ${fmt(pk.peak, 2)}` : null; }} />
+          <div className="grid grid-cols-1 gap-3">
             <Panel title="Bot view per symbol (last tick)">
               {st && Object.keys(st.symbols).length ? (
                 <SortTable rows={Object.entries(st.symbols).map(([symbol, v]) => ({ symbol, ...v }))} rowKey={(r) => r.symbol}
@@ -296,13 +296,10 @@ export function Live() {
                 </ul>
               ) : <p className="text-muted text-[12px]">None since the bot started.</p>}
             </Panel>
-            <Panel title="Bot log (tail)">
-              <pre className="num text-[10.5px] leading-snug max-h-60 overflow-auto whitespace-pre-wrap text-muted">
-                {d.log.slice(-40).map((l, i) => (
-                  <div key={i} className={/ERROR/.test(l) ? "text-down" : /WARNING|CONFIG|FLATTEN/.test(l) ? "text-warn" : /ORDER/.test(l) ? "text-fg" : ""}>{l}</div>
-                ))}
-              </pre>
-            </Panel>
+            {d.log_entries ? <LogPanel entries={d.log_entries} /> : (
+              <Panel title="Bot log (tail)">
+                <pre className="num text-[10.5px] leading-snug max-h-60 overflow-auto whitespace-pre-wrap text-muted">{d.log.slice(-40).join("\n")}</pre>
+              </Panel>)}
           </div>
         </>
       )}
@@ -322,63 +319,6 @@ export function Live() {
       )}
     </div>
   );
-}
-
-/** The core holding: what it holds against its target share, and what it last did. */
-function CorePanel({ core, positions }: { core?: CoreView; positions: Row[] }) {
-  if (!core) return null;
-  if (!core.enabled) {
-    const held = positions.find((p) => p.symbol === core.symbol);
-    return (
-      <Panel title="Core holding">
-        <p className="text-muted text-[12px]">Off. When switched on (<code>live.core.enabled: true</code> in config.yaml) the bot holds {core.symbol} long
-          term as {core.allocation_pct}% of the account, outside the trading jobs.{held ? ` ${core.symbol} is held now (${fmt(held.qty, 0)} shares) but not managed as the core.` : ""}</p>
-      </Panel>);
-  }
-  const tgt = core.vol_target?.target_pct ?? core.allocation_pct;
-  const w = core["weight_%"], lo = tgt - core.rebalance_band_pct, hi = tgt + core.rebalance_band_pct;
-  return (
-    <Panel title={`Core holding · ${core.symbol}`}>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[12px]">
-        <div><div className="text-muted">Held</div><div className="num font-semibold">{fmt(core.qty, 0)} shares</div></div>
-        <div><div className="text-muted">Value</div><div className="num font-semibold">{core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</div></div>
-        <div><div className="text-muted">Share of the account</div>
-          <div className="num font-semibold">{w !== undefined && w !== null ? `${fmt(w, 1)}%` : "–"} <span className="text-muted font-normal">target {fmt(tgt, 1)}%</span></div></div>
-        <div><div className="text-muted">Rebalances if outside</div><div className="num font-semibold">{lo}% – {hi}%</div></div>
-      </div>
-      <p className="text-[11.5px] text-muted mt-2">
-        {core.vol_target ? `Today's target: ${core.vol_target.reason} (from closes up to ${core.vol_target.as_of}). ` : ""}
-        {core.last_action ? `Last action ${ts(core.last_action.time)}: ${core.last_action.reason}. ` : "No core order since the bot started. "}
-        Held long term: not sold before the close or by the daily loss limit or profit lock, which count the trading jobs only.
-        Checked once a day at the first tick after the open.</p>
-    </Panel>);
-}
-
-/** The rotation sleeve: this month's ranking, what it holds and why. */
-function RotationPanel({ rot }: { rot?: RotationView }) {
-  if (!rot || !rot.enabled) return null;
-  const t = rot.target;
-  return (
-    <Panel title={`Rotation sleeve · ${rot.allocation_pct}% of the account, top ${rot.top_n} sector funds monthly`}>
-      {!t ? <p className="text-muted text-[12px]">Decides at the first tick after the next open (then once a month).</p> : (
-        <>
-          <p className="text-[12px] mb-2">From month-end closes up to {t.as_of}: holding {Object.keys(t.weights).length
-            ? Object.entries(t.weights).map(([k, v]) => `${k} ${fmt(v, 1)}%`).join(", ") : "nothing (all in cash)"}
-            {" "}= {fmt(t["invested_%"], 1)}% of the account; the rest of the sleeve stays in cash.</p>
-          <table className="w-full text-[12px]">
-            <thead><tr className="text-muted text-left"><th>Rank</th><th>Fund</th><th className="text-right">12-month return</th>
-              <th>Above its 10-month average</th><th className="text-right">Volatility</th><th className="text-right">Held</th></tr></thead>
-            <tbody>{t.ranking.map((r) => (
-              <tr key={r.symbol} className={t.weights[r.symbol] ? "font-semibold" : "text-muted"}>
-                <td>{r.rank}</td><td>{r.symbol}</td><td className="num text-right">{fmt(r["momentum_%"], 1)}%</td>
-                <td>{r.above_trend ? "yes" : "no"}</td><td className="num text-right">{fmt(r["volatility_%"], 0)}%</td>
-                <td className="num text-right">{rot.held[r.symbol] ? fmt(rot.held[r.symbol], 0) : "–"}</td></tr>))}</tbody>
-          </table>
-        </>)}
-      <p className="text-[11.5px] text-muted mt-2">
-        {rot.last_actions?.length ? `Last orders: ${rot.last_actions.map((a) => `${a.qty > 0 ? "buy" : "sell"} ${Math.abs(a.qty)} ${a.symbol}`).join(", ")}. ` : ""}
-        Held long term like the core: not sold before the close or by the daily loss limit or profit lock. Checked at the first tick of each month.</p>
-    </Panel>);
 }
 
 /** Alpaca reports BTC/USD positions as BTCUSD; the bot's status uses the job symbol. */

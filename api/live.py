@@ -118,6 +118,78 @@ def _log_tail(n=60) -> List[str]:
     return lines[-n:]
 
 
+def _equity_today(max_lines: int = 3000) -> List[Dict]:
+    """The latest trading day's rows of logs/equity.jsonl (written by the bot each tick while the market
+    is open): time (unix s), equity, long-term holdings' value and today's P&L split."""
+    f = LOGS / "equity.jsonl"
+    if not f.exists():
+        return []
+    with open(f, "rb") as fh:
+        fh.seek(0, 2)
+        fh.seek(max(0, fh.tell() - max_lines * 200))
+        lines = fh.read().decode("utf-8", "replace").splitlines()[1:]
+    rows = []
+    for l in lines:
+        try:
+            rows.append(json.loads(l))
+        except ValueError:
+            continue
+    if not rows:
+        return []
+    day = lambda r: pd.Timestamp(r["t"]).tz_convert("America/New_York").date()  # noqa: E731
+    last = day(rows[-1])
+    return [{**r, "t": int(pd.Timestamp(r["t"]).timestamp())} for r in rows if day(r) == last]
+
+
+def _log_entries(lines: List[str]) -> List[Dict]:
+    """Bot log lines grouped into entries: a line starting with a date opens an entry, every other line
+    (tracebacks) becomes its details, so errors show as one line with the details on demand."""
+    out: List[Dict] = []
+    for l in lines:
+        if len(l) > 10 and l[:4].isdigit() and l[4] == "-" or not out:
+            out.append({"line": l, "details": []})
+        else:
+            out[-1]["details"].append(l)
+    for e in out:
+        if e["details"]:
+            last = next((d for d in reversed(e["details"]) if d.strip()), "")
+            e["summary"] = last.strip()[:200]
+    return out
+
+
+_jvh: Dict[str, Any] = {"day": None, "data": None, "busy": False}
+
+
+def _jobs_vs_hold() -> Optional[Dict]:
+    """Trading jobs vs simply holding the same symbols (open to close-out, same size), summed over the
+    days since the bot's decision log starts (autobot.llm_judge.jobs_vs_hold, from broker fills). Worked
+    out once a day in the background; None until the first result is ready."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if _jvh["day"] != today and not _jvh["busy"]:
+        _jvh["busy"] = True
+
+        def work():
+            try:
+                from autobot import llm_judge as lj
+                recs = lj.decisions()
+                days = sorted({lj._t(r).tz_convert("America/New_York").date().isoformat() for r in recs
+                               if r.get("type") == "decision" and r.get("job") not in (None, "core", "rotation")
+                               and r.get("action") in ("buy", "sell", "flatten before close")})
+                days = [d for d in days if d < today][-20:]
+                rows = [r for r in lj.jobs_vs_hold(recs, days) if "error" not in r]
+                _jvh["data"] = {"from": days[0] if days else None, "to": days[-1] if days else None, "job_days": len(rows),
+                                "strategy_usd": round(sum(r["strategy_usd"] for r in rows), 2),
+                                "hold_usd": round(sum(r["hold_usd"] or 0 for r in rows), 2)}
+                _jvh["day"] = today
+            except Exception as e:  # noqa: BLE001  display only
+                _jvh["data"] = {"error": f"{type(e).__name__}: {e}"}
+                _jvh["day"] = today
+            finally:
+                _jvh["busy"] = False
+        threading.Thread(target=work, daemon=True, name="jobs_vs_hold").start()
+    return _jvh["data"]
+
+
 def snapshot() -> Dict:
     """Everything the Live page shows. Shared by all WebSocket clients and cached for a
     moment, so several open tabs don't multiply Alpaca requests (3 per refresh)."""
@@ -125,7 +197,8 @@ def snapshot() -> Dict:
         if _snap["data"] is not None and time.time() - _snap["at"] < PUSH_SECONDS - 0.5:
             return _snap["data"]
     data = {"time": int(time.time()), "bot": bot_state(), "status": _read_json(LOGS / "status.json"),
-            "trades": _trades(), "log": _log_tail(), **_account()}
+            "trades": _trades(), "log": _log_tail(), "log_entries": _log_entries(_log_tail(120)),
+            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), **_account()}
     with _snap_lock:
         _snap.update(at=time.time(), data=data)
     return data
