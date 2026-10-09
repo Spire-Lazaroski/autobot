@@ -65,6 +65,8 @@ class ReportInput:
     notes: List[str] = field(default_factory=list)
     news: Dict = field(default_factory=dict)  # report_news.collect(...); empty = no news section
     recal: Dict = field(default_factory=dict)  # report_recal.collect(...); live reports only
+    split: Dict = field(default_factory=dict)  # report_split.build(...): where the result came from; live only
+    rebalances: List[Dict] = field(default_factory=list)  # core / rotation orders in the period (not job trades)
 
 
 def _trade_dict(symbol, side, qty_text, entry_time, entry_price, exit_time, exit_price, pnl, pnl_pct,
@@ -188,7 +190,11 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
             first_pos[r["symbol"]] = float(r.get("position_before") or 0)
     trades, open_pos = _round_trips_from_fills(fills, a, b, by_order, recs, first_pos)
 
-    symbols = sorted({f["symbol"] for f in fills if a <= f["time"] < b} | {r["symbol"] for r in recs if "symbol" in r})
+    core_cfg, rot_cfg = cfg["live"].get("core") or {}, cfg["live"].get("rotation") or {}
+    core_sym = core_cfg.get("symbol", "VOO") if core_cfg.get("enabled") else None
+    rot_syms = list(rot_cfg.get("symbols") or []) if rot_cfg.get("enabled") else []
+    long_term = ({core_sym} if core_sym else set()) | set(rot_syms)
+    symbols = sorted(({f["symbol"] for f in fills if a <= f["time"] < b} | {r["symbol"] for r in recs if "symbol" in r}) | long_term)
     bench_sym = "SPY"
     bars = {}
     for s in dict.fromkeys(symbols + [bench_sym]):
@@ -202,6 +208,33 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
     if bench_sym in bars and len(bars[bench_sym]):
         c = bars[bench_sym].close
         bench = start_equity * c / c.iloc[0]
+    # where the result came from (core / rotation / jobs / account), each against its fair comparison
+    split, rebalances = {}, []
+    if long_term:
+        try:
+            from . import report_split
+            from .llm_judge import jobs_vs_hold
+            since = tc.get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, after=a.to_pydatetime(), limit=500))
+            since = [{"symbol": o.symbol, "side": getattr(o.side, "value", str(o.side)), "qty": float(o.filled_qty),
+                      "price": float(o.filled_avg_price), "time": pd.Timestamp(o.filled_at)}
+                     for o in since if o.filled_at is not None and o.filled_avg_price]
+            now = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
+            q0 = report_split.start_quantities(now, since)
+            in_period = [f for f in since if f["time"] < b]
+            days = sorted({_ny(t).date().isoformat() for t in eq.index})
+            jv = jobs_vs_hold(recs, days)
+            split = report_split.build(core_sym, rot_syms, q0, in_period, bars, eq, jv, bars.get(bench_sym))
+            acc = split.get("account")
+            if acc and bench is not None:          # SPY at the share of the account actually invested
+                c = bars[bench_sym].close
+                bench = start_equity * (1 + acc["share"] * (c / c.iloc[0] - 1))
+                bench_sym_label = f"SPY at the {acc['share'] * 100:.0f}% invested"
+            rebalances = [r for r in recs if r["type"] == "decision" and r.get("job") in ("core", "rotation")
+                          and r.get("action") in ("buy", "sell")]
+        except Exception as e:  # noqa: BLE001  the split is an extra; the report still works without it
+            notes.append(f"The split of the result into long-term holdings and trading jobs isn't available ({e}).")
+    trades = [t for t in trades if t["symbol"] not in long_term]
+    open_pos = {k: v for k, v in open_pos.items() if k not in long_term}
     jobs = [j for j in cfg["live"].get("jobs", []) if j.get("enabled", True)]
     job_syms = [s for j in jobs for s in j["symbols"]]
     nd = report_news.collect(sorted(set(symbols) | set(job_syms)), a, b, "live",
@@ -210,7 +243,9 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
     return ReportInput(
         title="Daily trading report" if d0 == d1 else "Trading report", period_label=_period(a, b - pd.Timedelta(seconds=1), days_only=True),
         source="Alpaca paper account (pretend money)", kind="live", is_demo=False, start_equity=start_equity, equity=eq,
-        benchmark=bench, benchmark_symbol=bench_sym, bars={s: d for s, d in bars.items() if s in symbols or s == bench_sym},
+        benchmark=bench, benchmark_symbol=locals().get("bench_sym_label", bench_sym),
+        bars={s: d for s, d in bars.items() if (s in symbols and s not in long_term) or s == bench_sym},
+        split=split, rebalances=rebalances,
         records=sorted(recs, key=lambda r: r.get("bar_time") or r["time"]), trades=trades,
         limits=dict(cfg["live"].get("risk", {})), open_positions=open_pos, notes=notes, news=nd,
         recal=_recal_or_note(a, b, notes))
@@ -729,6 +764,29 @@ HEADER ="""<header class="spire-hdr">
 </header>"""
 
 
+def _split_html(sp: Dict) -> str:
+    """'Where the result came from': each part next to its fair comparison (autobot.report_split)."""
+    if not sp or not sp.get("parts"):
+        return ""
+    rows = []
+    for p in sp["parts"]:
+        fair = p.get("fair")
+        diff = (p["pnl"] - fair) if fair is not None else None
+        cls = "profit" if p["pnl"] > 0 else "loss" if p["pnl"] < 0 else ""
+        rows.append(f"<tr><td><b>{_esc(p['label'])}</b></td><td class='{cls}'>{_money(p['pnl'], True)}</td>"
+                    f"<td>{_money(fair, True) if fair is not None else '–'}<br><span class='muted'>{_esc(p['fair_label'])}</span></td>"
+                    f"<td>{_money(diff, True) if diff is not None else '–'}</td></tr>")
+    acc = sp.get("account")
+    if acc:
+        diff = acc["pnl"] - acc["spy_matched"]
+        rows.append(f"<tr><td><b>Whole account</b></td><td class='{'profit' if acc['pnl'] > 0 else 'loss' if acc['pnl'] < 0 else ''}'>"
+                    f"{_money(acc['pnl'], True)}</td><td>{_money(acc['spy_matched'], True)}<br><span class='muted'>SPY with the "
+                    f"{acc['share'] * 100:.0f}% of the account that was invested on average</span></td><td>{_money(diff, True)}</td></tr>")
+    return (f"<h2>Where the result came from</h2><p class='muted'>{_esc(plain.REPORT_SPLIT['intro'])}</p>"
+            "<table><tr><th>Part</th><th>Result</th><th>Fair comparison</th><th>Difference</th></tr>" + "".join(rows) + "</table>"
+            f"<p class='muted'>{_esc(plain.REPORT_SPLIT['note'])}</p>")
+
+
 def render(ri: ReportInput) -> str:
     w = Words()
     a = analyse(ri)
@@ -787,6 +845,11 @@ def render(ri: ReportInput) -> str:
     demo = ('<p class="note"><b>Demo data.</b> These prices are made up to test the software. '
             "The numbers below say nothing about how the strategy would do in real markets.</p>") if ri.is_demo else ""
     notes = "".join(f'<p class="note">{_esc(n)}</p>' for n in ri.notes)
+    split_html = _split_html(ri.split)
+    rebal_html = ("<h2>Long-term holdings: rebalances</h2><ul>" + "".join(
+        f"<li>{_esc(_ny(pd.Timestamp(r.get('bar_time') or r['time'])).strftime('%a %d %b %H:%M'))}: {_esc(r['action'])} "
+        f"{r.get('qty', 0):g} {_esc(r['symbol'])} at about {_money(float(r.get('price') or 0))}. {_esc(r.get('reason', ''))}</li>"
+        for r in ri.rebalances) + "</ul>") if ri.rebalances else ""
     generated = datetime.now(LOCAL).strftime("%d %b %Y %H:%M")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -805,6 +868,7 @@ body{{margin:0}} .sp-doc svg text{{font-family:Inter,sans-serif}}
 {demo}{notes}
 <div class="grid" style="margin-top:14px">{kpis}</div>
 
+{split_html}
 <h2>Account value through the period</h2>
 <figure>{equity_chart(ri)}<figcaption>Percentage change from the start of the period. The dotted grey line is simply holding {_esc(ri.benchmark_symbol)} with the same money.</figcaption></figure>
 
@@ -812,7 +876,8 @@ body{{margin:0}} .sp-doc svg text{{font-family:Inter,sans-serif}}
 <h2>What happened, in order</h2>
 {"<ol class='timeline'>" + li(tl) + "</ol>" if tl else "<p class='muted'>No changes in market mood or strategy were recorded.</p>"}
 
-<h2>Every trade</h2>
+{rebal_html}
+<h2>Every trade by the trading jobs</h2>
 {"<ol>" + trades_html + "</ol>" if trades else "<p class='muted'>No trades in this period.</p>"}
 
 <h2>Prices, trades and market mood</h2>
