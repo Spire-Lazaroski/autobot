@@ -52,12 +52,13 @@ export function Panel({ title, right, children, className = "" }: { title?: Reac
   );
 }
 
-export function Kpi({ label, value, sub, tone = "text-fg" }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {
+export function Kpi({ label, value, sub, tone = "text-fg", extra }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string; extra?: ReactNode }) {
   return (
-    <div className="panel px-3 py-2 min-w-0">
+    <div className="panel px-3 py-2.5 min-w-0">
       <div className="text-[10px] uppercase tracking-wider text-muted truncate">{label}</div>
-      <div className={`num text-[17px] font-semibold ${tone} truncate`}>{value}</div>
+      <div className={`num text-[19px] font-semibold leading-tight ${tone} truncate`}>{value}</div>
       {sub && <div className="num text-[11px] text-muted truncate">{sub}</div>}
+      {extra && <div className="mt-1.5">{extra}</div>}
     </div>
   );
 }

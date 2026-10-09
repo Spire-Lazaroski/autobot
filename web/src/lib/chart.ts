@@ -19,6 +19,7 @@ export const C = {
   profit: extra.profit,
   loss: extra.loss,
   grey: benchmarkGrey,
+  faint: chart.faint,
   candleUp: chart.candleUp,
   candleDown: chart.candleDown,
   series,

@@ -209,7 +209,7 @@ function Body({ d, periodKey, setPeriodKey, sym, setSym, curve, setCurve, more, 
             <button className={`btn ${curve === "period" ? "btn-primary" : ""}`} onClick={() => setCurve("period")}>whole period</button>
             <button className={`btn ${curve === "test" ? "btn-primary" : ""}`} onClick={() => setCurve("test")}>test days</button>
           </div>
-          <Plot height={300} data={Object.entries(eq).filter(([k]) => shown.includes(k)).map(([k, v]) => ({
+          <Plot height={300} area="main" data={Object.entries(eq).filter(([k]) => shown.includes(k)).map(([k, v]) => ({
             x: v.map((p) => p[0]), y: v.map((p) => (p[1] - 1) * 100), name: name(k), type: "scatter", mode: "lines",
             line: k === "buy_hold" ? { color: C.grey, width: 1.5, dash: "dot" } : { color: colour[k] ?? C.inkFaint, width: k === d.base_policy || k === "walk_forward" ? 2.2 : 1.4 },
           }))} layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 10, t: 8, b: 36 }, legend: { orientation: "h", y: -0.2 } }} />

@@ -125,7 +125,7 @@ function Results({ res }: { res: WFResult }) {
       </div>
 
       <Panel title={`Out-of-sample equity from ${nyTime(res.oos_start)} · shaded = alternate test windows`}>
-        <Plot height={380}
+        <Plot height={380} area="main"
           data={(Object.keys(LINES) as (keyof typeof LINES)[]).map((k) => ({
             x, y: res.equity.series[k].map((v) => (v === null ? null : (v - 1) * 100)), name: LINES[k].label, type: "scatter", mode: "lines",
             line: { color: LINES[k].color, dash: LINES[k].dash, width: LINES[k].width }, hovertemplate: "%{y:.2f}%",

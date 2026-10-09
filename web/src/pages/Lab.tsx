@@ -139,12 +139,12 @@ function Results({ res, req, onOpen }: { res: CompareResult; req: CompareReq; on
       </div>
 
       <Panel title="Equity (equal weight across symbols, % return)">
-        <Plot data={equityTraces} height={380} layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 12, t: 8, b: 32 } }} />
+        <Plot data={equityTraces} height={380} area="zero" layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 12, t: 8, b: 32 } }} />
       </Panel>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <Panel title="Drawdown %">
-          <Plot data={ddTraces} height={280} layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 12, t: 8, b: 32 } }} />
+          <Plot data={ddTraces} height={280} area="zero" layout={{ yaxis: { ticksuffix: "%" }, margin: { l: 48, r: 12, t: 8, b: 32 } }} />
         </Panel>
         <Panel title="Return vs drawdown (bubble = trades)">
           <Plot height={280} onClick={(e) => e.points?.[0] && onOpen(e.points[0].text)}

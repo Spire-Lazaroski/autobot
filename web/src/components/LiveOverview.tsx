@@ -50,7 +50,7 @@ export function SplitBar({ split, cash }: { split?: Split; cash?: number }) {
     { w: jobs, c: GREYS.jobs, label: `Jobs ${fmt(jobs, 1)}%` },
   ];
   return (
-    <Panel title="Account split · now vs target">
+    <Panel title={<Title icon="bi-columns-gap">Account split · now vs target</Title>}>
       <div className="flex h-3 rounded overflow-hidden bg-sunk">
         {parts.map((p, i) => <div key={i} style={{ width: `${p.w}%`, background: p.c }} title={p.label} />)}
       </div>
@@ -62,21 +62,94 @@ export function SplitBar({ split, cash }: { split?: Split; cash?: number }) {
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return <Panel title={title}><div className="text-[12px] flex flex-col gap-0.5">{children}</div></Panel>;
+/** Card header with a small icon (Bootstrap Icons, already loaded by the app). */
+export function Title({ icon, children }: { icon: string; children: React.ReactNode }) {
+  return <span className="inline-flex items-center gap-1.5"><i className={`bi ${icon} text-muted`} aria-hidden="true" />{children}</span>;
+}
+
+export type Tone = "up" | "down" | "warn" | "neutral" | "dark";
+const CHIP: Record<Tone, string> = {
+  up: "bg-up/10 text-up", down: "bg-down/10 text-down", warn: "bg-warn/15 text-warn", neutral: "bg-panel-2 text-muted border border-line",
+  dark: "bg-fg text-panel",
+};
+export function Chip({ tone = "neutral", children, title }: { tone?: Tone; children: React.ReactNode; title?: string }) {
+  return <span title={title} className={`inline-flex items-center rounded-full px-2 py-px text-[10.5px] whitespace-nowrap ${CHIP[tone]}`}>{children}</span>;
+}
+
+/** Card with a grey header strip (title + optional status chip) and a white body. */
+function Card({ title, icon, chip, children }: { title: string; icon: string; chip?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="panel overflow-hidden min-w-0">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-panel-2 border-b border-line">
+        <h3 className="panel-title !text-fg"><Title icon={icon}>{title}</Title></h3>{chip}
+      </div>
+      <div className="px-3 py-2.5 text-[12px] flex flex-col gap-1.5">{children}</div>
+    </section>
+  );
+}
+
+/** KPI tile: warm grey surface, a coloured left edge carrying the meaning. */
+export function Tile({ label, value, sub, tone = "neutral", valueTone, extra }: {
+  label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; valueTone?: string; extra?: React.ReactNode;
+}) {
+  const edge = tone === "up" ? "border-l-up" : tone === "down" ? "border-l-down" : tone === "warn" ? "border-l-warn" : "border-l-line-2";
+  return (
+    <div className={`rounded-xl bg-panel-2 border border-line border-l-[3px] ${edge} px-3 py-2.5 min-w-0`}>
+      <div className="text-[10px] uppercase tracking-wider text-muted truncate">{label}</div>
+      <div className={`num text-[20px] font-semibold leading-tight truncate ${valueTone ?? "text-fg"}`}>{value}</div>
+      {sub && <div className="num text-[11px] text-muted truncate">{sub}</div>}
+      {extra && <div className="mt-1.5">{extra}</div>}
+    </div>
+  );
+}
+
+export const toneOf = (v: number | null | undefined): Tone => (v === null || v === undefined || v === 0 ? "neutral" : v > 0 ? "up" : "down");
+
+/** A small heading that splits the long page into blocks. */
+export function Section({ children }: { children: React.ReactNode }) {
+  return <div className="flex items-center gap-3 mt-1"><span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{children}</span>
+    <span className="flex-1 border-t border-line" /></div>;
+}
+
+/** A small grey area sparkline (style B), e.g. the account value through the day. */
+export function Sparkline({ values, height = 26 }: { values: number[]; height?: number }) {
+  if (values.length < 2) return <div style={{ height }} />;
+  const lo = Math.min(...values), hi = Math.max(...values), w = 120;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${hi === lo ? height / 2 : height - 2 - ((v - lo) / (hi - lo)) * (height - 4)}`);
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} width="100%" height={height} preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={`0,${height} ${pts.join(" ")} ${w},${height}`} fill={chart.ink} fillOpacity={0.1} />
+      <polyline points={pts.join(" ")} fill="none" stroke={chart.ink} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+/** A thin bar: the current share against a target (marker), both in % of the account. */
+export function ShareBar({ now, target, max = 100 }: { now: number; target?: number; max?: number }) {
+  return (
+    <div className="relative h-1.5 rounded-full" style={{ background: chart.faint }}>
+      <div className="h-1.5 rounded-full" style={{ width: `${Math.min(100, (now / max) * 100)}%`, background: chart.ink }} />
+      {target !== undefined && <div className="absolute -top-0.5 h-2.5 w-0.5" style={{ left: `${Math.min(100, (target / max) * 100)}%`, background: brand.amber }}
+        title={`target ${fmt(target, 1)}%`} />}
+    </div>
+  );
 }
 
 export function CoreCard({ core }: { core?: CoreLike }) {
   if (!core) return null;
-  if (!core.enabled) return <Card title="Core holding"><span className="text-muted">Off (live.core.enabled in config.yaml).</span></Card>;
+  if (!core.enabled) return <Card title="Core holding" icon="bi-bullseye" chip={<Chip>off</Chip>}><span className="text-muted">Off (live.core.enabled in config.yaml).</span></Card>;
   const tgt = core.vol_target?.target_pct ?? core.allocation_pct;
   const v = core.vol_target;
   return (
-    <Card title={`Core · ${core.symbol}`}>
-      <span className="num">{fmt(core.qty, 0)} shares · {core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</span>
-      <span className="num">{core["weight_%"] !== undefined && core["weight_%"] !== null ? `${fmt(core["weight_%"], 1)}%` : "–"}
-        <span className="text-muted"> · target {fmt(tgt, 1)}% · band {fmt(tgt - core.rebalance_band_pct, 1)}–{fmt(tgt + core.rebalance_band_pct, 1)}%</span></span>
-      {v && <span className="text-muted">{v.ratio < 0.9 ? "Calmer" : v.ratio > 1.1 ? "Jumpier" : "About as jumpy"} than normal: volatility {fmt(v.vol_pct, 1)}% vs {fmt(v.normal_pct, 1)}%</span>}
+    <Card title={`Core · ${core.symbol}`} icon="bi-bullseye"
+      chip={v ? <Chip tone={v.ratio < 0.9 ? "up" : v.ratio > 1.1 ? "warn" : "neutral"} title={v.reason}>{v.ratio < 0.9 ? "calm" : v.ratio > 1.1 ? "jumpy" : "normal"}</Chip> : undefined}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span><span className="num text-[17px] font-semibold">{core["weight_%"] !== undefined && core["weight_%"] !== null ? `${fmt(core["weight_%"], 1)}%` : "–"}</span>
+          <span className="text-muted"> of {fmt(tgt, 1)}% target</span></span>
+        <span className="num text-muted">{fmt(core.qty, 0)} sh · {core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</span>
+      </div>
+      {core["weight_%"] !== undefined && core["weight_%"] !== null && <ShareBar now={core["weight_%"]} target={tgt} max={50} />}
+      <span className="text-muted">{v ? `Volatility ${fmt(v.vol_pct, 1)}% vs normal ${fmt(v.normal_pct, 1)}% · ` : ""}band {fmt(tgt - core.rebalance_band_pct, 1)}–{fmt(tgt + core.rebalance_band_pct, 1)}%</span>
       <span className="text-muted">{core.last_action ? `Last: ${core.last_action.reason}` : "No core order since the bot started"}</span>
     </Card>
   );
@@ -84,15 +157,19 @@ export function CoreCard({ core }: { core?: CoreLike }) {
 
 export function RotationCard({ rot }: { rot?: RotationLike }) {
   const [open, setOpen] = useState(false);
-  if (!rot || !rot.enabled) return <Card title="Rotation sleeve"><span className="text-muted">Off (live.rotation.enabled in config.yaml).</span></Card>;
+  if (!rot || !rot.enabled) return <Card title="Rotation sleeve" icon="bi-arrow-repeat" chip={<Chip>off</Chip>}><span className="text-muted">Off (live.rotation.enabled in config.yaml).</span></Card>;
   const t = rot.target;
   const below = t ? t.ranking.filter((r) => r.rank <= rot.top_n && !r.above_trend).map((r) => r.symbol) : [];
   return (
-    <Card title={`Rotation · ${rot.allocation_pct}% sleeve, top ${rot.top_n} monthly`}>
+    <Card title={`Rotation · ${rot.allocation_pct}% sleeve, top ${rot.top_n}`} icon="bi-arrow-repeat" chip={<Chip>next check {nextMonth()}</Chip>}>
       {!t ? <span className="text-muted">Decides at the first tick after the next open.</span> : (<>
-        <span className="num">{Object.keys(t.weights).length ? Object.entries(t.weights).map(([k, v]) => `${k} ${fmt(v, 1)}%`).join(" · ") : "All in cash"}</span>
-        <span className="text-muted">{below.length ? `${below.join(", ")} in the top ${rot.top_n} but below trend: cash` : `Invested ${fmt(t["invested_%"], 1)}% of the account`}</span>
-        <span className="text-muted">As of {t.as_of} month-end closes ·{" "}
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(t.weights).sort((a, b) => b[1] - a[1]).map(([k, v]) => <Chip key={k} tone="dark">{k} {fmt(v, 1)}%</Chip>)}
+          {below.map((k) => <Chip key={k} tone="warn" title="in the top 5 but below its 10-month average: its share stays in cash">{k} below trend</Chip>)}
+          {!Object.keys(t.weights).length && <Chip>all in cash</Chip>}
+        </div>
+        <ShareBar now={t["invested_%"]} target={rot.allocation_pct} max={50} />
+        <span className="text-muted">{fmt(t["invested_%"], 1)}% invested of {fmt(rot.allocation_pct, 0)}% · from {t.as_of} month-end closes ·{" "}
           <button className="underline" onClick={() => setOpen(!open)}>{open ? "hide ranking" : "show ranking"}</button></span>
         {open && (
           <table className="w-full text-[11.5px] mt-1 table-fixed">
@@ -111,9 +188,13 @@ export function RotationCard({ rot }: { rot?: RotationLike }) {
 
 export function JobsCard({ split, jobs, positions, jvh, rules }: { split?: Split; jobs: number; positions: number; jvh?: JobsVsHold | null; rules?: string }) {
   return (
-    <Card title="Trading jobs · live check">
-      <span className="num">{jobs} jobs · {positions} position{positions === 1 ? "" : "s"} open</span>
-      <span className="num">Today <span className={pnl(split?.jobs_pl_today)}>{split ? signed(split.jobs_pl_today) : "–"}</span></span>
+    <Card title="Trading jobs · live check" icon="bi-lightning-charge"
+      chip={jvh && !jvh.error && jvh.job_days ? <Chip tone={(jvh.strategy_usd ?? 0) >= (jvh.hold_usd ?? 0) ? "up" : "down"}>
+        {(jvh.strategy_usd ?? 0) >= (jvh.hold_usd ?? 0) ? "ahead of hold" : "behind hold"}</Chip> : undefined}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span><span className="num text-[17px] font-semibold">{positions}</span><span className="text-muted"> open of {jobs} jobs</span></span>
+        <span className={`num ${pnl(split?.jobs_pl_today)}`}>{split ? `${signed(split.jobs_pl_today)} today` : "today: from the next tick"}</span>
+      </div>
       <span className="text-muted">{jvh && !jvh.error && jvh.job_days
         ? <>Since {jvh.from}: jobs <span className={pnl(jvh.strategy_usd)}>{signed(jvh.strategy_usd ?? 0)}</span> vs holding the same <span className={pnl(jvh.hold_usd)}>{signed(jvh.hold_usd ?? 0)}</span></>
         : jvh?.error ? "Comparison with holding unavailable" : "Comparing with holding the same symbols…"}</span>
@@ -124,7 +205,7 @@ export function JobsCard({ split, jobs, positions, jvh, rules }: { split?: Split
 
 /** Today's account value, with the long-term holdings' value and fills as markers. */
 export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: number; side: string }[] }) {
-  if (rows.length < 2) return <Panel title="Account value today"><p className="text-muted text-[12px]">Builds up while the market is open (one point per bar).</p></Panel>;
+  if (rows.length < 2) return <Panel title={<Title icon="bi-graph-up">Account value today</Title>}><p className="text-muted text-[12px]">Builds up while the market is open (one point per bar).</p></Panel>;
   const x = rows.map((r) => nyStamp(r.t));
   const near = (t: number) => rows.reduce((b, r) => (Math.abs(r.t - t) < Math.abs(b.t - t) ? r : b), rows[0]);
   const mk = (side: string) => {
@@ -133,8 +214,8 @@ export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: nu
       marker: { color: side === "buy" ? C.profit : C.loss, size: 6 }, hovertemplate: `${side}<extra></extra>` };
   };
   return (
-    <Panel title="Account value today (New York time) · equity, long-term holdings, fills">
-      <Plot height={220} layout={{ margin: { l: 56, r: 56, t: 8, b: 28 }, xaxis: { type: "date" },
+    <Panel title={<Title icon="bi-graph-up">Account value today (New York time) · equity, long-term holdings, fills</Title>}>
+      <Plot height={220} area="main" layout={{ margin: { l: 56, r: 64, t: 8, b: 28 }, xaxis: { type: "date" },
         yaxis: { title: { text: "equity $" } }, yaxis2: { overlaying: "y", side: "right", showgrid: false, title: { text: "long-term $" } } }}
         data={[
           { type: "scatter", mode: "lines", name: "equity", x, y: rows.map((r) => r.equity), line: { color: C.navy, width: 2 } },
@@ -161,11 +242,11 @@ export function PositionsSplit({ positions, longTerm, extra }: { positions: Row[
   const jobCols = extra ? [...POS_COLS, { key: "note", label: "Note", align: "left" as const, render: (r: Row) => <span className="text-muted whitespace-nowrap">{extra(r) ?? "–"}</span> }] : POS_COLS;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-      <Panel title="Long-term positions · core and rotation">
+      <Panel title={<Title icon="bi-briefcase">Long-term positions · core and rotation</Title>}>
         {lt.length ? <SortTable rows={lt} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={POS_COLS} />
           : <p className="text-muted text-[12px]">None.</p>}
       </Panel>
-      <Panel title="Trading job positions · closed by 15:55">
+      <Panel title={<Title icon="bi-clock-history">Trading job positions · closed by 15:55</Title>}>
         {jobs.length ? <SortTable rows={jobs} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={jobCols} />
           : <p className="text-muted text-[12px]">No open job positions.</p>}
       </Panel>
@@ -178,7 +259,7 @@ export function LogPanel({ entries }: { entries: LogEntry[] }) {
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const shown = entries.slice(-40);
   return (
-    <Panel title="Bot log">
+    <Panel title={<Title icon="bi-terminal">Bot log</Title>}>
       <div className="num text-[10.5px] leading-snug max-h-60 overflow-y-auto text-muted">
         {shown.map((e, i) => {
           const tone = /ERROR|CRITICAL/.test(e.line) ? "text-down" : /WARNING|CONFIG|FLATTEN/.test(e.line) ? "text-warn" : /ORDER|ROTATION|CORE/.test(e.line) ? "text-fg" : "";
@@ -195,6 +276,12 @@ export function LogPanel({ entries }: { entries: LogEntry[] }) {
       </div>
     </Panel>
   );
+}
+
+/** The first day of next month, e.g. "1 Nov" (the rotation sleeve decides at its first open tick). */
+export function nextMonth(): string {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 export const tsNy = (s: string | number) => nyTime(typeof s === "number" ? s : Date.parse(s) / 1000);

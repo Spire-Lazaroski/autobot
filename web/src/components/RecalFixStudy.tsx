@@ -130,7 +130,7 @@ function Body({ d, cost, setCost, period, setPeriod, sym, setSym }: {
         ▲/▼ = clearly better/worse. {d.tests.comparisons} comparisons; about {fmt(d.tests.expected_by_luck, 0)} would look clearly better by luck, {d.tests.clearly_better} did.
       </p>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-        <Plot height={300} data={[
+        <Plot height={300} area="main" data={[
           ...versions.map((v, i) => {
             const pts = [...(byV[v].design?.equity ?? []), ...((byV[v].confirm?.equity ?? []).map(([f, e]) => [f, e * (byV[v].design?.equity.at(-1)?.[1] ?? 1)] as [string, number]))];
             return { x: pts.map((p) => p[0]), y: pts.map((p) => (p[1] - 1) * 100), name: d.versions[v].label, type: "scatter", mode: "lines",
