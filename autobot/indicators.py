@@ -19,7 +19,7 @@ RTH_OPEN, RTH_CLOSE = 9 * 60 + 30, 16 * 60  # minutes after midnight, New York
 # Overlay colours come from the Spire brand (web/src/theme.ts -> autobot/assets/brand.json).
 _B = json.loads((Path(__file__).resolve().parent / "assets" / "brand.json").read_text(encoding="utf-8"))
 COL = {
-    "primary": _B["brand"]["navy"], "secondary": _B["brand"]["gold"], "up": _B["extra"]["profit"],
+    "primary": _B["chart"]["ink"], "secondary": _B["chart"]["mid"], "up": _B["extra"]["profit"],
     "down": _B["extra"]["loss"], "osc": _B["series"][4], "vol": _B["series"][5], "hist": _B["extra"]["line-strong"],
 }
 

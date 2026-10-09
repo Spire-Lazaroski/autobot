@@ -35,17 +35,33 @@ export const extra = {
   mark2: "#3a3a52", // second stop of the mark gradient (from the header source)
 } as const;
 
-/** Chart series order: navy, gold, then distinguishable extras. Buy & hold is always dotted grey. */
-export const series = ["#1a1a2e", "#e8b23d", "#1b9aaa", "#3f6fd8", "#8e5bd0", "#d6457a", "#5b8c3a", "#b86b2b", "#2f4858", "#7a7a7a"] as const;
-export const benchmarkGrey = "#8d8a83";
+/** Charts: one grey professional template for every chart (web, reports, SOP), chosen 2026-10-09.
+ *  The brand colours stay on the page chrome (header, buttons, badges); inside charts only greys are
+ *  used, and profit / loss green and red only for gains, losses and actual fills. */
+export const chart = {
+  ink: "#2c2c2a", // the main line (the bot, the strategy, the price)
+  mid: "#6b6a65", // the second line (fixed params, a comparison)
+  soft: "#9c9a92", // third lines, indicators
+  faint: "#c4c2ba", // light indicator lines, bands
+  grid: "#e6e4de", // gridlines
+  zero: "#cfccc4", // zero line, axes
+  band: "#efeee9", // shaded areas
+  candleUp: "#ffffff", // rising candle body (hollow), border = ink
+  candleDown: "#5f5e5a", // falling candle body (filled)
+} as const;
 
-/** Regimes / states used in bands and pies. */
+/** Chart series order: dark to light greys, alternating so neighbours stay distinguishable
+ *  (charts with many lines add dashes). Buy & hold is always the dotted benchmark grey. */
+export const series = ["#2c2c2a", "#8a8880", "#4f4e4a", "#adaba3", "#6b6a65", "#c4c2ba", "#3d3c39", "#9c9a92", "#5f5e5a", "#7a7973"] as const;
+export const benchmarkGrey = "#9c9a92";
+
+/** Regimes / states used in bands and pies (greys; long / short keep profit / loss). */
 export const states = {
-  trend: "#1b9aaa",
-  range: "#3f6fd8",
-  high_vol: "#c23b3b",
-  flat: "#cfc9bb",
-  warmup: "#ece8de",
+  trend: "#8a8880",
+  range: "#c4c2ba",
+  high_vol: "#4f4e4a",
+  flat: "#e2e0d9",
+  warmup: "#efeee9",
   long: "#1e7d4f",
   short: "#c23b3b",
 } as const;
