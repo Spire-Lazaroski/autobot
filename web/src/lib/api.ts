@@ -125,7 +125,7 @@ export function useStrategies() {
 }
 
 export function useHealth() {
-  return useQuery({ queryKey: ["health"], queryFn: () => api<{ ok: boolean; alpaca_keys: boolean; timeframes: string[] }>("/health"), staleTime: 60_000 });
+  return useQuery({ queryKey: ["health"], queryFn: () => api<{ ok: boolean; alpaca_keys: boolean; timeframes: string[] }>("/health"), staleTime: 60_000, refetchInterval: 30_000 });   // recovers by itself after an API restart
 }
 
 /** Poll a background job until it finishes. */
