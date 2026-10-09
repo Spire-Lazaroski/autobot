@@ -127,8 +127,16 @@ def metrics(bt: pd.DataFrame) -> Dict:
 
 
 # ----------------------------------------------------------------- comparisons
+def ruled_signal(name: str, df: pd.DataFrame, params: Dict, allow_short=False, rules: Optional[Dict] = None) -> pd.Series:
+    """The strategy's signal through the live bot's signal rules (config live.trade_rules, e.g. no quick
+    re-entry), so a backtest describes the bot as it actually trades. rules=None: the bare signal."""
+    from .trade_rules import apply
+    sig = get_signal(name, df, params, allow_short)
+    return apply(sig, df, rules) if rules else sig
+
+
 def compare_strategies(data: Dict[str, pd.DataFrame], strategies: Dict[str, Dict],
-                       costs: CostModel = CostModel(), allow_short=False):
+                       costs: CostModel = CostModel(), allow_short=False, rules: Optional[Dict] = None):
     """
     data:        {symbol: ohlcv df}
     strategies:  {strategy_name: params}
@@ -139,7 +147,7 @@ def compare_strategies(data: Dict[str, pd.DataFrame], strategies: Dict[str, Dict
     for name, params in strategies.items():
         per_sym = []
         for sym, df in data.items():
-            sig = get_signal(name, df, params, allow_short)
+            sig = ruled_signal(name, df, params, allow_short, rules)
             bt = run_backtest(df, sig, costs)
             m = metrics(bt)
             rows.append({"strategy": name, "symbol": sym, **m})
@@ -183,7 +191,7 @@ def param_combos(name: str, grid: Dict[str, List] | None = None) -> List[Dict]:
 def parameter_search(data: Dict[str, pd.DataFrame], names: List[str] | None = None,
                      costs: CostModel = CostModel(), train_frac=0.7, allow_short=False,
                      rank_by="sharpe", progress: Optional[Callable[[float, str], None]] = None,
-                     grids: Dict[str, Dict[str, List]] | None = None) -> pd.DataFrame:
+                     grids: Dict[str, Dict[str, List]] | None = None, rules: Optional[Dict] = None) -> pd.DataFrame:
     """Grid-search every strategy's parameter space. Rank on train, report test.
 
     progress(fraction, message) is called after each parameter set, if given.
@@ -198,7 +206,7 @@ def parameter_search(data: Dict[str, pd.DataFrame], names: List[str] | None = No
         keys = list(grids.get(name, spec.grid))
         tr_m, te_m = [], []
         for sym, df in data.items():
-            sig = get_signal(name, df, params, allow_short)
+            sig = ruled_signal(name, df, params, allow_short, rules)
             bt = run_backtest(df, sig, costs)
             cut = int(len(bt) * train_frac)
             tr_m.append(metrics(bt.iloc[:cut].assign(equity=(1 + bt.ret.iloc[:cut]).cumprod())))
@@ -252,7 +260,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
                  step_bars: int | None = None, costs: CostModel = CostModel(), allow_short=False,
                  rank_by: str = "sharpe", grid: Dict[str, List] | None = None,
                  fixed_params: Dict | None = None,
-                 progress: Optional[Callable[[float, str], None]] = None) -> Dict:
+                 progress: Optional[Callable[[float, str], None]] = None, rules: Optional[Dict] = None) -> Dict:
     """Rolling re-optimization.
 
     Windows are cut on the first symbol's bar clock: train on [s, s+train_bars), trade the
@@ -277,7 +285,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
     # each combo's full-history backtest per symbol (valid because every strategy is causal)
     bts: List[Dict[str, pd.DataFrame]] = []
     for i, p in enumerate(combos):
-        bts.append({s: run_backtest(df, get_signal(name, df, p, allow_short), costs) for s, df in data.items()})
+        bts.append({s: run_backtest(df, ruled_signal(name, df, p, allow_short, rules), costs) for s, df in data.items()})
         if progress:
             progress(0.6 * (i + 1) / len(combos), f"backtesting {i + 1}/{len(combos)} parameter sets")
 
@@ -322,7 +330,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], name: str, train_bars: int, test
             end = chosen[i + 1][0] if i + 1 < len(chosen) else oos.index[-1] + pd.Timedelta(seconds=1)
             m = (oos.index >= t1) & (oos.index < end)
             pos[m] = bts[best][sym].position.reindex(oos.index)[m]
-        full_fixed = run_backtest(df, get_signal(name, df, fixed, allow_short), costs).position.reindex(oos.index)
+        full_fixed = run_backtest(df, ruled_signal(name, df, fixed, allow_short, rules), costs).position.reindex(oos.index)
         for key, p in (("walk_forward", pos), ("fixed", full_fixed.fillna(0)),
                        ("buy_and_hold", pd.Series(1.0, index=oos.index))):
             bt = _replay(df, p, costs)

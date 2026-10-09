@@ -35,7 +35,7 @@ def test_news_section_numbers_come_from_the_studies(monkeypatch, tmp_path):
     f = build_sop.facts()
     md = build_sop.to_md(build_sop.build(f))
     assert "## 6. News and earnings" in md and "## 7. Automatic strategy selection" in md
-    assert "## 8. What to watch: daily checklist" in md and "## 10. Weekly review" in md
+    assert "## 9. What to watch: daily checklist" in md and "## 11. Weekly review" in md
     assert "start_news.bat" in md and "context only" in md
     if event_study.OUT.exists():
         es = json.loads(event_study.OUT.read_text(encoding="utf-8"))

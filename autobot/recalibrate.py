@@ -54,6 +54,7 @@ import yaml
 from . import plain, universe
 from .backtest import CostModel, _replay, bars_per_year, metrics, param_combos, run_backtest
 from .data import fetch_bars, is_crypto
+from .trade_rules import apply as trade_rules_apply
 from .strategies import STRATEGIES, get_signal
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +138,7 @@ def settings(cfg: Optional[Dict] = None) -> Dict:
     r["score_weights"] = {**DEFAULTS["score_weights"], **(r.get("score_weights") or {})}
     r["timeframe"] = cfg["live"]["timeframe"]
     r["flatten_min"] = int((cfg["live"].get("risk") or {}).get("flatten_before_close_min", 0))
+    r["trade_rules"] = cfg["live"].get("trade_rules") or {}       # scored with the same rules the jobs run with
     return r
 
 
@@ -294,6 +296,7 @@ class SymbolStudy:
         k = _key({"strategy": spec["strategy"], "params": spec.get("params") or {}})
         if k not in self._sig:
             sig = get_signal(spec["strategy"], self.df, spec.get("params") or {}, False)
+            sig = trade_rules_apply(sig, self.df, self.r.get("trade_rules"))   # as live: e.g. no quick re-entry
             if is_crypto(self.sym):
                 sig = sig.clip(lower=0)  # no crypto shorting on Alpaca
             self._sig[k] = flat_before_close(sig, self.df, self.flat_min)

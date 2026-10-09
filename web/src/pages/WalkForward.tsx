@@ -1,3 +1,4 @@
+import { RulesNote } from "../components/RulesNote";
 import { useMemo, useState } from "react";
 import { Plot } from "../components/Plot";
 import { SettingsBar } from "../components/SettingsBar";
@@ -67,6 +68,7 @@ export function WalkForward() {
 
   return (
     <div className="flex flex-col gap-3">
+      <RulesNote />
       <SettingsBar action={<button className="btn btn-primary" onClick={go} disabled={!spec || !!running}>{running ? <Spinner /> : "⏩"} Run walk-forward</button>} />
       <Panel title="Walk-forward setup">
         <div className="flex flex-wrap items-end gap-3">

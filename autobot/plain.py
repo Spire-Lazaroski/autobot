@@ -410,3 +410,15 @@ def nick(strategy: str | None) -> str:
 
 def regime_name(regime: str | None) -> str:
     return REGIMES.get(regime or "", {}).get("name", regime or "unknown")
+
+
+# ----------------------------------------------------------------- report: where the result came from (2026-10-09)
+REPORT_SPLIT = {
+    "intro": ("The account holds three different things, so each is compared with what it is fairly measured against: the core "
+              "with keeping the shares it had at the start (the difference is what rebalancing did), the rotation sleeve with an "
+              "equal mix of all the sector funds with the same money (did picking the strongest help?), the trading jobs with "
+              "buying the same symbols at the open and holding to the close-out with the same money, and the whole account with "
+              "SPY at the share of the account that was actually invested."),
+    "note": ("The trading jobs' result is the account's change minus the long-term holdings', so it includes their costs. "
+             "Long-term rebalances are listed on their own, not as trades."),
+}

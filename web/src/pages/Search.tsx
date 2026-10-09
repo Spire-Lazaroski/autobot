@@ -1,3 +1,4 @@
+import { RulesNote } from "../components/RulesNote";
 import { useEffect, useMemo, useState } from "react";
 import { DetailView } from "../components/DetailView";
 import { Plot } from "../components/Plot";
@@ -49,6 +50,7 @@ export function Search() {
 
   return (
     <div className="flex flex-col gap-3">
+      <RulesNote />
       <SettingsBar
         extra={
           <label className="flex flex-col gap-0.5">

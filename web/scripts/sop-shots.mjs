@@ -22,11 +22,12 @@ const shot = async (name, locator) => {
 
 // 1. Live page: connection, bot state, account
 await page.goto(`${BASE}/#/live`);
-await page.waitForSelector("text=Paper equity", { timeout: 60000 });
+await page.waitForSelector("#status-band", { timeout: 60000 });
 await page.waitForTimeout(3500);
 await page.screenshot({ path: `${OUT}/live_top.png`, clip: { x: 0, y: 0, width: 1280, height: 330 } });
 console.log("wrote live_top");
-await shot("live_state", page.locator("main .panel").first());
+await shot("live_state", page.locator("#status-band"));
+await shot("live_holdings", page.locator("#holdings-cards"));
 // 2. Jobs editor
 const jobs = page.locator("section", { hasText: "Jobs · config.yaml" }).first();
 await jobs.scrollIntoViewIfNeeded();
@@ -65,7 +66,10 @@ await panelTop("recal", "Recalibration proposal", 640);
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 760 } });
 const p2 = await ctx.newPage();
 const snap = { time: 0, bot: { running: true, unresponsive: false, pid: 1234, heartbeat_age_s: 1, process_alive: true, stop_requested: false },
-  status: null, trades: [], log: [], ok: true, positions: [], orders: [],
+  status: { time: new Date().toISOString(), equity: 100000, "day_pnl_%": 0, market_open: true, halted: false, symbols: {},
+    core: { enabled: true, symbol: "VOO", allocation_pct: 30, rebalance_band_pct: 5, qty: 55 },
+    rotation: { enabled: true, allocation_pct: 40, top_n: 5, symbols: ["XLK", "XLV", "XLE"], held: { XLE: 59, XLK: 15, XLV: 36 } } },
+  trades: [], log: [], ok: true, positions: [], orders: [],
   account: { number_tail: "DEMO", status: "ACTIVE", equity: 100000, last_equity: 100000, day_pnl: 0, day_pnl_pct: 0, cash: 100000, buying_power: 200000 } };
 await p2.routeWebSocket(/\/ws\/live/, (ws) => { ws.send(JSON.stringify(snap)); });
 await p2.route("**/api/live/stop", (r) => r.abort());

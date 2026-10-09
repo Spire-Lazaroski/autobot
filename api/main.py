@@ -15,6 +15,7 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from autobot.backtest import ruled_signal
 from autobot.backtest import (CostModel, best_per_strategy, compare_strategies, fills, metrics,
                               parameter_search, round_trips, run_backtest, walk_forward)
 from autobot.data import TIMEFRAMES, fetch_bars, synthetic_bars
@@ -121,7 +122,7 @@ def compare(req: CompareReq):
         raise HTTPException(422, "Pick at least one strategy")
     data = load(req.data)
     costs = CostModel(req.fee_bps, req.slippage_bps)
-    summary, equity, per_sym = compare_strategies(data, req.strategies, costs, req.allow_short)
+    summary, equity, per_sym = compare_strategies(data, req.strategies, costs, req.allow_short, live_rules())
     total = per_sym.groupby("strategy")["trades"].sum()
     summary = summary.assign(total_trades=total.reindex(summary.index).astype(int),
                              family=[STRATEGIES[n].family for n in summary.index])
@@ -137,6 +138,44 @@ def compare(req: CompareReq):
 
 
 # ----------------------------------------------------------------- one strategy on one symbol
+def live_rules():
+    """The live bot's signal rules (config live.trade_rules, e.g. no quick re-entry): every Lab backtest uses
+    them, so the Lab describes the bot as it actually trades. Read fresh each call (the Jobs editor may change it)."""
+    try:
+        return (yaml.safe_load(CONFIG_PATH.read_text()).get("live") or {}).get("trade_rules") or None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+@app.get("/api/holdings-studies")
+def holdings_studies():
+    """The long-term holdings' backtests (docs/STRATEGY_EVIDENCE.md sections 12, 15, 23-24), read from the saved
+    study files: the core's volatility targeting and the sector rotation with its mixes. Read-only."""
+    import json as _json
+    root = CONFIG_PATH.parent / "data"
+    out = {}
+    try:
+        v = _json.loads((root / "ml" / "study_vol_target.json").read_text(encoding="utf-8"))
+        out["core"] = {"period": [v.get("test_from"), v.get("test_to")], "rules": v.get("rules"),
+                       "methods": v["cash_0"]["as_traded"], "same_amount": v["cash_0"]["same_amount"],
+                       "crises": v["cash_0"].get("crises_%"), "accuracy": v.get("forecast_accuracy")}
+    except (OSError, ValueError, KeyError):
+        out["core"] = None
+    try:
+        r = _json.loads((root / "rs_study.json").read_text(encoding="utf-8"))
+        out["rotation"] = {"rule": r.get("rule"), "long": r["combine_french"]["whole"], "long_vs_market": r["combine_french"]["vs_market_same_vol"],
+                           "long_periods": r["combine_french"].get("periods"), "recent": r["combine_etf"]["whole"],
+                           "recent_vs_market": r["combine_etf"]["vs_market_same_vol"], "correlation": r["combine_french"].get("correlation")}
+    except (OSError, ValueError, KeyError):
+        out["rotation"] = None
+    return out
+
+
+@app.get("/api/trade-rules")
+def trade_rules_in_use():
+    return {"trade_rules": live_rules() or {}}
+
+
 @app.post("/api/detail")
 def detail(req: DetailReq):
     spec = _strategy(req.strategy)
@@ -147,7 +186,7 @@ def detail(req: DetailReq):
     df = data[sym]
     params = {**spec.defaults, **req.params}
     costs = CostModel(req.fee_bps, req.slippage_bps)
-    sig = get_signal(req.strategy, df, params, req.allow_short)
+    sig = ruled_signal(req.strategy, df, params, req.allow_short, live_rules())
     bt = run_backtest(df, sig, costs)
     bh = run_backtest(df, pd.Series(1.0, index=df.index), costs)
     ind = plot_indicators(req.strategy, df, params)
@@ -208,7 +247,7 @@ def shift(req: ShiftReq):
             _strategy(n)
         cand = p.get("candidate_params") or {}
         runs = {req.strategy: p, **{n: cand.get(n, {}) for n in unders}, "buy_and_hold": {}}
-        summary, equity, per_sym = compare_strategies(data, runs, costs, req.allow_short)
+        summary, equity, per_sym = compare_strategies(data, runs, costs, req.allow_short, live_rules())
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
 
@@ -222,7 +261,7 @@ def shift(req: ShiftReq):
     for sym, df in data.items():
         ex = spec.explain(df, p, req.allow_short)
         names = ex["names"]
-        pos = get_signal(req.strategy, df, p, req.allow_short).to_numpy()
+        pos = ruled_signal(req.strategy, df, p, req.allow_short, live_rules()).to_numpy()
         t = times(df.index)
         changes = [i for i in range(1, len(names)) if names[i] != names[i - 1] and names[i - 1] is not None]
         switches[sym] = {"switches": len(changes),
@@ -255,7 +294,7 @@ def search(req: SearchReq):
 
     def work(progress):
         res = parameter_search(data, names, costs, req.train_frac, req.allow_short,
-                               progress=progress, grids=req.grids)
+                               progress=progress, grids=req.grids, rules=live_rules())
         if res.empty:
             return {"results": [], "best": []}
         res["test_trades_total"] = res["test_trades"] * len(data)  # test_trades is a per-symbol mean
@@ -278,7 +317,7 @@ def walkforward(req: WalkForwardReq):
 
     def work(progress):
         r = walk_forward(data, req.strategy, req.train_bars, req.test_bars, req.step_bars, costs,
-                         req.allow_short, req.rank_by, req.grid, req.fixed_params, progress)
+                         req.allow_short, req.rank_by, req.grid, req.fixed_params, progress, rules=live_rules())
         w = r["windows"]
         return {"windows": records(w), "equity": frame(r["equity"], 6), "metrics": plain(r["metrics"]),
                 "fixed_params": plain(r["fixed_params"]), "combos": r["combos"],

@@ -1,3 +1,4 @@
+import { RulesNote } from "../components/RulesNote";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { DetailView } from "../components/DetailView";
@@ -70,6 +71,7 @@ export function Shifting() {
 
   return (
     <div className="flex flex-col gap-3">
+      <RulesNote />
       <SettingsBar action={<>
         <button className="btn" onClick={walkForward} disabled={!spec} title="Re-optimize this meta-strategy's grid in rolling windows">⏩ Walk-forward this</button>
         <button className="btn btn-primary" onClick={go} disabled={!spec || q.isFetching}>{q.isFetching ? <Spinner /> : "⎇"} Run shifting</button>

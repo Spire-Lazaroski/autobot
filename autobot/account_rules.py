@@ -19,6 +19,7 @@ from . import recalibrate as rc
 from .backtest import portfolio_backtest
 from .data import fetch_bars, is_crypto
 from .sizing import bucket_map
+from .trade_rules import apply as trade_rules_apply
 from .strategies import get_signal
 
 
@@ -37,6 +38,7 @@ def compare(cfg: Dict, days: int = 60, trigger_pct: float = 1.5, giveback_pct: f
     for j in jobs:
         for s in j["symbols"]:
             sig = get_signal(j["strategy"], data[s], j.get("params") or {}, bool(live.get("allow_short", False)))
+            sig = trade_rules_apply(sig, data[s], live.get("trade_rules"))   # as live
             if is_crypto(s):
                 sig = sig.clip(lower=0)
             else:

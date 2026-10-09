@@ -191,7 +191,7 @@ export function Live() {
   return (
     <div className="flex flex-col gap-4">
       {/* dark status band (Spire navy): bot state, the two numbers looked at most, the day's sparkline, start / stop */}
-      <div className="rounded-xl px-4 py-3 grid gap-x-6 gap-y-2 items-center grid-cols-1 md:grid-cols-[1.3fr_1fr_1fr_1.2fr_auto]"
+      <div id="status-band" className="rounded-xl px-4 py-3 grid gap-x-6 gap-y-2 items-center grid-cols-1 md:grid-cols-[1.3fr_1fr_1fr_1.2fr_auto]"
         style={{ background: brand.navy, color: "#ffffff" }}>
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[12px]">
@@ -248,7 +248,7 @@ export function Live() {
 
           <Section>Holdings</Section>
           <SplitBar split={st?.split} cash={acct?.cash} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div id="holdings-cards" className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <CoreCard core={st?.core} />
             <RotationCard rot={st?.rotation} />
             <JobsCard split={st?.split} jobs={st?.jobs?.length ?? 0} jvh={d.jobs_vs_hold}
