@@ -147,6 +147,30 @@ def live_rules():
         return None
 
 
+@app.get("/api/holdings-studies")
+def holdings_studies():
+    """The long-term holdings' backtests (docs/STRATEGY_EVIDENCE.md sections 12, 15, 23-24), read from the saved
+    study files: the core's volatility targeting and the sector rotation with its mixes. Read-only."""
+    import json as _json
+    root = CONFIG_PATH.parent / "data"
+    out = {}
+    try:
+        v = _json.loads((root / "ml" / "study_vol_target.json").read_text(encoding="utf-8"))
+        out["core"] = {"period": [v.get("test_from"), v.get("test_to")], "rules": v.get("rules"),
+                       "methods": v["cash_0"]["as_traded"], "same_amount": v["cash_0"]["same_amount"],
+                       "crises": v["cash_0"].get("crises_%"), "accuracy": v.get("forecast_accuracy")}
+    except (OSError, ValueError, KeyError):
+        out["core"] = None
+    try:
+        r = _json.loads((root / "rs_study.json").read_text(encoding="utf-8"))
+        out["rotation"] = {"rule": r.get("rule"), "long": r["combine_french"]["whole"], "long_vs_market": r["combine_french"]["vs_market_same_vol"],
+                           "long_periods": r["combine_french"].get("periods"), "recent": r["combine_etf"]["whole"],
+                           "recent_vs_market": r["combine_etf"]["vs_market_same_vol"], "correlation": r["combine_french"].get("correlation")}
+    except (OSError, ValueError, KeyError):
+        out["rotation"] = None
+    return out
+
+
 @app.get("/api/trade-rules")
 def trade_rules_in_use():
     return {"trade_rules": live_rules() or {}}

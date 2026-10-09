@@ -37,3 +37,9 @@ def test_api_reads_the_rules_from_config(tmp_path, monkeypatch):
     p.write_text(yaml.safe_dump({"live": {"trade_rules": RULES}}))
     monkeypatch.setattr(main, "CONFIG_PATH", p)
     assert main.live_rules() == RULES and main.trade_rules_in_use() == {"trade_rules": RULES}
+
+
+def test_holdings_studies_read_the_saved_files_and_survive_missing_ones(tmp_path, monkeypatch):
+    from api import main
+    monkeypatch.setattr(main, "CONFIG_PATH", tmp_path / "config.yaml")     # no data/ next to it
+    assert main.holdings_studies() == {"core": None, "rotation": None}
