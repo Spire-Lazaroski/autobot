@@ -460,6 +460,7 @@ class Bot:
         pending = []  # decision records, written after the display-only trigger is known
         self._safe(self.core_step, status, equity, held, clock)
         self._safe(self.rotation_step, status, equity, held, clock)
+        self._safe(self.account_split, status, equity, clock)
         try:
             for job in self.jobs:
                 spec = STRATEGIES[job["strategy"]]
@@ -560,6 +561,36 @@ class Bot:
         else:
             log.warning("CORE volatility target unavailable (too little daily history); using %s%%", self.core["allocation_pct"])
         return out
+
+    def account_split(self, status: dict, equity: float, clock):
+        """For the Live page only (never used for trading): where the money is (core, rotation, jobs, cash)
+        and today's P&L split into long-term holdings and trading jobs; while the market is open, one line
+        per tick in logs/equity.jsonl for the "account value today" chart."""
+        core_sym = self.core_symbol()
+        rot = set(self.rotation["symbols"]) if self.rotation.get("enabled") else set()
+        split = {"core_usd": 0.0, "rotation_usd": 0.0, "jobs_usd": 0.0, "long_term_pl_today": 0.0}
+        for p in self.tc.get_all_positions():
+            mv = abs(float(getattr(p, "market_value", 0) or 0))
+            pl = float(getattr(p, "unrealized_intraday_pl", 0) or 0)
+            if p.symbol == core_sym:
+                split["core_usd"] += mv
+                split["long_term_pl_today"] += pl
+            elif p.symbol in rot:
+                split["rotation_usd"] += mv
+                split["long_term_pl_today"] += pl
+            else:
+                split["jobs_usd"] += mv
+        day_pl = equity - self.day_start_equity
+        split.update({k: round(v, 2) for k, v in split.items()})
+        split["jobs_pl_today"] = round(day_pl - split["long_term_pl_today"], 2)
+        split["equity"] = round(equity, 2)
+        split["targets_%"] = {"core": (self.core_vol or {}).get("target_pct") or (self.core["allocation_pct"] if core_sym else 0),
+                              "rotation": self.rotation["allocation_pct"] if rot else 0}
+        status["split"] = split
+        if clock.is_open:
+            with open(LOGS / "equity.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": status["time"], "equity": split["equity"], "long_term_usd": round(split["core_usd"] + split["rotation_usd"], 2),
+                                    "long_term_pl_today": split["long_term_pl_today"], "jobs_pl_today": split["jobs_pl_today"]}) + "\n")
 
     def rotation_step(self, status: dict, equity: float, held: dict, clock):
         """The rotation sleeve (autobot.rotation): this month's sector funds, decided once a month at the

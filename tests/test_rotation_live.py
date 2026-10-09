@@ -79,3 +79,23 @@ def test_switching_the_sleeve_on_is_logged(env):  # noqa: F811
     _rewrite(env, lambda l: l.__setitem__("rotation", dict(ROT)))
     bot.reload_config()
     assert bot.rotation["enabled"] and any("rotation.enabled: None -> True" in c["change"] for c in bot.changes)
+
+
+def test_account_split_and_equity_log(env):  # noqa: F811
+    from types import SimpleNamespace
+
+    class SplitTC(CoreTC):
+        def get_all_positions(self):
+            mv = {"VOO": 30_000, "XLK": 5_000, "SPY": 2_000}
+            pl = {"VOO": 100.0, "XLK": -20.0, "SPY": 5.0}
+            return [SimpleNamespace(symbol=s, qty=str(q), market_value=str(mv.get(s, 0)), unrealized_intraday_pl=str(pl.get(s, 0)))
+                    for s, q in self.pos.items()]
+    tc = SplitTC({"VOO": 60, "XLK": 20, "SPY": 5}, equity="100150", last_equity="100000")
+    bot = live.Bot(cfg_with(env), tc=tc)
+    status = {"time": "2026-10-09T14:00:00+00:00"}
+    bot.account_split(status, 100_150.0, SimpleNamespace(is_open=True))
+    sp = status["split"]
+    assert sp["core_usd"] == 30_000 and sp["rotation_usd"] == 5_000 and sp["jobs_usd"] == 2_000
+    assert sp["long_term_pl_today"] == 80.0 and sp["jobs_pl_today"] == 70.0          # 150 today, 80 of it long-term
+    row = json.loads((live.LOGS / "equity.jsonl").read_text().splitlines()[-1])
+    assert row["long_term_usd"] == 35_000 and row["equity"] == 100_150

@@ -84,7 +84,8 @@ export function CandleChart({ candles, priceLines, overlays = NO_OVERLAYS, panes
 
     // --- price pane
     const price = chart.addSeries(CandlestickSeries, {
-      upColor: C.profit, downColor: C.loss, borderVisible: false, wickUpColor: C.profit, wickDownColor: C.loss,
+      upColor: C.candleUp, downColor: C.candleDown, borderVisible: true, borderUpColor: C.navy, borderDownColor: C.candleDown,
+      wickUpColor: C.navy, wickDownColor: C.candleDown,
     });
     price.setData(t.map((time, i) => ({ time: time as UTCTimestamp, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i] })));
     priceRef.current = price;

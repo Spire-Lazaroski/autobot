@@ -34,14 +34,29 @@ def _keys():
 HTTP_TIMEOUT = (5, 20)  # seconds: connect, read
 
 
-def with_timeout(client, timeout=HTTP_TIMEOUT):
-    """Give an alpaca-py client (trading or data) default request timeouts."""
+GET_RETRY_PAUSE_S = 1.5   # a read (GET) that times out is tried once more after this pause
+
+
+def with_timeout(client, timeout=HTTP_TIMEOUT, retries: int = 1, pause_s: float = GET_RETRY_PAUSE_S):
+    """Give an alpaca-py client (trading or data) default request timeouts. A GET that times out or
+    loses its connection is retried `retries` times (Alpaca's paper server is sometimes slow for a few
+    seconds); orders and other writes are never retried, so nothing can be sent twice."""
+    import time
+
     from requests import Session
+    from requests.exceptions import ConnectionError as ReqConnectionError, Timeout
 
     class _TimeoutSession(Session):
         def request(self, method, url, **kw):
             kw.setdefault("timeout", timeout)
-            return super().request(method, url, **kw)
+            tries = 1 + (retries if str(method).upper() == "GET" else 0)
+            for k in range(tries):
+                try:
+                    return super().request(method, url, **kw)
+                except (Timeout, ReqConnectionError):
+                    if k == tries - 1:
+                        raise
+                    time.sleep(pause_s)
 
     old = client._session
     client._session = _TimeoutSession()

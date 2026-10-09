@@ -579,12 +579,13 @@ def _mpl():
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)  # SVG text is drawn by the browser in Inter
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    b, e = BRAND["brand"], BRAND["extra"]
+    b, g = BRAND["brand"], BRAND["chart"]                      # the grey chart template (web/src/theme.ts)
     plt.rcParams.update({
         "font.family": ["Inter", "Segoe UI", "DejaVu Sans"], "font.size": 9,
-        "axes.facecolor": b["paper"], "figure.facecolor": b["paper"], "axes.edgecolor": b["line"],
+        "axes.facecolor": b["paper"], "figure.facecolor": b["paper"], "axes.edgecolor": g["zero"],
         "axes.labelcolor": b["ink-soft"], "xtick.color": b["ink-soft"], "ytick.color": b["ink-soft"],
-        "grid.color": b["line"], "axes.grid": True, "grid.linewidth": 0.8, "axes.spines.top": False,
+        "axes.prop_cycle": __import__("cycler").cycler(color=BRAND["series"]),
+        "grid.color": g["grid"], "axes.grid": True, "grid.linewidth": 0.8, "axes.spines.top": False,
         "axes.spines.right": False, "legend.frameon": False, "svg.fonttype": "none",
     })
     return plt
@@ -617,12 +618,12 @@ def equity_chart(ri) -> str:
     plt = _mpl()
     fig, ax = plt.subplots(figsize=(9.2, 3.1))
     eq = ri.equity
-    ax.plot(range(len(eq)), (eq / eq.iloc[0] - 1) * 100, color=BRAND["brand"]["navy"], lw=2, label="The bot" if ri.kind == "live" else "The strategy")
+    ax.plot(range(len(eq)), (eq / eq.iloc[0] - 1) * 100, color=BRAND["chart"]["ink"], lw=2, label="The bot" if ri.kind == "live" else "The strategy")
     if ri.benchmark is not None and len(ri.benchmark):
         bm = ri.benchmark.reindex(eq.index, method="ffill").bfill()
         ax.plot(range(len(bm)), (bm / bm.iloc[0] - 1) * 100, color=BRAND["benchmarkGrey"], lw=1.4, ls=(0, (2, 2)),
                 label=f"Simply holding {ri.benchmark_symbol}")
-    ax.axhline(0, color=BRAND["extra"]["line-strong"], lw=1)
+    ax.axhline(0, color=BRAND["chart"]["zero"], lw=1)
     ax.set_ylabel("% change")
     _positions_axis(eq.index, ax)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, fontsize=8.5)
@@ -652,10 +653,10 @@ def price_chart(ri, sym: str) -> Optional[str]:
                 if isinstance(g, str) and g in colors:
                     ax.axvspan(start - 0.5, i - 0.5, color=colors[g], alpha=0.13 if g != "warmup" else 0.3, lw=0)
                 start = i
-    ax.plot(x, df.close.values, color=BRAND["brand"]["navy"], lw=1.3)
+    ax.plot(x, df.close.values, color=BRAND["chart"]["ink"], lw=1.3)
     marks = report_news.chart_marks(ri.news, sym, df) if ri.news else []
     if marks:  # material stories: small diamonds just above the plot (clear of the legend)
-        ax.scatter(marks, [1.03] * len(marks), marker="D", s=16, color=BRAND["brand"]["gold"], edgecolors=BRAND["brand"]["navy"],
+        ax.scatter(marks, [1.03] * len(marks), marker="D", s=16, color=BRAND["chart"]["faint"], edgecolors=BRAND["chart"]["ink"],
                    linewidths=0.5, transform=ax.get_xaxis_transform(), zorder=6, clip_on=False)
     for t in ri.trades:
         if t["symbol"] != sym:
@@ -676,8 +677,8 @@ def price_chart(ri, sym: str) -> Optional[str]:
                Line2D([], [], marker="v", ls="", color=BRAND["extra"]["loss"], label="sell")]
     handles += [Patch(color=BRAND["states"][g], alpha=0.35, label=plain.REGIMES[g]["short"]) for g in ("trend", "range", "high_vol")]
     if marks:
-        handles.append(Line2D([], [], marker="D", ls="", markersize=4, color=BRAND["brand"]["gold"],
-                              markeredgecolor=BRAND["brand"]["navy"], label="news story"))
+        handles.append(Line2D([], [], marker="D", ls="", markersize=4, color=BRAND["chart"]["faint"],
+                              markeredgecolor=BRAND["chart"]["ink"], label="news story"))
     ax.legend(handles=handles, loc="upper left", ncol=6, fontsize=8)
     return _svg(fig)
 

@@ -1,35 +1,38 @@
 /**
- * Chart colours and the Plotly "spire" template, all derived from theme.ts.
- * White paper and plot background, --line gridlines, --ink-soft axis labels.
+ * Chart colours and the Plotly "spire" template, all derived from theme.ts: the grey professional
+ * template (theme.chart), white background, light grey gridlines. `navy` / `gold` / `amber` are kept
+ * as names so existing charts keep their roles (main line / second line / third), now in greys.
  */
-import { benchmarkGrey, brand, extra, series } from "../theme";
+import { benchmarkGrey, brand, chart, extra, series } from "../theme";
 
 export const C = {
   paper: brand.paper,
-  sunk: brand.sunk,
-  line: brand.line,
-  lineStrong: extra["line-strong"],
+  sunk: chart.band,
+  line: chart.grid,
+  lineStrong: chart.zero,
   ink: brand.ink,
   inkSoft: brand["ink-soft"],
-  inkFaint: extra["ink-faint"],
-  navy: brand.navy,
-  gold: brand.gold,
-  amber: brand.amber,
+  inkFaint: chart.soft,
+  navy: chart.ink,
+  gold: chart.mid,
+  amber: chart.soft,
   profit: extra.profit,
   loss: extra.loss,
   grey: benchmarkGrey,
+  candleUp: chart.candleUp,
+  candleDown: chart.candleDown,
   series,
 };
 
 /** Diverging scale for returns / Sharpe: loss red - white - profit green. */
 export const DIVERGING: [number, string][] = [[0, extra.loss], [0.5, "#ffffff"], [1, extra.profit]];
-/** Sequential scale for counts: white - navy. */
-export const SEQUENTIAL: [number, string][] = [[0, "#ffffff"], [1, brand.navy]];
+/** Sequential scale for counts: white - dark grey. */
+export const SEQUENTIAL: [number, string][] = [[0, "#ffffff"], [1, chart.ink]];
 
 const AXIS = {
-  gridcolor: brand.line,
-  zerolinecolor: extra["line-strong"],
-  linecolor: brand.line,
+  gridcolor: chart.grid,
+  zerolinecolor: chart.zero,
+  linecolor: chart.zero,
   tickfont: { size: 10.5, color: brand["ink-soft"] },
   title: { font: { color: brand["ink-soft"], size: 11.5 } },
 };
@@ -45,7 +48,7 @@ export const spireTemplate = {
     xaxis: AXIS,
     yaxis: AXIS,
     legend: { font: { size: 10.5, color: brand["ink-soft"] } },
-    hoverlabel: { bgcolor: brand.paper, bordercolor: brand.line, font: { family: "Inter, sans-serif", size: 11.5, color: brand.ink } },
+    hoverlabel: { bgcolor: brand.paper, bordercolor: chart.zero, font: { family: "Inter, sans-serif", size: 11.5, color: brand.ink } },
   },
 };
 

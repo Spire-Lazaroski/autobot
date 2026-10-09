@@ -153,3 +153,31 @@ def test_unresponsive_blocks_start(tmp_path, monkeypatch):
     liveconfig.PID_FILE.write_text(__import__("json").dumps(lock))
     st = liveconfig.bot_state()
     assert st["running"] is False and st["unresponsive"] is True  # this process is alive, beat is stale
+
+
+def test_reads_are_retried_once_and_orders_never():
+    from requests import Session
+    from requests.exceptions import ReadTimeout
+    from autobot.data import with_timeout
+    calls = []
+
+    def fake(self, method, url, **kw):
+        calls.append(method)
+        if len(calls) == 1 or method == "POST":
+            raise ReadTimeout("slow")
+        return "ok"
+
+    class C:
+        _session = Session()
+    import unittest.mock as um
+    with um.patch.object(Session, "request", fake):
+        c = with_timeout(C(), pause_s=0)
+        assert c._session.request("GET", "http://x") == "ok" and calls == ["GET", "GET"]
+        calls.clear()
+        calls.append("first")                                  # make the next call not the first
+        try:
+            c._session.request("POST", "http://x")
+            raise AssertionError("POST must not be retried")
+        except ReadTimeout:
+            pass
+        assert calls == ["first", "POST"]
