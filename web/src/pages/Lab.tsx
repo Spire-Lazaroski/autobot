@@ -1,3 +1,4 @@
+import { RulesNote } from "../components/RulesNote";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { AccountRules } from "../components/AccountRules";
@@ -47,6 +48,7 @@ export function Lab() {
 
   return (
     <div className="flex flex-col gap-3">
+      <RulesNote />
       <SettingsBar action={
         <button className="btn btn-primary" onClick={runIt} disabled={!Object.keys(chosen).length || q.isFetching}>
           {q.isFetching ? <Spinner /> : "▶"} Run backtest
