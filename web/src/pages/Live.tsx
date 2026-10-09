@@ -5,12 +5,26 @@ import { C } from "../lib/chart";
 import { Confirm } from "../components/Confirm";
 import { JobsEditor } from "../components/JobsEditor";
 import { SortTable } from "../components/SortTable";
-import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
-import { CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, ShareBar, Sparkline, SplitBar,
+import { ErrorBox, Panel, Spinner } from "../components/ui";
+import { Chip, CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, Section, ShareBar, SplitBar, Tile, toneOf,
   type EquityRow, type JobsVsHold, type LogEntry, type Split } from "../components/LiveOverview";
 import { api, type Candles, type Fill, type Row } from "../lib/api";
 import { colorFor, fmt, nyTime, pnl, signed } from "../lib/format";
 import { useLiveSocket } from "../lib/useLiveSocket";
+import { brand, chart } from "../theme";
+
+/** The day's equity as a gold area sparkline on the dark band. */
+function BandSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return <div className="text-[11px]" style={{ color: chart.soft }}>Day chart from the first tick after the open</div>;
+  const lo = Math.min(...values), hi = Math.max(...values), w = 160, h = 36;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${hi === lo ? h / 2 : h - 3 - ((v - lo) / (hi - lo)) * (h - 6)}`);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={`0,${h} ${pts.join(" ")} ${w},${h}`} fill={brand.gold} fillOpacity={0.18} />
+      <polyline points={pts.join(" ")} fill="none" stroke={brand.gold} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 interface BotState {
   running: boolean;
@@ -137,7 +151,7 @@ function entryOf(positions: Row[] | undefined, symbol: string): number | null {
 const ts = (s: string | number | null | undefined) => (s === null || s === undefined || s === "" ? "–" : nyTime(typeof s === "number" ? s : Date.parse(s) / 1000));
 
 export function Live() {
-  const { data: d, connected, lastAt } = useLiveSocket<Snapshot>();
+  const { data: d, connected } = useLiveSocket<Snapshot>();
   const [confirmStop, setConfirmStop] = useState(false);
   const [sellCore, setSellCore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -164,7 +178,6 @@ export function Live() {
   const alive = !!bot && (bot.running || !!bot.unresponsive);
   const state = !bot ? "…" : bot.stop_requested && alive ? "stopping" : bot.unresponsive ? "unresponsive"
     : bot.running ? (st?.halted ? "halted" : "running") : "stopped";
-  const stateTone = state === "running" ? "text-up" : state === "stopped" ? "text-muted" : "text-warn";
   const acct = d?.account;
 
   const symbols = useMemo(() => {
@@ -177,27 +190,38 @@ export function Live() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="panel p-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${state === "running" ? "bg-up animate-pulse" : state === "stopped" ? "bg-dim" : "bg-warn"}`} />
-          <span className={`font-semibold uppercase tracking-wide text-[12px] ${stateTone}`}>bot {state}</span>
-          {alive && <span className={`num text-[11px] ${bot?.unresponsive ? "text-warn" : "text-muted"}`}>pid {bot?.pid} · beat {fmt(bot?.heartbeat_age_s, 0)}s ago</span>}
-          {bot?.unresponsive && <span className="text-[11px] text-warn">process alive but no heartbeat: Start is blocked</span>}
-          {bot && !bot.running && bot.process_alive === false && bot.pid && <span className="text-[11px] text-dim">(last pid {bot.pid} exited)</span>}
-        </span>
-        <span className="text-[12px] text-muted">market <b className={d?.market?.is_open ? "text-up" : "text-fg"}>{d?.market ? (d.market.is_open ? "open" : "closed") : "–"}</b>
-          {d?.market && <span className="num text-dim"> · {d.market.is_open ? `closes ${nyTime(d.market.next_close)}` : `opens ${nyTime(d.market.next_open)}`}</span>}
-        </span>
-        {st && <span className="text-[11px] text-muted num">last tick {ts(st.time)} · {st.timeframe ?? ""} bars · {st.jobs?.length ?? 0} jobs</span>}
-        <span className="text-[11px] text-muted num flex items-center gap-1.5">
-          <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-up" : "bg-down"}`} />
-          {connected ? `live · ${lastAt ? new Date(lastAt).toLocaleTimeString() : ""}` : "reconnecting…"}
-        </span>
-        <div className="ml-auto flex gap-2">
+      {/* dark status band (Spire navy): bot state, the two numbers looked at most, the day's sparkline, start / stop */}
+      <div className="rounded-xl px-4 py-3 grid gap-x-6 gap-y-2 items-center grid-cols-1 md:grid-cols-[1.3fr_1fr_1fr_1.2fr_auto]"
+        style={{ background: brand.navy, color: "#ffffff" }}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[12px]">
+            <span className={`h-2.5 w-2.5 rounded-full ${state === "running" ? "bg-up animate-pulse" : state === "stopped" ? "bg-dim" : "bg-warn"}`} />
+            <span className="font-semibold uppercase tracking-wide">bot {state}</span>
+            <span style={{ color: chart.faint }}>· market {d?.market ? (d.market.is_open ? "open" : "closed") : "–"}</span>
+          </div>
+          <div className="num text-[11px] truncate" style={{ color: chart.soft }}>
+            {st ? `last tick ${ts(st.time)} · ${st.jobs?.length ?? 0} jobs` : "no status yet"}
+            {d?.market ? ` · ${d.market.is_open ? `closes ${nyTime(d.market.next_close)}` : `opens ${nyTime(d.market.next_open)}`}` : ""}
+            {alive ? ` · beat ${fmt(bot?.heartbeat_age_s, 0)}s` : ""}{connected ? "" : " · reconnecting…"}
+          </div>
+          {bot?.unresponsive && <div className="text-[11px] text-warn">process alive but no heartbeat: Start is blocked</div>}
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: chart.faint }}>Equity · ···{acct?.number_tail ?? ""}</div>
+          <div className="num text-[22px] font-semibold leading-tight">{acct ? `$${fmt(acct.equity, 0)}` : "–"}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wider" style={{ color: chart.faint }}>Day P&L</div>
+          <div className="num text-[22px] font-semibold leading-tight" style={{ color: acct && acct.day_pnl < 0 ? "#f09595" : "#7fd3a8" }}>
+            {acct ? signed(acct.day_pnl) : "–"}</div>
+          <div className="num text-[11px]" style={{ color: chart.soft }}>{acct ? `${signed(acct.day_pnl_pct, 3)}%` : ""}</div>
+        </div>
+        <div className="min-w-0"><BandSparkline values={(d?.equity_today ?? []).map((r) => r.equity)} /></div>
+        <div className="flex gap-2 justify-end">
           <button className="btn btn-primary" disabled={!bot || alive || busy} onClick={() => call("/live/start", {})}>▶ Start bot</button>
           <button className="btn btn-danger" disabled={!alive || busy || bot?.stop_requested} onClick={() => setConfirmStop(true)}>⏹ Stop + flatten</button>
         </div>
-        {msg && <div className={`basis-full text-[12px] ${msg.ok ? "text-up" : "text-down"}`}>{msg.text}</div>}
+        {msg && <div className={`md:col-span-5 text-[12px] ${msg.ok ? "text-up" : "text-down"}`}>{msg.text}</div>}
       </div>
 
       {!d && <Panel><Spinner label="Connecting to the live feed…" /></Panel>}
@@ -205,19 +229,24 @@ export function Live() {
 
       {d && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-            <Kpi label={`Paper equity · ···${acct?.number_tail ?? ""}`} value={acct ? `$${fmt(acct.equity)}` : "–"} sub={acct?.status} />
-            <Kpi label="Day P&L" value={acct ? `${signed(acct.day_pnl)}` : "–"} tone={pnl(acct?.day_pnl)} sub={acct ? `${signed(acct.day_pnl_pct, 3)}%` : undefined}
-              extra={<Sparkline values={(d.equity_today ?? []).map((r) => r.equity)} />} />
-            <Kpi label="Long-term today" value={st?.split ? signed(st.split.long_term_pl_today) : "–"} tone={pnl(st?.split?.long_term_pl_today)}
-              sub={st?.split ? `core + rotation · ${fmt((st.split.core_usd + st.split.rotation_usd) / st.split.equity * 100, 1)}% held` : "core + rotation"}
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            <Tile label="Long-term today" tone={toneOf(st?.split?.long_term_pl_today)} valueTone={pnl(st?.split?.long_term_pl_today)}
+              value={st?.split ? signed(st.split.long_term_pl_today) : "–"}
+              sub={st?.split ? `core + rotation · ${fmt((st.split.core_usd + st.split.rotation_usd) / st.split.equity * 100, 1)}% held` : "core + rotation · from the next tick"}
               extra={st?.split ? <ShareBar now={(st.split.core_usd + st.split.rotation_usd) / st.split.equity * 100}
                 target={st.split["targets_%"].core + st.split["targets_%"].rotation} /> : undefined} />
-            <Kpi label="Jobs today" value={st?.split ? signed(st.split.jobs_pl_today) : "–"} tone={pnl(st?.split?.jobs_pl_today)}
-              sub={`${st?.jobs?.length ?? 0} jobs · realized + open`} />
-            <Kpi label="Cash" value={acct ? `$${fmt(acct.cash, 0)}` : "–"} sub={acct && acct.equity ? `${fmt((acct.cash / acct.equity) * 100, 0)}% of equity` : undefined} />
+            <Tile label="Jobs today" tone={toneOf(st?.split?.jobs_pl_today)} valueTone={pnl(st?.split?.jobs_pl_today)}
+              value={st?.split ? signed(st.split.jobs_pl_today) : "–"}
+              sub={st?.split ? `${st?.jobs?.length ?? 0} jobs · realized + open` : "from the next tick"} />
+            <Tile label="Cash" value={acct ? `$${fmt(acct.cash, 0)}` : "–"}
+              sub={acct && acct.equity ? `${fmt((acct.cash / acct.equity) * 100, 0)}% of equity` : undefined} />
+            <Tile label={d.jobs_vs_hold?.from ? `Jobs since ${d.jobs_vs_hold.from}` : "Jobs vs holding"} tone="warn"
+              value={d.jobs_vs_hold && !d.jobs_vs_hold.error && d.jobs_vs_hold.job_days ? <>{signed(d.jobs_vs_hold.strategy_usd ?? 0, 0)}
+                <span className="text-[13px] font-normal text-muted"> vs hold {signed(d.jobs_vs_hold.hold_usd ?? 0, 0)}</span></> : "–"}
+              sub={d.jobs_vs_hold?.job_days ? `${d.jobs_vs_hold.job_days} job-days · the live check` : "worked out once a day"} />
           </div>
 
+          <Section>Holdings</Section>
           <SplitBar split={st?.split} cash={acct?.cash} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <CoreCard core={st?.core} />
@@ -227,18 +256,20 @@ export function Live() {
           </div>
           <EquityChart rows={d.equity_today ?? []} fills={d.orders.filter((o) => o.status === "filled" && o.submitted_at)
             .map((o) => ({ t: Date.parse(String(o.submitted_at)) / 1000, side: String(o.side) }))} />
+          <Section>Positions and trading jobs</Section>
           <PositionsSplit positions={d.positions} longTerm={longTermSet}
             extra={(r) => { const pk = peakOf(st?.symbols, r.symbol); return pk ? `gave back ${fmt(pk.gave_back_pct, 2)}% from ${fmt(pk.peak, 2)}` : null; }} />
           <div className="grid grid-cols-1 gap-3">
             <Panel title="Bot view per symbol (last tick)">
               {st && Object.keys(st.symbols).length ? (
-                <SortTable rows={Object.entries(st.symbols).map(([symbol, v]) => ({ symbol, ...v }))} rowKey={(r) => r.symbol}
+                <SortTable zebra rows={Object.entries(st.symbols).map(([symbol, v]) => ({ symbol, ...v }))} rowKey={(r) => r.symbol}
                   cols={[
                     { key: "symbol", label: "Symbol", render: (r) => <span className="num font-semibold">{r.symbol}</span> },
                     { key: "job", label: "Job", render: (r) => <span className="text-muted">{r.job}</span> },
                     { key: "strategy", label: "Strategy", render: (r) => (
                       <span className="num">{r.strategy}{r.active && <span className="ml-1.5 chip" style={{ background: `${colorFor(r.active)}33`, color: colorFor(r.active) }}>{r.active}</span>}</span>) },
-                    { key: "signal", label: "Signal", tone: true },
+                    { key: "signal", label: "Signal", render: (r) => <Chip tone={r.signal > 0 ? "up" : r.signal < 0 ? "down" : "neutral"}>
+                      {r.signal > 0 ? "long" : r.signal < 0 ? "short" : "flat"}</Chip> },
                     { key: "position", label: "Pos", digits: 4 },
                     { key: "target", label: "Target", digits: 4 },
                     { key: "price", label: "Price" },
@@ -254,6 +285,7 @@ export function Live() {
             </Panel>
           </div>
 
+          <Section>Charts</Section>
           <LiveCharts symbols={symbols} positions={d.positions} timeframe={st?.timeframe} views={st?.symbols} />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
