@@ -118,27 +118,39 @@ live:
   - name: auto_USO
     strategy: regime_switch
     params:
-      trend_strategy: momentum
-      range_strategy: intraday_momentum
+      trend_strategy: intraday_momentum
+      range_strategy: rsi_reversion
       high_vol_strategy: flat
       confirm_bars: 3
       candidate_params:
-        momentum:
-          lookback: 10
-          threshold: 0.0
         intraday_momentum:
           signal_min: 30
           hold_min: 60
+        rsi_reversion:
+          period: 7
+          oversold: 20
+          overbought: 70
+          exit_level: 50
     symbols:
     - USO
     allocation_pct: 10
     enabled: true
   - name: auto_AAPL
-    strategy: rsi_reversion
+    strategy: regime_switch
     params:
-      period: 7
-      oversold: 20
-      exit_level: 50
+      trend_strategy: bollinger_reversion
+      range_strategy: rsi_reversion
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        bollinger_reversion:
+          period: 40
+          num_std: 2.5
+        rsi_reversion:
+          period: 14
+          oversold: 30
+          overbought: 70
+          exit_level: 60
     symbols:
     - AAPL
     allocation_pct: 10
@@ -270,6 +282,29 @@ live:
           band_pct: 0.5
     symbols:
     - META
+    allocation_pct: 10
+    enabled: true
+  - name: auto_MSFT
+    strategy: perf_rotation
+    params:
+      candidates:
+      - rsi_reversion
+      - bollinger_reversion
+      - vwap_reversion
+      candidate_params:
+        rsi_reversion:
+          period: 7
+          oversold: 10
+          overbought: 70
+          exit_level: 60
+        bollinger_reversion:
+          period: 40
+          num_std: 2.0
+        vwap_reversion:
+          band_pct: 0.5
+      cost_bps: 2.0
+    symbols:
+    - MSFT
     allocation_pct: 10
     enabled: true
 news:
