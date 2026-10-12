@@ -715,3 +715,47 @@ zero. So the timing adds no measurable value here; what decides the result is **
 is invested**, a sizing choice (the core's volatility target, the sleeve's size, cash). Cash earned 0%
 in all these tests; with a money-market rate the part-invested strategies and the scaled holds would gain
 the same amount.
+
+## 27. Sizing: how much to invest, fixed or moving (2026-10-12)
+
+`python -m autobot.sizing_study` (`data/sizing_study.json`). Section 26 showed that the result is set by how
+much money is at work, so the only choice left is the share in stocks (rest in cash). Two samples: S&P 500
+daily 2017-2026 (FRED, plus 1.4% dividends) and US stocks monthly 1901-2026 (Shiller, then SPY), cash at
+0% and at the T-bill rate. The account at the time: 53.5% invested (core 39.3%, rotation 13.0%, jobs 1.1%).
+
+Ways to set the share at a base level (10% to 100%, never above 100%): fixed; volatility target (less when
+markets are jumpy, the live core's rule); trend (out below the 10-month / 200-day average); drawdown cut
+(less after falls); and on the monthly sample the Kelly rule (full and half).
+
+Base level 50%, cash at the T-bill rate:
+
+| Method | Daily 2017-2026: per year / worst drop / average share | Monthly 1901-2026: per year / worst drop / average share |
+|---|---|---|
+| Fixed 50% | +9.2% / −18% / 52% | +7.1% / **−54%** / 50% |
+| Volatility target | +6.7% / **−8%** / 41% | +7.0% / **−29%** / 51% |
+| Trend | +6.8% / −10% / 42% | +6.7% / −31% / 36% |
+| Drawdown cut | +7.9% / −12% / 45% | +6.4% / −26% / 41% |
+
+Per dollar invested none of them beats the fixed share (all differences against fixed at the same average
+share are within luck, −1.3 to +0.5% a year). What they change is the **worst drop**: on 125 years the
+volatility target kept the same average money in stocks as fixed 50% and the same return, with the worst
+drop cut from −54% to −29%. By era (base 50%, T-bill cash): 1901-1945 −54% → −29%, 1946-1999 −16% → −15%,
+2000-2026 −27% → −21% (trend −9%), so the gain comes from the big crashes, not from every decade.
+
+Read as a menu (return at a given worst drop, T-bill cash):
+
+| Worst drop accepted | Fixed | Volatility target | Trend | Drawdown cut |
+|---|---|---|---|---|
+| 10% (daily) | +6.0% | **+7.9%** | +6.8% | +7.1% |
+| 20% (daily) | +10.1% | (its highest level dropped −16%: +10.4%) | +10.1% | +11.3% |
+| 20% (monthly) | +5.0% | **+6.2%** | +5.5% | +5.9% |
+| 30% (monthly) | +5.5% | **+7.1%** | +6.6% | +6.8% |
+
+Kelly from the data known at the time said "100% in stocks" almost always (full: +10.0% a year, worst drop
+−82%; half: +9.3%, −78%): it maximises long-run growth and ignores drops, so it is no guide for this account.
+
+Reading: there is no single optimal share; it follows from the worst drop one accepts. For a given drop, a
+moving share (volatility target first, then drawdown cut and trend) lets more money be invested and earns
+about 1-2 points a year more than a fixed share, because it holds less in the crashes. The live core already
+uses the volatility target. Cash interest adds about 2-3 points a year to a half-invested account (T-bill
+history); Alpaca's paper account pays none, a funded account's cash programme does.
