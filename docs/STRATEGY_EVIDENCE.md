@@ -678,3 +678,40 @@ too few to separate skill from luck.
 
 Strategy vs holding for the same jobs and days (from broker fills): the trading jobs made +$7 over 25 job-days;
 buying the same symbols at the open and holding to the close-out would have made +$705.
+
+## 26. Same money: the daily strategies against holding the same amount (2026-10-12)
+
+`python -m autobot.same_money_study` (`data/same_money_study.json`). Sections 1 and 5 compared every
+daily strategy with buy and hold **fully invested every day**, while a strategy is invested only part
+of the time and its idle money earns nothing. Here each one is compared, on the same data, fills and
+costs as section 5 (17 symbols, 2021-07-28 to 2026-10-09), with buy and hold kept at the strategy's
+own average share invested (same money), and at the strategy's own volatility (same risk).
+
+Buy and hold at a fixed share of the money is a straight line: 10% invested made +2.4% a year
+(worst drop −3%), 30% +7.1% (−8%), 50% +12.0% (−12%), 100% +24.4% (−24%).
+
+| Strategy | Per year | Worst drop | In the market | Hold, same money | vs same money (bps/day, 95%) | vs same risk |
+|---|---|---|---|---|---|---|
+| Relative strength top 4 | +31.6% | −31% | 100% | +24.4% | +3.3 (−3.2 to +9.8) | −2.8 (−9.4 to +3.8) |
+| bollinger_reversion | +8.7% | −10% | 21% | +4.9% | +1.5 (−0.6 to +3.6) | −1.0 (−3.1 to +1.1) |
+| rsi_reversion | +5.7% | −5% | 10% | +2.3% | +1.4 (−0.3 to +3.0) | −0.8 (−2.5 to +0.9) |
+| ibs_reversion | +12.5% | −11% | 44% | +10.6% | +0.8 (−1.5 to +3.1) | −0.9 (−3.3 to +1.5) |
+| donchian_breakout | +12.1% | −9% | 45% | +10.7% | +0.5 (−1.8 to +2.8) | +0.3 (−2.1 to +2.6) |
+| Best of all (walk-forward) | +13.3% | −14% | 53% | +12.6% | +0.3 (−1.4 to +2.0) | −0.4 (−2.2 to +1.4) |
+| momentum | +14.2% | −12% | 57% | +13.8% | +0.2 (−2.2 to +2.6) | +0.2 (−2.2 to +2.6) |
+| Volatility target (on hold) | +22.4% | −21% | 91% | +22.2% | +0.0 (−0.7 to +0.8) | +0.4 (−0.4 to +1.0) |
+| sma / ema cross, macd | +12.4 to +13.9% | −14 to −15% | 50-58% | +12.1 to +14.0% | −0.2 to +0.2 | about 0 |
+| Momentum 12-1 | +17.1% | −17% | 74% | +18.0% | −0.3 (−2.3 to +1.7) | −0.6 |
+| Above 200-day average | +14.8% | −17% | 69% | +16.7% | −0.7 (−3.3 to +2.0) | −0.1 |
+
+(Default settings; the walk-forward versions are within the same ranges. 27 rows in the JSON.)
+
+Reading: **none is clearly different from holding the same amount, in either direction, and none at the
+same risk.** The "nothing beats holding" of section 5 was mostly a matter of how much money was at work:
+per dollar invested the strategies roughly match holding, they do not lose to it. Their return and their
+drops are about what holding that share of the money gives. The mean-reversion rules (rsi, bollinger)
+lean ahead per dollar but take more risk per dollar (behind at the same risk), and the ranges include
+zero. So the timing adds no measurable value here; what decides the result is **how much of the money
+is invested**, a sizing choice (the core's volatility target, the sleeve's size, cash). Cash earned 0%
+in all these tests; with a money-market rate the part-invested strategies and the scaled holds would gain
+the same amount.
