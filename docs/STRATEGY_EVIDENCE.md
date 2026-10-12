@@ -678,3 +678,84 @@ too few to separate skill from luck.
 
 Strategy vs holding for the same jobs and days (from broker fills): the trading jobs made +$7 over 25 job-days;
 buying the same symbols at the open and holding to the close-out would have made +$705.
+
+## 26. Same money: the daily strategies against holding the same amount (2026-10-12)
+
+`python -m autobot.same_money_study` (`data/same_money_study.json`). Sections 1 and 5 compared every
+daily strategy with buy and hold **fully invested every day**, while a strategy is invested only part
+of the time and its idle money earns nothing. Here each one is compared, on the same data, fills and
+costs as section 5 (17 symbols, 2021-07-28 to 2026-10-09), with buy and hold kept at the strategy's
+own average share invested (same money), and at the strategy's own volatility (same risk).
+
+Buy and hold at a fixed share of the money is a straight line: 10% invested made +2.4% a year
+(worst drop −3%), 30% +7.1% (−8%), 50% +12.0% (−12%), 100% +24.4% (−24%).
+
+| Strategy | Per year | Worst drop | In the market | Hold, same money | vs same money (bps/day, 95%) | vs same risk |
+|---|---|---|---|---|---|---|
+| Relative strength top 4 | +31.6% | −31% | 100% | +24.4% | +3.3 (−3.2 to +9.8) | −2.8 (−9.4 to +3.8) |
+| bollinger_reversion | +8.7% | −10% | 21% | +4.9% | +1.5 (−0.6 to +3.6) | −1.0 (−3.1 to +1.1) |
+| rsi_reversion | +5.7% | −5% | 10% | +2.3% | +1.4 (−0.3 to +3.0) | −0.8 (−2.5 to +0.9) |
+| ibs_reversion | +12.5% | −11% | 44% | +10.6% | +0.8 (−1.5 to +3.1) | −0.9 (−3.3 to +1.5) |
+| donchian_breakout | +12.1% | −9% | 45% | +10.7% | +0.5 (−1.8 to +2.8) | +0.3 (−2.1 to +2.6) |
+| Best of all (walk-forward) | +13.3% | −14% | 53% | +12.6% | +0.3 (−1.4 to +2.0) | −0.4 (−2.2 to +1.4) |
+| momentum | +14.2% | −12% | 57% | +13.8% | +0.2 (−2.2 to +2.6) | +0.2 (−2.2 to +2.6) |
+| Volatility target (on hold) | +22.4% | −21% | 91% | +22.2% | +0.0 (−0.7 to +0.8) | +0.4 (−0.4 to +1.0) |
+| sma / ema cross, macd | +12.4 to +13.9% | −14 to −15% | 50-58% | +12.1 to +14.0% | −0.2 to +0.2 | about 0 |
+| Momentum 12-1 | +17.1% | −17% | 74% | +18.0% | −0.3 (−2.3 to +1.7) | −0.6 |
+| Above 200-day average | +14.8% | −17% | 69% | +16.7% | −0.7 (−3.3 to +2.0) | −0.1 |
+
+(Default settings; the walk-forward versions are within the same ranges. 27 rows in the JSON.)
+
+Reading: **none is clearly different from holding the same amount, in either direction, and none at the
+same risk.** The "nothing beats holding" of section 5 was mostly a matter of how much money was at work:
+per dollar invested the strategies roughly match holding, they do not lose to it. Their return and their
+drops are about what holding that share of the money gives. The mean-reversion rules (rsi, bollinger)
+lean ahead per dollar but take more risk per dollar (behind at the same risk), and the ranges include
+zero. So the timing adds no measurable value here; what decides the result is **how much of the money
+is invested**, a sizing choice (the core's volatility target, the sleeve's size, cash). Cash earned 0%
+in all these tests; with a money-market rate the part-invested strategies and the scaled holds would gain
+the same amount.
+
+## 27. Sizing: how much to invest, fixed or moving (2026-10-12)
+
+`python -m autobot.sizing_study` (`data/sizing_study.json`). Section 26 showed that the result is set by how
+much money is at work, so the only choice left is the share in stocks (rest in cash). Two samples: S&P 500
+daily 2017-2026 (FRED, plus 1.4% dividends) and US stocks monthly 1901-2026 (Shiller, then SPY), cash at
+0% and at the T-bill rate. The account at the time: 53.5% invested (core 39.3%, rotation 13.0%, jobs 1.1%).
+
+Ways to set the share at a base level (10% to 100%, never above 100%): fixed; volatility target (less when
+markets are jumpy, the live core's rule); trend (out below the 10-month / 200-day average); drawdown cut
+(less after falls); and on the monthly sample the Kelly rule (full and half).
+
+Base level 50%, cash at the T-bill rate:
+
+| Method | Daily 2017-2026: per year / worst drop / average share | Monthly 1901-2026: per year / worst drop / average share |
+|---|---|---|
+| Fixed 50% | +9.2% / −18% / 52% | +7.1% / **−54%** / 50% |
+| Volatility target | +6.7% / **−8%** / 41% | +7.0% / **−29%** / 51% |
+| Trend | +6.8% / −10% / 42% | +6.7% / −31% / 36% |
+| Drawdown cut | +7.9% / −12% / 45% | +6.4% / −26% / 41% |
+
+Per dollar invested none of them beats the fixed share (all differences against fixed at the same average
+share are within luck, −1.3 to +0.5% a year). What they change is the **worst drop**: on 125 years the
+volatility target kept the same average money in stocks as fixed 50% and the same return, with the worst
+drop cut from −54% to −29%. By era (base 50%, T-bill cash): 1901-1945 −54% → −29%, 1946-1999 −16% → −15%,
+2000-2026 −27% → −21% (trend −9%), so the gain comes from the big crashes, not from every decade.
+
+Read as a menu (return at a given worst drop, T-bill cash):
+
+| Worst drop accepted | Fixed | Volatility target | Trend | Drawdown cut |
+|---|---|---|---|---|
+| 10% (daily) | +6.0% | **+7.9%** | +6.8% | +7.1% |
+| 20% (daily) | +10.1% | (its highest level dropped −16%: +10.4%) | +10.1% | +11.3% |
+| 20% (monthly) | +5.0% | **+6.2%** | +5.5% | +5.9% |
+| 30% (monthly) | +5.5% | **+7.1%** | +6.6% | +6.8% |
+
+Kelly from the data known at the time said "100% in stocks" almost always (full: +10.0% a year, worst drop
+−82%; half: +9.3%, −78%): it maximises long-run growth and ignores drops, so it is no guide for this account.
+
+Reading: there is no single optimal share; it follows from the worst drop one accepts. For a given drop, a
+moving share (volatility target first, then drawdown cut and trend) lets more money be invested and earns
+about 1-2 points a year more than a fixed share, because it holds less in the crashes. The live core already
+uses the volatility target. Cash interest adds about 2-3 points a year to a half-invested account (T-bill
+history); Alpaca's paper account pays none, a funded account's cash programme does.
