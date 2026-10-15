@@ -1,5 +1,5 @@
 # The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. The only placeholder is the release tag the panel fills in: the
-# panel supplies the settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) as environment variables;
+# panel injects its Environment settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) itself;
 # PORT 8080, STATE_DIR /state and AUTOSTART_BOT 0 are the image's defaults (Dockerfile).
 services:
   app:
@@ -15,10 +15,6 @@ services:
       start_period: 60s
     expose:
       - "8080"                      # reached through the panel's proxy (the lab has no login of its own)
-    environment:
-      - ALPACA_API_KEY
-      - ALPACA_SECRET_KEY
-      - AUTOSTART_BOT
     volumes:
       - autobot_state:/state
 
