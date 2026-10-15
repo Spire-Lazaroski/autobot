@@ -21,8 +21,9 @@ if [ ! -f "$STATE/config.yaml" ] || [ "${RESET_CONFIG:-0}" = "1" ]; then
 fi
 ln -sf "$STATE/config.yaml" /app/config.yaml
 
-# a new container: no bot of ours is running yet; an old lock or STOP file must not block or stop the new one
-rm -f /app/logs/bot.pid /app/STOP
+# an old STOP file must not stop a new bot. The lock (logs/bot.pid) is kept: during an update the old version
+# runs on for about 30 s with the same /state, and its lock is what keeps a second bot from being started
+rm -f /app/STOP
 
 if [ -z "${ALPACA_API_KEY:-}" ] || [ -z "${ALPACA_SECRET_KEY:-}" ]; then
   echo "ALPACA_API_KEY / ALPACA_SECRET_KEY are not set: the lab starts, the bot and the news collector do not."
@@ -30,7 +31,9 @@ if [ -z "${ALPACA_API_KEY:-}" ] || [ -z "${ALPACA_SECRET_KEY:-}" ]; then
   NO_NEWS=1
 fi
 
-# 2. processes
+# 2. processes: the lab first (the panel needs /health within about 24 s), then the news collector and the bot
+python docker/serve.py &
+API=$!
 NEWS=""
 [ "${NO_NEWS:-0}" = "1" ] || { python run_news.py & NEWS=$!; }
 if [ "${AUTOSTART_BOT:-0}" = "1" ]; then
@@ -39,8 +42,6 @@ if [ "${AUTOSTART_BOT:-0}" = "1" ]; then
 else
   echo "bot not started (AUTOSTART_BOT=0): use the lab's Live page, Start"
 fi
-python docker/serve.py &
-API=$!
 
 bot_up() {
   python -c "import sys; from autobot.liveconfig import bot_state as b; s = b(); sys.exit(0 if s['running'] or s['unresponsive'] else 1)" 2>/dev/null
