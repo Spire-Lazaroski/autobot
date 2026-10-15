@@ -81,6 +81,9 @@ def test_container_files():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "stop_grace_period: 120s" in compose and "/state" in compose
     assert "${" not in compose                          # the panel forbids compose placeholders
+    import yaml
+    app = yaml.safe_load(compose)["services"]["app"]                   # the panel needs a service named app
+    assert "/health" in " ".join(app["healthcheck"]["test"])           # ... with a health check
     ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
     assert ".env" in ignore and "data" in ignore and "logs" in ignore
     serve = (ROOT / "docker" / "serve.py").read_text(encoding="utf-8")
