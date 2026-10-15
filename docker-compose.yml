@@ -1,8 +1,9 @@
-# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. No placeholders at all: the
+# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. The only placeholder is the release tag the panel fills in: the
 # panel supplies the settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) as environment variables;
 # PORT 8080, STATE_DIR /state and AUTOSTART_BOT 0 are the image's defaults (Dockerfile).
 services:
   app:
+    image: autobot:${RELEASE_SHA}   # a local image, tagged with the release the panel deploys
     build: .
     restart: unless-stopped
     stop_grace_period: 120s         # the bot needs time to close the trading jobs' positions on a stop
