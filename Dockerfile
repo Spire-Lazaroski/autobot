@@ -24,6 +24,6 @@ COPY . .
 COPY --from=web /web/dist ./web/dist
 RUN chmod +x docker/entrypoint.sh
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
+HEALTHCHECK --interval=5s --timeout=3s --start-period=20s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/health', timeout=4)"
 ENTRYPOINT ["docker/entrypoint.sh"]
