@@ -41,9 +41,11 @@ Copy the PC's `E:\autobot\data` folder (at least `news.db`, `recalibration/`, `u
 ## Running it without a panel
 
 ```bash
-ALPACA_API_KEY=... ALPACA_SECRET_KEY=... docker compose up -d --build
+export ALPACA_API_KEY=... ALPACA_SECRET_KEY=...
+docker compose up -d --build
 docker compose logs -f
 ```
 
-The port is published to the server itself only (`127.0.0.1:8080`); reach it through the panel's proxy or an SSH
-tunnel (`ssh -L 8080:127.0.0.1:8080 user@server`, then http://127.0.0.1:8080).
+The port is only exposed to other containers (a panel's proxy). To open the lab on the server itself, add
+`ports: ["127.0.0.1:8080:8080"]` locally, then use an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 user@server`).
+Never publish it to the internet without a password in front: the lab has no login of its own.
