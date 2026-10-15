@@ -1,0 +1,13 @@
+[Unit]
+Description=autobot lab (API + web pages, daily report and nightly recalibration) on 127.0.0.1
+After=network-online.target
+
+[Service]
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/.venv/bin/python -m api
+Restart=on-failure
+RestartSec=10
+# The lab never trades; stopping it never touches the bot or its positions.
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=autobot paper-trading bot (run_bot.py supervises live.py)
+After=network-online.target autobot-lab.service
+
+[Service]
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/.venv/bin/python run_bot.py
+# run_bot.py restarts live.py after a crash (max 3 per hour) and never after a normal stop, as on Windows;
+# exit code 4 = another bot already holds the lock. So systemd itself never restarts it.
+Restart=no
+# A stop (systemctl stop, a reboot) goes through the STOP file like the lab's Stop button: the trading jobs'
+# positions are closed, the long-term holdings (core, rotation) are kept, then the bot exits by itself.
+ExecStop=/bin/sh -c 'touch @ROOT@/STOP; for i in $(seq 90); do kill -0 $MAINPID 2>/dev/null || exit 0; sleep 1; done'
+TimeoutStopSec=120
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

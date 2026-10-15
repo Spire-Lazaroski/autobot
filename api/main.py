@@ -359,3 +359,11 @@ def put_config(cfg: Dict):
         yaml.safe_dump(cfg, f, sort_keys=False)
     os.replace(tmp, CONFIG_PATH)
     return {"ok": True}
+
+
+# The built lab (cd web && npm run build) served by the API itself, e.g. on a Linux server where the Vite dev
+# server isn't run. Mounted last so every /api, /ws, /reports and /docs route above wins. Absent on a dev PC: no-op.
+_DIST = CONFIG_PATH.parent / "web" / "dist"
+if _DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="web")

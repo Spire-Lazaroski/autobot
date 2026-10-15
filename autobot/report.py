@@ -18,6 +18,7 @@ import html
 import io
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -915,9 +916,21 @@ def write(ri: ReportInput, name: str, pdf: bool = True) -> Dict[str, str]:
     return out
 
 
-def to_pdf(html_path: Path) -> Optional[Path]:
-    """Print to PDF with headless Edge (installed with Windows)."""
+LINUX_BROWSERS = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "microsoft-edge")
+
+
+def pdf_browser() -> Optional[Path]:
+    """Headless Edge on Windows; Chromium, Chrome or Edge from the PATH elsewhere (None = HTML only)."""
     edge = next((e for e in EDGE if e.exists()), None)
+    if edge:
+        return edge
+    found = next((shutil.which(b) for b in LINUX_BROWSERS if shutil.which(b)), None)
+    return Path(found) if found else None
+
+
+def to_pdf(html_path: Path) -> Optional[Path]:
+    """Print to PDF with a headless Chromium-family browser (Edge on Windows)."""
+    edge = pdf_browser()
     if not edge:
         return None
     pdf = html_path.with_suffix(".pdf")
