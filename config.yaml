@@ -205,44 +205,45 @@ live:
     allocation_pct: 10
     enabled: true
   - name: auto_AMD
-    strategy: intraday_momentum
+    strategy: regime_switch
     params:
-      signal_min: 60
-      hold_min: 30
+      trend_strategy: macd
+      range_strategy: momentum
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        macd:
+          fast: 12
+          slow: 26
+          signal: 5
+        momentum:
+          lookback: 20
+          threshold: 0.0
     symbols:
     - AMD
     allocation_pct: 10
     enabled: true
   - name: auto_SLV
-    strategy: perf_rotation
+    strategy: regime_switch
     params:
-      candidates:
-      - rsi_reversion
-      - bollinger_reversion
-      - vwap_reversion
+      trend_strategy: bollinger_reversion
+      range_strategy: vwap_reversion
+      high_vol_strategy: flat
+      confirm_bars: 3
       candidate_params:
-        rsi_reversion:
-          period: 2
-          oversold: 10
-          overbought: 70
-          exit_level: 50
         bollinger_reversion:
-          period: 10
-          num_std: 2.0
+          period: 40
+          num_std: 2.5
         vwap_reversion:
           band_pct: 0.15
-      cost_bps: 2.0
     symbols:
     - SLV
     allocation_pct: 10
     enabled: true
   - name: auto_PFE
-    strategy: rsi_reversion
+    strategy: vwap_reversion
     params:
-      period: 14
-      oversold: 20
-      overbought: 70
-      exit_level: 60
+      band_pct: 0.8
     symbols:
     - PFE
     allocation_pct: 10
@@ -305,6 +306,46 @@ live:
       cost_bps: 2.0
     symbols:
     - MSFT
+    allocation_pct: 10
+    enabled: true
+  - name: auto_LLY
+    strategy: rsi_reversion
+    params:
+      period: 7
+      oversold: 10
+      overbought: 70
+      exit_level: 60
+    symbols:
+    - LLY
+    allocation_pct: 10
+    enabled: true
+  - name: auto_WMT
+    strategy: regime_switch
+    params:
+      trend_strategy: momentum
+      range_strategy: donchian_breakout
+      high_vol_strategy: flat
+      confirm_bars: 3
+      candidate_params:
+        momentum:
+          lookback: 100
+          threshold: 0.5
+        donchian_breakout:
+          entry: 40
+          exit: 20
+    symbols:
+    - WMT
+    allocation_pct: 10
+    enabled: true
+  - name: auto_GLD
+    strategy: rsi_reversion
+    params:
+      period: 14
+      oversold: 10
+      overbought: 70
+      exit_level: 50
+    symbols:
+    - GLD
     allocation_pct: 10
     enabled: true
 news:
