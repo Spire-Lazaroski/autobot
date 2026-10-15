@@ -80,7 +80,7 @@ def test_container_files():
     assert "rm -f /app/logs/bot.pid /app/STOP" in ep    # an old lock can't block the new bot
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "stop_grace_period: 120s" in compose and "/state" in compose
-    assert "${" not in compose                          # the panel forbids compose placeholders
+    assert compose.count("${") == 1 and "image: autobot:${RELEASE_SHA}" in compose   # the only placeholder the panel allows
     import yaml
     app = yaml.safe_load(compose)["services"]["app"]                   # the panel needs a service named app
     assert "/health" in " ".join(app["healthcheck"]["test"])           # ... with a health check
