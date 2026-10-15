@@ -1,0 +1,19 @@
+# never into the image: keys, local state, caches, environments
+.env
+.git
+.venv
+.venv-ml
+**/__pycache__
+**/node_modules
+web/dist
+data
+data_cache
+logs
+reports
+results
+branding
+STOP
+*.yaml.tmp
+next deployment.txt
+docs/img/live_page_preview4.png
+docs/img/live_page_top.png
