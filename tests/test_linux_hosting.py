@@ -87,6 +87,7 @@ def test_container_files():
     import yaml
     app = yaml.safe_load(compose)["services"]["app"]                   # the panel needs a service named app
     assert "/health" in " ".join(app["healthcheck"]["test"])           # ... with a health check
+    assert int(app["healthcheck"]["interval"].rstrip("s")) <= 10       # first check well inside the panel's ~24 s
     ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
     assert ".env" in ignore and "data" in ignore and "logs" in ignore
     serve = (ROOT / "docker" / "serve.py").read_text(encoding="utf-8")
