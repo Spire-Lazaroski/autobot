@@ -13,7 +13,7 @@ RUN npm run build
 # ---- 2. the app
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 \
-    PORT=8080 STATE_DIR=/state AUTOSTART_BOT=1
+    PORT=8080 STATE_DIR=/state AUTOSTART_BOT=0
 # chromium: the PDF copy of the daily report (without it the report is HTML only)
 RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*

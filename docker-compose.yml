@@ -10,7 +10,7 @@ services:
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:?set ALPACA_SECRET_KEY (paper key)}
       PORT: ${PORT:-8080}
       STATE_DIR: /state
-      AUTOSTART_BOT: ${AUTOSTART_BOT:-1}
+      AUTOSTART_BOT: ${AUTOSTART_BOT:-0}   # 1 only once no other bot trades this account
     ports:
       # local to the server only: the lab has no login, so put it behind the panel's password / proxy
       - "127.0.0.1:${PORT:-8080}:${PORT:-8080}"

@@ -12,7 +12,7 @@ the paper bot. Paper trading only.
 | Stop time | at least **120 seconds** before a forced kill | the bot closes the trading jobs' positions on a stop |
 | Password | the panel's access password, on **every** path (incl. `/ws/live`) | the lab has no login of its own |
 | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | your Alpaca **paper** keys | check them: some panels fill names ending in `_KEY` with random values |
-| `AUTOSTART_BOT` | `1` (default) | the bot starts with the container; `0` = start it from the lab's Live page |
+| `AUTOSTART_BOT` | `0` (default) until the PC's bot is off, then `1` | `1` = the bot starts with the container (and after every update); `0` = start it from the lab's Live page |
 
 Not needed: `ANTHROPIC_API_KEY` (the AI judge has ended and the news uses the free keyword rules). Leaving it out
 means nothing in the container can spend money on Claude.

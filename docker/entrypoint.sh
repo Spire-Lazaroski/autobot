@@ -33,7 +33,7 @@ fi
 # 2. processes
 NEWS=""
 [ "${NO_NEWS:-0}" = "1" ] || { python run_news.py & NEWS=$!; }
-if [ "${AUTOSTART_BOT:-1}" = "1" ]; then
+if [ "${AUTOSTART_BOT:-0}" = "1" ]; then
   python run_bot.py &
   echo "bot started (run_bot.py)"
 else
