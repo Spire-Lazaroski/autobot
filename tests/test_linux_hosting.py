@@ -79,7 +79,8 @@ def test_container_files():
     assert "rm -rf" not in ep                           # never deletes saved state
     assert "rm -f /app/logs/bot.pid /app/STOP" in ep    # an old lock can't block the new bot
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "stop_grace_period: 120s" in compose and "127.0.0.1:" in compose and "/state" in compose
+    assert "stop_grace_period: 120s" in compose and "/state" in compose
+    assert "${" not in compose                          # the panel forbids compose placeholders
     ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
     assert ".env" in ignore and "data" in ignore and "logs" in ignore
     serve = (ROOT / "docker" / "serve.py").read_text(encoding="utf-8")

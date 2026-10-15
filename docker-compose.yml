@@ -1,19 +1,17 @@
-# docker compose up -d --build     (keys from the panel's environment or a local .env next to this file)
+# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. No ${...} placeholders: the
+# panel supplies the settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) as environment variables;
+# PORT 8080, STATE_DIR /state and AUTOSTART_BOT 0 are the image's defaults (Dockerfile).
 services:
   autobot:
     build: .
-    init: true                      # forwards the stop signal to the entrypoint, which stops the bot cleanly
     restart: unless-stopped
     stop_grace_period: 120s         # the bot needs time to close the trading jobs' positions on a stop
+    expose:
+      - "8080"                      # reached through the panel's proxy (the lab has no login of its own)
     environment:
-      ALPACA_API_KEY: ${ALPACA_API_KEY:?set ALPACA_API_KEY (paper key)}
-      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:?set ALPACA_SECRET_KEY (paper key)}
-      PORT: ${PORT:-8080}
-      STATE_DIR: /state
-      AUTOSTART_BOT: ${AUTOSTART_BOT:-0}   # 1 only once no other bot trades this account
-    ports:
-      # local to the server only: the lab has no login, so put it behind the panel's password / proxy
-      - "127.0.0.1:${PORT:-8080}:${PORT:-8080}"
+      - ALPACA_API_KEY
+      - ALPACA_SECRET_KEY
+      - AUTOSTART_BOT
     volumes:
       - autobot_state:/state
 
