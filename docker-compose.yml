@@ -6,6 +6,12 @@ services:
     build: .
     restart: unless-stopped
     stop_grace_period: 120s         # the bot needs time to close the trading jobs' positions on a stop
+    healthcheck:                    # the lab answers on /health (no keys or account data)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     expose:
       - "8080"                      # reached through the panel's proxy (the lab has no login of its own)
     environment:
