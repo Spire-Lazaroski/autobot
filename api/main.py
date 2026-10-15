@@ -100,6 +100,12 @@ def health():
             "strategies": len(STRATEGIES), "timeframes": list(TIMEFRAMES)}
 
 
+@app.get("/health")
+def health_plain():
+    """For the hosting panel's check: the lab answers. No keys or account data."""
+    return {"ok": True}
+
+
 @app.get("/api/strategies")
 def strategies():
     return [_spec_json(s) for s in STRATEGIES.values()]
@@ -354,8 +360,19 @@ def get_config():
 def put_config(cfg: Dict):
     _validate_config(cfg)
     # write-then-rename so a bot reading config.yaml never sees a half-written file
-    fd, tmp = tempfile.mkstemp(dir=CONFIG_PATH.parent, suffix=".yaml.tmp")
+    # through a symlink: on the server config.yaml points at the permanent volume, and replacing the link
+    # itself would lose the change at the next update
+    target = os.path.realpath(CONFIG_PATH)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".yaml.tmp")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
-    os.replace(tmp, CONFIG_PATH)
+    os.replace(tmp, target)
     return {"ok": True}
+
+
+# The built lab (cd web && npm run build) served by the API itself, e.g. on a Linux server where the Vite dev
+# server isn't run. Mounted last so every /api, /ws, /reports and /docs route above wins. Absent on a dev PC: no-op.
+_DIST = CONFIG_PATH.parent / "web" / "dist"
+if _DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="web")

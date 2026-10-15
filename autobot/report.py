@@ -18,7 +18,9 @@ import html
 import io
 import json
 import os
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -915,9 +917,21 @@ def write(ri: ReportInput, name: str, pdf: bool = True) -> Dict[str, str]:
     return out
 
 
-def to_pdf(html_path: Path) -> Optional[Path]:
-    """Print to PDF with headless Edge (installed with Windows)."""
+LINUX_BROWSERS = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "microsoft-edge")
+
+
+def pdf_browser() -> Optional[Path]:
+    """Headless Edge on Windows; Chromium, Chrome or Edge from the PATH elsewhere (None = HTML only)."""
     edge = next((e for e in EDGE if e.exists()), None)
+    if edge:
+        return edge
+    found = next((shutil.which(b) for b in LINUX_BROWSERS if shutil.which(b)), None)
+    return Path(found) if found else None
+
+
+def to_pdf(html_path: Path) -> Optional[Path]:
+    """Print to PDF with a headless Chromium-family browser (Edge on Windows)."""
+    edge = pdf_browser()
     if not edge:
         return None
     pdf = html_path.with_suffix(".pdf")
@@ -925,7 +939,8 @@ def to_pdf(html_path: Path) -> Optional[Path]:
     tmp.unlink(missing_ok=True)
     profile = ROOT / "data" / "edge_pdf_profile"  # its own profile next to the project, not on the (small) system drive
     profile.mkdir(parents=True, exist_ok=True)
-    subprocess.run([str(edge), "--headless=new", "--disable-gpu", "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
+    sandbox = [] if sys.platform == "win32" else ["--no-sandbox"]  # Chromium in a container has no sandbox; our own file only
+    subprocess.run([str(edge), "--headless=new", "--disable-gpu", *sandbox, "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
                     f"--user-data-dir={profile}", "--virtual-time-budget=8000", f"--print-to-pdf={tmp}", html_path.resolve().as_uri()],
                    capture_output=True, timeout=120, check=False)
     if tmp.exists() and tmp.stat().st_size > 1000:

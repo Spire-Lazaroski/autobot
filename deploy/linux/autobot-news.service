@@ -1,0 +1,12 @@
+[Unit]
+Description=autobot news collector (under its own supervisor; never trades)
+After=network-online.target
+
+[Service]
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/.venv/bin/python run_news.py
+# run_news.py restarts the collector itself (max 3 per hour) and gives up after that, like on Windows.
+Restart=no
+
+[Install]
+WantedBy=default.target

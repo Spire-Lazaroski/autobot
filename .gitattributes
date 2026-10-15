@@ -2,3 +2,6 @@
 autobot/assets/brand.json text eol=lf
 autobot/assets/brand.css text eol=lf
 web/src/brand.css text eol=lf
+# Linux server files must keep LF line endings (bash and systemd reject CRLF)
+*.sh text eol=lf
+deploy/linux/* text eol=lf

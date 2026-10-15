@@ -95,6 +95,7 @@ def build_live(live: Dict, targets: Dict[str, Optional[Dict]], take_from_hand: f
 
 
 def _atomic_write(path: Path, cfg: Dict):
+    path = Path(os.path.realpath(path))  # through a symlink (the server keeps config.yaml on its permanent volume)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".yaml.tmp")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)

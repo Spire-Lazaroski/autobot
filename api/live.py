@@ -273,12 +273,12 @@ def live_start():
                                  f"{st['heartbeat_age_s']:.0f}s old. Stop it first (Stop + flatten, or end "
                                  "the process) so two bots can't trade at once.")
     STOP_FILE.unlink(missing_ok=True)
-    flags = 0
-    if sys.platform == "win32":  # keep running if the API restarts
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    # keep running if the API restarts: its own process group (Windows) / session (Linux)
+    detach = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+              if sys.platform == "win32" else {"start_new_session": True})
     out = open(LOGS / "bot_stdout.log", "a")
     proc = subprocess.Popen([sys.executable, str(ROOT / "live.py")], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+                            stdin=subprocess.DEVNULL, close_fds=True, **detach)
     return {"ok": True, "pid": proc.pid}
 
 
