@@ -1,4 +1,4 @@
-# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. No ${...} placeholders: the
+# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. No placeholders at all: the
 # panel supplies the settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) as environment variables;
 # PORT 8080, STATE_DIR /state and AUTOSTART_BOT 0 are the image's defaults (Dockerfile).
 services:
