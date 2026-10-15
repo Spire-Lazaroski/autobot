@@ -77,10 +77,13 @@ def test_container_files():
     assert "\r" not in ep
     assert "touch /app/STOP" in ep                      # a stop closes the jobs and keeps the long-term holdings
     assert "rm -rf" not in ep                           # never deletes saved state
-    assert "rm -f /app/logs/bot.pid /app/STOP" in ep    # an old lock can't block the new bot
+    assert "rm -f /app/STOP" in ep and "bot.pid" not in ep.split("rm -f")[1].splitlines()[0]   # the lock survives an update overlap
+    assert ep.index("docker/serve.py") < ep.index("run_news.py") < ep.index("run_bot.py")       # /health answers first
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "stop_grace_period: 120s" in compose and "/state" in compose
-    assert compose.count("${") == 1 and "image: autobot:${RELEASE_SHA}" in compose   # the only placeholder the panel allows
+    assert compose.count("${") == 1                                     # the only placeholder the panel allows, in its exact form
+    assert "image: autobot:${RELEASE_SHA:?RELEASE_SHA must be a full commit SHA}" in compose
+    assert "env_file: .env" in compose                                  # the panel writes its Environment settings there
     import yaml
     app = yaml.safe_load(compose)["services"]["app"]                   # the panel needs a service named app
     assert "/health" in " ".join(app["healthcheck"]["test"])           # ... with a health check

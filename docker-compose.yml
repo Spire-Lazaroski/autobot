@@ -1,10 +1,11 @@
-# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`. The only placeholder is the release tag the panel fills in: the
-# panel injects its Environment settings (ALPACA_API_KEY, ALPACA_SECRET_KEY, optional AUTOSTART_BOT) itself;
+# The container for a hosting panel (NextDeploy) or `docker compose up -d --build`.
+# NextDeploy writes the Environment settings into .env and fills in the release tag.
 # PORT 8080, STATE_DIR /state and AUTOSTART_BOT 0 are the image's defaults (Dockerfile).
 services:
   app:
-    image: autobot:${RELEASE_SHA}   # a local image, tagged with the release the panel deploys
+    image: autobot:${RELEASE_SHA:?RELEASE_SHA must be a full commit SHA}
     build: .
+    env_file: .env                  # ALPACA_API_KEY, ALPACA_SECRET_KEY, … from the panel's Environment
     restart: unless-stopped
     stop_grace_period: 120s         # the bot needs time to close the trading jobs' positions on a stop
     healthcheck:                    # the lab answers on /health (no keys or account data)
@@ -14,7 +15,7 @@ services:
       retries: 3
       start_period: 60s
     expose:
-      - "8080"                      # reached through the panel's proxy (the lab has no login of its own)
+      - "8080"                      # reached through the panel's proxy, behind the site's Access password
     volumes:
       - autobot_state:/state
 
