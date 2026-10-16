@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
@@ -22,9 +22,6 @@ export function News() {
   const items = useQuery({ queryKey: ["news-items", sym], queryFn: () => api<Row[]>(`/news/items?limit=150${sym ? `&symbol=${sym}` : ""}`), refetchInterval: 30_000 });
   const c = st.data?.collector;
   const db = st.data?.db;
-  const qc = useQueryClient();
-  const start = useMutation({ mutationFn: () => api("/news/start", {}),
-    onSettled: () => setTimeout(() => qc.invalidateQueries({ queryKey: ["news-status"] }), 3000) });
 
   return (
     <div className="flex flex-col gap-3">
@@ -36,18 +33,15 @@ export function News() {
           {c?.running && <span className="num text-[11.5px] text-muted">pid {c.pid} · beat {fmt(c.heartbeat_age_s, 0)}s ago · {c.stream_items ?? 0} live items, {c.poll_new ?? 0} caught by the poll</span>}
         </span>
         {!c?.running && c?.supervisor && <span className="text-[12px] text-warn">its supervisor is waiting to restart it (after repeated failures it waits 15 minutes)</span>}
-        {!c?.running && !c?.supervisor && <>
-          <span className="text-[12px] text-muted">It collects news only and never trades.</span>
-          <button className="btn btn-primary ml-auto" disabled={start.isPending} onClick={() => start.mutate()}>
-            <i className="bi bi-play-fill" aria-hidden="true" /> Start collector</button>
-        </>}
+        {!c?.running && !c?.supervisor && <span className="text-[12px] text-muted">
+          Start it with <a className="underline" href="#/live">Start on the Live page</a> (it starts whatever is stopped). It never trades.</span>}
         {!c?.running && !!c?.log_tail?.length && (
           <details className="w-full text-[11.5px]">
             <summary className="cursor-pointer text-muted">Last lines of the collector's log (why it stopped)</summary>
             <pre className="num whitespace-pre-wrap break-words max-h-48 overflow-y-auto mt-1 p-2 bg-bg rounded">{c.log_tail.join("\n")}</pre>
           </details>)}
       </div>
-      <ErrorBox error={start.error} />
+
       <ErrorBox error={st.error} />
 
       {db && (
