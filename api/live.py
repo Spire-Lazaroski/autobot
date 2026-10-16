@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -23,7 +25,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
-from autobot.liveconfig import STOP_FILE, bot_state
+from autobot.liveconfig import STOP_FILE, bot_state, validate_live
 
 from .serialize import times, values
 from .settings import CONFIG_PATH, LOGS, ROOT
@@ -198,7 +200,8 @@ def snapshot() -> Dict:
             return _snap["data"]
     data = {"time": int(time.time()), "bot": bot_state(), "status": _read_json(LOGS / "status.json"),
             "trades": _trades(), "log": _log_tail(), "log_entries": _log_entries(_log_tail(120)),
-            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), "news": news_state(), **_account()}
+            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), "news": news_state(), "paused": _paused(),
+            **_account()}
     with _snap_lock:
         _snap.update(at=time.time(), data=data)
     return data
@@ -256,6 +259,93 @@ def live_candles(symbol: str, timeframe: Optional[str] = None, bars: int = 300):
             "candles": {"t": times(df.index), "o": values(df.open, 4), "h": values(df.high, 4),
                         "l": values(df.low, 4), "c": values(df.close, 4), "v": values(df.volume, 0)},
             "fills": fills}
+
+
+class CloseReq(BaseModel):
+    symbols: List[str]
+    confirm: bool = False
+
+
+class ResumeReq(BaseModel):
+    symbols: List[str]
+
+
+def _paused() -> List[str]:
+    try:
+        return list((yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}).get("live", {}).get("paused") or [])
+    except (OSError, ValueError):
+        return []
+
+
+def _write_paused(paused: List[str]):
+    """Rewrite live.paused in config.yaml (validated, atomic, through the server's symlink); the bot reads it at
+    its next bar."""
+    cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    live = cfg["live"]
+    if paused:
+        live["paused"] = sorted(set(paused))
+    else:
+        live.pop("paused", None)
+    errs = validate_live(live)
+    if errs:
+        raise HTTPException(422, "; ".join(errs))
+    target = os.path.realpath(CONFIG_PATH)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".yaml.tmp")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+    os.replace(tmp, target)
+
+
+@router.post("/api/live/close")
+def live_close(req: CloseReq):
+    """Close positions by hand (any of them, long-term holdings included) and pause those symbols, so the bot
+    doesn't buy them back: no job trades them, the core isn't rebalanced, the rotation leaves the fund out, until
+    Resume. The pause is written first; then a market order per position (paper). With the market closed the
+    order waits for the next open."""
+    if not req.confirm:
+        raise HTTPException(400, "Closing positions sells them. Send {\"confirm\": true}.")
+    syms = sorted({s.strip().upper() for s in req.symbols if s.strip()})
+    if not syms:
+        raise HTTPException(400, "No symbols given.")
+    tc = _client()
+    held = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
+    _write_paused(_paused() + syms)
+    results = []
+    for s in syms:
+        key = s.replace("/", "")
+        if not held.get(key):
+            results.append({"symbol": s, "ok": True, "note": "no position; paused"})
+            continue
+        try:
+            o = tc.close_position(key)
+            results.append({"symbol": s, "ok": True, "qty": held[key], "order_id": str(getattr(o, "id", ""))})
+        except Exception as e:  # noqa: BLE001
+            results.append({"symbol": s, "ok": False, "error": str(e)})
+    try:
+        from autobot.decisions import Recorder
+        done = [r["symbol"] for r in results if r.get("qty")]
+        Recorder(LOGS / "decisions.jsonl").event(
+            "manual_close", f"Closed by hand and paused: {', '.join(done) if done else 'nothing held'}"
+                            f"{'; paused without a position: ' + ', '.join(r['symbol'] for r in results if not r.get('qty')) if len(done) < len(results) else ''}.",
+            symbols=syms)
+    except Exception:  # noqa: BLE001  the record is for reports; the close itself already happened
+        pass
+    _snap["data"] = None   # the next push shows it
+    failed = [f"{r['symbol']} ({r['error']})" for r in results if not r["ok"]]
+    msg = (f"Sell orders sent for {', '.join(r['symbol'] for r in results if r.get('qty')) or 'nothing (no position)'}; "
+           f"paused: {', '.join(syms)}. The bot leaves them alone until you press Resume."
+           + (f" Not closed: {'; '.join(failed)}." if failed else ""))
+    return {"ok": not failed, "results": results, "paused": _paused(), "message": msg}
+
+
+@router.post("/api/live/resume")
+def live_resume(req: ResumeReq):
+    """Hand symbols back to the bot: jobs trade them again from their next bar, the core rebalances at the next
+    open, a rotation fund is bought again at the next monthly decision if it is still chosen."""
+    syms = {s.strip().upper() for s in req.symbols}
+    _write_paused([s for s in _paused() if s not in syms])
+    _snap["data"] = None
+    return {"ok": True, "paused": _paused(), "message": f"Resumed {', '.join(sorted(syms))}: the bot follows its rules for them again."}
 
 
 class StopReq(BaseModel):

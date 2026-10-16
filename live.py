@@ -139,6 +139,8 @@ def config_diff(old: dict, new: dict) -> list[str]:
         a, b = old.get("risk", {}).get(k), new.get("risk", {}).get(k)
         if a != b:
             out.append(f"risk.{k}: {a} -> {b}")
+    if sorted(old.get("paused") or []) != sorted(new.get("paused") or []):
+        out.append(f"paused: {sorted(old.get('paused') or [])} -> {sorted(new.get('paused') or [])}")
     if (old.get("trade_rules") or {}) != (new.get("trade_rules") or {}):
         out.append(f"trade_rules: {old.get('trade_rules')} -> {new.get('trade_rules')}")
     for sect in ("core", "rotation"):
@@ -217,6 +219,7 @@ class Bot:
         self.core = core.settings(live.get("core"))
         self.rotation = rotation.settings(live.get("rotation"))
         self.rules = live.get("trade_rules") or {}
+        self.paused = set(live.get("paused") or [])   # closed by hand: the bot leaves these symbols alone
 
     # ------------------------------------------------------------ hot reload
     def reload_config(self):
@@ -286,6 +289,9 @@ class Bot:
         from alpaca.trading.requests import MarketOrderRequest
         if qty == 0:
             return
+        if qty > 0 and sym in getattr(self, "paused", ()):
+            log.warning("PAUSED %s: not buying %s (closed by hand; Resume on the Live page)", sym, qty)
+            return None
         side = OrderSide.BUY if qty > 0 else OrderSide.SELL
         tif = TimeInForce.GTC if is_crypto(sym) else TimeInForce.DAY
         order = self.tc.submit_order(MarketOrderRequest(symbol=sym, qty=abs(qty), side=side, time_in_force=tif))
@@ -449,7 +455,7 @@ class Bot:
                   "day_pnl_%": round((equity / self.day_start_equity - 1) * 100, 3),
                   "market_open": clock.is_open, "halted": self.halted, "timeframe": self.tf,
                   "jobs": [{k: j.get(k) for k in ("name", "strategy", "params", "symbols", "allocation_pct")} for j in self.jobs],
-                  "config_changes": self.changes, "symbols": {}}
+                  "config_changes": self.changes, "symbols": {}, "paused": sorted(self.paused)}
         budget = self.budgets(equity)
         status["sizing"] = {"mode": self.risk.get("sizing", "fixed"), "usd": {s: round(v, 2) for s, v in budget.items()}}
         pl = self.risk.get("profit_lock") or {}
@@ -470,6 +476,9 @@ class Bot:
                     if not crypto and not clock.is_open:
                         continue
                     cur = held.get(self._pos_key(sym), 0.0)
+                    if sym in self.paused:
+                        status["symbols"][sym] = {"job": job["name"], "strategy": job["strategy"], "position": cur, "paused": True}
+                        continue
                     active = None
                     override = None
                     try:
@@ -598,7 +607,8 @@ class Bot:
         overnight like the core."""
         c = self.rotation
         view = {"enabled": bool(c.get("enabled")), "allocation_pct": c["allocation_pct"], "top_n": c["top_n"],
-                "symbols": c["symbols"], "held": {s: held.get(s, 0.0) for s in c["symbols"] if held.get(s)}}
+                "symbols": c["symbols"], "held": {s: held.get(s, 0.0) for s in c["symbols"] if held.get(s)},
+                "paused": sorted(set(c["symbols"]) & self.paused)}
         if self.rot_target:
             view["target"] = self.rot_target
         if self.rot_last:
@@ -625,6 +635,9 @@ class Bot:
             prices[s] = float(b.close.iloc[-1])
         acts = []
         for o in rotation.orders({s: held.get(s, 0.0) for s in c["symbols"]}, prices, equity, tgt, c):
+            if o["symbol"] in self.paused:
+                log.info("ROTATION %s is paused (closed by hand): no order this month", o["symbol"])
+                continue
             res = self.submit(o["symbol"], o["qty"], o["reason"], prices[o["symbol"]], "rotation")
             acts.append({"time": datetime.now(timezone.utc).isoformat(), **o, "order_id": str(res.id) if res is not None else None})
             self._safe(self.rec.write, {"type": "decision", "job": "rotation", "symbol": o["symbol"], "strategy": "rotation sleeve",
@@ -650,6 +663,9 @@ class Bot:
         status["core"] = view
         if self.core_vol:
             view["vol_target"] = self.core_vol
+        if sym in self.paused:
+            view["paused"] = True     # closed by hand: no rebalance until it is resumed
+            return
         if not c.get("enabled") or not clock.is_open:
             return
         today = self._today(clock)

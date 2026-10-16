@@ -235,21 +235,43 @@ const POS_COLS = [
   { key: "unrealized_plpc", label: "P&L %", tone: true },
 ];
 
-/** Positions in two groups: long-term (core and sleeve) and trading jobs. */
-export function PositionsSplit({ positions, longTerm, extra }: { positions: Row[]; longTerm: Set<string>; extra?: (r: Row) => string | null }) {
+/** Positions in two groups: long-term (core and sleeve) and trading jobs. With `selected` / `onToggle` each row
+ *  gets a tick box (close by hand); paused symbols carry a chip and, below, a Resume button. */
+export function PositionsSplit({ positions, longTerm, extra, selected, onToggle, paused = [], onResume }: {
+  positions: Row[]; longTerm: Set<string>; extra?: (r: Row) => string | null;
+  selected?: Set<string>; onToggle?: (sym: string) => void; paused?: string[]; onResume?: (sym: string) => void;
+}) {
   const lt = positions.filter((p) => longTerm.has(p.symbol));
   const jobs = positions.filter((p) => !longTerm.has(p.symbol));
-  const jobCols = extra ? [...POS_COLS, { key: "note", label: "Note", align: "left" as const, render: (r: Row) => <span className="text-muted whitespace-nowrap">{extra(r) ?? "–"}</span> }] : POS_COLS;
+  const pausedSet = new Set(paused.map((s) => s.replace("/", "")));
+  const pick = selected && onToggle ? [{ key: "pick", label: "", sortable: false, render: (r: Row) => (
+    <input type="checkbox" aria-label={`select ${r.symbol}`} checked={selected.has(r.symbol)} onChange={() => onToggle(r.symbol)} />) }] : [];
+  const symCol = { key: "symbol", label: "Symbol", render: (r: Row) => (
+    <span className="num font-semibold">{r.symbol}{pausedSet.has(r.symbol) && <span className="ml-1.5"><Chip tone="warn">paused</Chip></span>}</span>) };
+  const cols = [...pick, symCol, ...POS_COLS.slice(1)];
+  const jobCols = extra ? [...cols, { key: "note", label: "Note", align: "left" as const, render: (r: Row) => <span className="text-muted whitespace-nowrap">{extra(r) ?? "–"}</span> }] : cols;
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-      <Panel title={<Title icon="bi-briefcase">Long-term positions · core and rotation</Title>}>
-        {lt.length ? <SortTable rows={lt} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={POS_COLS} />
-          : <p className="text-muted text-[12px]">None.</p>}
-      </Panel>
-      <Panel title={<Title icon="bi-clock-history">Trading job positions · closed by 15:55</Title>}>
-        {jobs.length ? <SortTable rows={jobs} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={jobCols} />
-          : <p className="text-muted text-[12px]">No open job positions.</p>}
-      </Panel>
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <Panel title={<Title icon="bi-briefcase">Long-term positions · core and rotation</Title>}>
+          {lt.length ? <SortTable rows={lt} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={cols} />
+            : <p className="text-muted text-[12px]">None.</p>}
+        </Panel>
+        <Panel title={<Title icon="bi-clock-history">Trading job positions · closed by 15:55</Title>}>
+          {jobs.length ? <SortTable rows={jobs} rowKey={(r) => r.symbol} initialSort={{ key: "market_value", desc: true }} cols={jobCols} />
+            : <p className="text-muted text-[12px]">No open job positions.</p>}
+        </Panel>
+      </div>
+      {paused.length > 0 && (
+        <div className="panel p-2.5 flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="font-semibold"><i className="bi bi-pause-circle text-warn" aria-hidden="true" /> Paused by hand</span>
+          <span className="text-muted">the bot doesn't buy these until you resume them:</span>
+          {paused.map((s) => (
+            <span key={s} className="inline-flex items-center gap-1 chip border border-line-2">
+              <span className="num font-semibold">{s}</span>
+              {onResume && <button className="underline text-accent" onClick={() => onResume(s)}>Resume</button>}
+            </span>))}
+        </div>)}
     </div>
   );
 }

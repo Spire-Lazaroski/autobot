@@ -43,6 +43,9 @@ def validate_live(live: Dict) -> List[str]:
         return ["live section missing"]
     if live.get("timeframe") not in TIMEFRAMES:
         errs.append(f"timeframe must be one of {list(TIMEFRAMES)}")
+    paused = live.get("paused")
+    if paused is not None and (not isinstance(paused, list) or not all(isinstance(s, str) and s for s in paused)):
+        errs.append("paused must be a list of symbols")
     risk = live.get("risk") or {}
     for k in ("max_daily_loss_pct", "max_position_usd"):
         v = risk.get(k)
