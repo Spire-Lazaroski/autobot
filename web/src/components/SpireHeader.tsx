@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { api, toLogin } from "../lib/api";
+import { toLogin, useMe } from "../lib/api";
 import { InstallApp } from "./InstallApp";
 /**
  * The Spire Analytics header, reproduced from partials/spire_header.html
@@ -10,6 +9,7 @@ export interface NavItem {
   id: string;
   label: string;
   icon: string; // Bootstrap Icons class
+  admin?: boolean; // shown to the admin only
 }
 
 export const NAV: NavItem[] = [
@@ -21,9 +21,13 @@ export const NAV: NavItem[] = [
   { id: "recal", label: "Recalibrate", icon: "bi-sliders" },
   { id: "reports", label: "Reports", icon: "bi-file-earmark-text" },
   { id: "help", label: "Help", icon: "bi-question-circle" },
+  { id: "users", label: "Users", icon: "bi-people", admin: true },
 ];
 
 export function SpireHeader({ active, title, status }: { active: string; title?: string; status?: React.ReactNode }) {
+  const me = useMe();
+  const role = me.data?.role;
+  const nav = role === "user" ? [] : NAV.filter((n) => !n.admin || role === "admin");   // invited users: their own pages only
   return (
     <>
       <header className="spire-hdr">
@@ -34,7 +38,7 @@ export function SpireHeader({ active, title, status }: { active: string; title?:
         {title && <span className="page">{title}</span>}
         {status}
         <nav className="spire-hdr-nav">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <a key={n.id} href={`#/${n.id}`} className={n.id === active ? "on" : undefined}>
               <i className={`bi ${n.icon}`} /> {n.label}
             </a>
@@ -44,7 +48,7 @@ export function SpireHeader({ active, title, status }: { active: string; title?:
         </nav>
       </header>
       <nav className="spire-tabs" aria-label="Pages">
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <a key={n.id} href={`#/${n.id}`} className={n.id === active ? "on" : undefined}>
             <i className={`bi ${n.icon}`} />{n.label}
           </a>
@@ -56,7 +60,7 @@ export function SpireHeader({ active, title, status }: { active: string; title?:
 
 /** Shown only when the lab asks for a login (on the server): who is signed in, and Sign out. */
 function SignOut() {
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api<{ user: string | null; login_required: boolean }>("/me"), staleTime: 300_000 });
+  const me = useMe();
   if (!me.data?.login_required || !me.data.user) return null;
   return (
     <a href="#" title={`Signed in as ${me.data.user}`} onClick={async (e) => {

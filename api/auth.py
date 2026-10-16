@@ -32,9 +32,12 @@ COOKIE = "spire_session"
 SHORT_S, LONG_S = 12 * 3600, 30 * 86400
 MAX_FAILS, FAIL_WINDOW_S, LOCK_S = 5, 900, 900
 ITERATIONS = 600_000
-OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/health", "/favicon.ico",
+OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/api/signup", "/health", "/favicon.ico",
               "/manifest.webmanifest", "/sw.js")                # the phone app's description and helper: no data
 OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code only, no data): the login page needs its own
+
+# what an invited user may reach before their own account is connected: their identity, sign-out, the app's shell
+USER_API = ("/api/me", "/api/logout", "/api/health")
 
 _fails: Dict[str, deque] = defaultdict(deque)
 _locked: Dict[str, float] = {}
@@ -118,9 +121,19 @@ def session_user(token: Optional[str]) -> Optional[str]:
         d = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     except (ValueError, TypeError):
         return None
-    if d.get("exp", 0) < time.time() or d.get("u") != user():
+    if d.get("exp", 0) < time.time() or not role_of(d.get("u", "")):
         return None
     return d["u"]
+
+
+def role_of(name: str) -> Optional[str]:
+    """admin = the lab's own login (environment); user = an invited, not disabled user (api/users.py)."""
+    if not name:
+        return None
+    if configured() and hmac.compare_digest(name.encode(), user().encode()):
+        return "admin"
+    from . import users
+    return "user" if users.active(name) else None
 
 
 def cookie_from_header(raw: Optional[str]) -> Optional[str]:
@@ -175,12 +188,22 @@ class AuthMiddleware:
         if scope["type"] not in ("http", "websocket") or not required() or is_open(scope.get("path", "")):
             return await self.app(scope, receive, send)
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
-        if session_user(cookie_from_header(headers.get("cookie"))):
+        name = session_user(cookie_from_header(headers.get("cookie")))
+        path = scope.get("path", "")
+        if name and (role_of(name) == "admin" or not path.startswith(("/api/", "/ws/", "/reports/", "/docs/"))
+                     or path in USER_API):
             return await self.app(scope, receive, send)
+        if name:                                        # an invited user: nothing of the admin's account
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 4403})
+                return
+            await send({"type": "http.response.start", "status": 403,
+                        "headers": [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]})
+            await send({"type": "http.response.body", "body": b'{"detail":"Your own account is not connected yet."}'})
+            return
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 4401})
             return
-        path = scope.get("path", "")
         if path.startswith(("/api/", "/reports/", "/docs/")):
             body, status, extra = b'{"detail":"Please sign in."}', 401, [(b"content-type", b"application/json")]
         else:                                           # a page: to the login, then back here

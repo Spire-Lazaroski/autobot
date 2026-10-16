@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { SpireHeader } from "./components/SpireHeader";
-import { useHealth } from "./lib/api";
+import { useHealth, useMe } from "./lib/api";
 import { usePageState } from "./lib/usePageState";
 import { Help } from "./pages/Help";
 import { Lab } from "./pages/Lab";
@@ -10,6 +10,7 @@ import { Recalibration } from "./pages/Recalibration";
 import { Reports } from "./pages/Reports";
 import { Search } from "./pages/Search";
 import { Shifting } from "./pages/Shifting";
+import { Users, Welcome } from "./pages/Users";
 import { WalkForward } from "./pages/WalkForward";
 
 function SearchHub() {
@@ -36,6 +37,7 @@ const PAGES: Record<string, { title: string; Component: ComponentType }> = {
   recal: { title: "Recalibration", Component: Recalibration },
   reports: { title: "Trading reports", Component: Reports },
   help: { title: "Help & operating procedure", Component: Help },
+  users: { title: "Users & invites", Component: Users },
 };
 
 function useHashPage() {
@@ -56,7 +58,9 @@ function useHashPage() {
 export default function App() {
   const page = useHashPage();
   const health = useHealth();
-  const { title, Component } = PAGES[page];
+  const me = useMe();
+  const invited = me.data?.role === "user";               // an invited user: the welcome page, nothing of the lab's account
+  const { title, Component } = invited ? { title: "Welcome", Component: () => <Welcome name={me.data?.user ?? ""} /> } : PAGES[page];
   useEffect(() => {
     document.body.classList.add("has-tabs");
     document.title = `${title} · Spire Analytics`;
@@ -75,7 +79,7 @@ export default function App() {
         } />
       </div>
       <main className="flex-1 p-3 sm:p-4 max-w-[1800px] w-full mx-auto">
-        <Component />
+        {me.data || me.isError ? <Component /> : null /* who is signed in decides which page may load */}
       </main>
     </div>
   );
