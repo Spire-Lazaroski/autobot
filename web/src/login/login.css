@@ -10,6 +10,7 @@
   --down: #f09595;
 }
 * { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }   /* the invite-only fields: .card label's display:flex must not show them */
 html, body { height: 100%; }
 body {
   background: radial-gradient(ellipse at 50% 35%, #26263f 0%, var(--navy) 45%, var(--navy-deep) 100%);
