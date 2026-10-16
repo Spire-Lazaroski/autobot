@@ -134,6 +134,7 @@ export function Welcome({ name }: { name: string }) {
           <div className="flex flex-col gap-2 text-[13px]">
             {s?.oauth_available && (<>
               <span>You sign in on Alpaca's own page and allow this app to trade <b>one paper account</b>. Your Alpaca password never comes here.</span>
+              <AlpacaDisclosure />
               <div><a className="btn btn-primary" href="/api/alpaca/connect"><i className="bi bi-link-45deg" aria-hidden="true" /> Connect with Alpaca</a></div>
             </>)}
             <details open={!s?.oauth_available} className="text-[12.5px]">
@@ -158,6 +159,19 @@ export function Welcome({ name }: { name: string }) {
           This app forgets its permission for your paper account. Nothing in your Alpaca account changes. To also remove the
           app on Alpaca's side, open Alpaca's dashboard and revoke it there.
         </Confirm>)}
+    </div>
+  );
+}
+
+/** The disclosure Alpaca requires at the moment of connecting (Alpaca Connect app registration), word for word. */
+function AlpacaDisclosure() {
+  return (
+    <div id="alpaca-disclosure" className="rounded-lg border border-line-2 bg-bg p-3 text-[12.5px] leading-relaxed">
+      <b className="block mb-1 text-[13px]">Authorize Spire Analytics</b>
+      By allowing Spire Analytics to access your Alpaca account, you are granting Spire Analytics access to your account
+      information and authorization to place transactions in your account at your direction. Alpaca does not warrant or
+      guarantee that Spire Analytics will work as advertised or expected. Before authorizing,{" "}
+      <a className="underline" href="/terms" target="_blank" rel="noopener">learn more about Spire Analytics</a>.
     </div>
   );
 }
