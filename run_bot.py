@@ -21,6 +21,7 @@ import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent
 LOGS = ROOT / "logs"
@@ -88,8 +89,12 @@ def run_once() -> int:
 
 
 def supervise(run=run_once, sleep=time.sleep, clock=time.time, say=None, what: str = "the bot",
-              out_log: Path = OUT_LOG, how_to_start: str = "start_bot.bat or the lab's Start button") -> int:
-    """Run, and restart after a crash (RestartPolicy). Also used by run_news.py for the news collector."""
+              out_log: Path = OUT_LOG, how_to_start: str = "start_bot.bat or the lab's Start button",
+              cooldown_s: Optional[float] = None) -> int:
+    """Run, and restart after a crash (RestartPolicy). Also used by run_news.py for the news collector.
+    After MAX_RESTARTS crashes within an hour it gives up, or, with `cooldown_s` (the news collector, which never
+    trades), waits that long and starts counting again, so a network outage can't silence it for good. The bot
+    itself keeps giving up: a trading program that keeps crashing should wait for a person."""
     say = say or log
     policy = RestartPolicy()
     while True:
@@ -101,6 +106,12 @@ def supervise(run=run_once, sleep=time.sleep, clock=time.time, say=None, what: s
             return EXIT_ALREADY_RUNNING  # another copy is running: quiet
         say(f"CRASH: {what} exited with code {code}. Last output:\n{tail(out_log)}", "ERROR")
         if not policy.allow(clock()):
+            if cooldown_s:
+                say(f"{MAX_RESTARTS} crashes within the last hour; waiting {cooldown_s / 60:.0f} min, then trying again",
+                    "CRITICAL")
+                sleep(cooldown_s)
+                policy = RestartPolicy()
+                continue
             say(f"giving up: {MAX_RESTARTS} crashes within the last hour. Check the log, then start it again "
                 f"({how_to_start}).", "CRITICAL")
             return code

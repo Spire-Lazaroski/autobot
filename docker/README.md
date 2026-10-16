@@ -33,6 +33,13 @@ and close the lab windows. Two bots must never trade the same paper account.
   positions are closed, the long-term holdings (VOO and the sector funds) are kept, the bot exits, then the rest.
   Prefer updating while the market is closed.
 
+## Study results and news on a new server
+
+The saved study results the lab's panels show (`seed/studies`, see `seed/README.md`) are copied into
+`/state/data` at every start where they are missing. The news archive is rebuilt by the collector itself (it backfills
+from Alpaca); if it stops, the News page shows its last log lines and a **Start collector** button, and after
+repeated failures its supervisor waits 15 minutes and tries again on its own.
+
 ## Bringing the history from the PC (optional)
 
 Copy the PC's `E:\autobot\data` folder (at least `news.db`, `recalibration/`, `universe/`) to `/state/data`, and

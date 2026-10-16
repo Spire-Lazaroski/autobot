@@ -15,6 +15,8 @@ for d in data logs reports; do
     ln -s "$STATE/$d" "/app/$d"
   fi
 done
+# saved study results for the lab's panels (seed/README.md): copied only where missing, never over a newer run
+cp -rn /app/seed/studies/. "$STATE/data/" 2>/dev/null || true
 if [ ! -f "$STATE/config.yaml" ] || [ "${RESET_CONFIG:-0}" = "1" ]; then
   cp /app/config.yaml "$STATE/config.yaml"
   echo "config.yaml copied from the repository to $STATE"

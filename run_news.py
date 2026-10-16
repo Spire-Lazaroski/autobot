@@ -5,8 +5,9 @@ Supervisor for the news collector: starts news_collector.py and restarts it if i
 
 Same rules as run_bot.py: a crash is written to logs/news.log with the last lines of the
 collector's output (logs/news_stdout.log), then the collector is restarted after a short
-pause, at most 3 times in any hour. A second supervisor, or a collector that finds another
-collector running, exits quietly. The collector never trades.
+pause, at most 3 times in any hour; after that it waits COOLDOWN_S and tries again (it never trades, so
+it never gives up for good: on the server nobody is there to restart it). A second supervisor, or a
+collector that finds another collector running, exits quietly.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ LOGS = ROOT / "logs"
 NEWS_LOG = LOGS / "news.log"
 OUT_LOG = LOGS / "news_stdout.log"
 LOCK = LOGS / "run_news.pid"
+COOLDOWN_S = 900
 
 
 def log(msg: str, level: str = "INFO"):
@@ -60,7 +62,7 @@ def other_supervisor_alive() -> bool:
 
 def supervise(run=run_once, sleep=time.sleep, clock=time.time) -> int:
     return run_bot.supervise(run, sleep, clock, say=log, what="the news collector", out_log=OUT_LOG,
-                             how_to_start="start_news.bat")
+                             how_to_start="start_news.bat or the News page's Start button", cooldown_s=COOLDOWN_S)
 
 
 def main() -> int:

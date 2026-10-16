@@ -1,0 +1,788 @@
+{
+ "generated": "2026-10-07T14:23:29+00:00",
+ "data": "S&P 500 daily closes 2016-10-03 to 2026-10-02 (FRED), dividends 1.4% a year flat",
+ "test_from": "2019-09-26",
+ "test_to": "2026-10-02",
+ "rules": {
+  "base": 0.3,
+  "range": [
+   0.15,
+   0.45
+  ],
+  "band": 0.05,
+  "cost_per_side": 0.0002
+ },
+ "forecast_accuracy": {
+  "ewma": {
+   "error_daily_vol_%": 0.3998,
+   "corr": 0.614
+  },
+  "har": {
+   "error_daily_vol_%": 0.3874,
+   "corr": 0.668
+  },
+  "trees": {
+   "error_daily_vol_%": 0.3699,
+   "corr": 0.44
+  },
+  "vix": {
+   "error_daily_vol_%": 0.4624,
+   "corr": 0.727
+  },
+  "har_vix": {
+   "error_daily_vol_%": 0.4455,
+   "corr": 0.626
+  },
+  "trees_vix": {
+   "error_daily_vol_%": 0.3686,
+   "corr": 0.444
+  },
+  "garch": {
+   "error_daily_vol_%": 0.3672,
+   "corr": 0.701
+  },
+  "gjr": {
+   "error_daily_vol_%": 0.3442,
+   "corr": 0.736
+  },
+  "egarch": {
+   "error_daily_vol_%": 0.3381,
+   "corr": 0.731
+  }
+ },
+ "cash_0": {
+  "as_traded": {
+   "hold_30": {
+    "yearly_%": 5.23,
+    "yearly_ups_downs_%": 5.95,
+    "per_risk": 0.886,
+    "max_drop_%": -11.17,
+    "worst_month_%": -2.95,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 1.0,
+    "costs_%_per_year": 0.002
+   },
+   "ewma": {
+    "yearly_%": 4.0,
+    "yearly_ups_downs_%": 4.13,
+    "per_risk": 0.969,
+    "max_drop_%": -5.85,
+    "worst_month_%": -1.78,
+    "avg_weight_%": 26.3,
+    "trades_per_year": 10.6,
+    "costs_%_per_year": 0.013
+   },
+   "har": {
+    "yearly_%": 4.32,
+    "yearly_ups_downs_%": 4.55,
+    "per_risk": 0.953,
+    "max_drop_%": -6.66,
+    "worst_month_%": -2.05,
+    "avg_weight_%": 28.5,
+    "trades_per_year": 43.6,
+    "costs_%_per_year": 0.064
+   },
+   "trees": {
+    "yearly_%": 4.44,
+    "yearly_ups_downs_%": 4.35,
+    "per_risk": 1.02,
+    "max_drop_%": -6.05,
+    "worst_month_%": -1.88,
+    "avg_weight_%": 29.5,
+    "trades_per_year": 68.1,
+    "costs_%_per_year": 0.124
+   },
+   "vix": {
+    "yearly_%": 3.75,
+    "yearly_ups_downs_%": 4.15,
+    "per_risk": 0.909,
+    "max_drop_%": -6.62,
+    "worst_month_%": -1.99,
+    "avg_weight_%": 26.3,
+    "trades_per_year": 13.9,
+    "costs_%_per_year": 0.018
+   },
+   "har_vix": {
+    "yearly_%": 4.89,
+    "yearly_ups_downs_%": 5.21,
+    "per_risk": 0.941,
+    "max_drop_%": -8.66,
+    "worst_month_%": -2.65,
+    "avg_weight_%": 34.0,
+    "trades_per_year": 42.9,
+    "costs_%_per_year": 0.068
+   },
+   "trees_vix": {
+    "yearly_%": 4.35,
+    "yearly_ups_downs_%": 4.75,
+    "per_risk": 0.921,
+    "max_drop_%": -6.8,
+    "worst_month_%": -2.22,
+    "avg_weight_%": 31.7,
+    "trades_per_year": 59.6,
+    "costs_%_per_year": 0.102
+   },
+   "garch": {
+    "yearly_%": 4.56,
+    "yearly_ups_downs_%": 4.65,
+    "per_risk": 0.982,
+    "max_drop_%": -6.18,
+    "worst_month_%": -1.96,
+    "avg_weight_%": 30.3,
+    "trades_per_year": 36.0,
+    "costs_%_per_year": 0.052
+   },
+   "gjr": {
+    "yearly_%": 4.39,
+    "yearly_ups_downs_%": 4.55,
+    "per_risk": 0.966,
+    "max_drop_%": -6.15,
+    "worst_month_%": -2.03,
+    "avg_weight_%": 29.8,
+    "trades_per_year": 42.4,
+    "costs_%_per_year": 0.066
+   },
+   "egarch": {
+    "yearly_%": 4.5,
+    "yearly_ups_downs_%": 4.55,
+    "per_risk": 0.99,
+    "max_drop_%": -5.98,
+    "worst_month_%": -1.84,
+    "avg_weight_%": 30.1,
+    "trades_per_year": 38.0,
+    "costs_%_per_year": 0.057
+   }
+  },
+  "same_amount": {
+   "hold_30": {
+    "yearly_%": 5.23,
+    "yearly_ups_downs_%": 5.95,
+    "per_risk": 0.886,
+    "max_drop_%": -11.17,
+    "worst_month_%": -2.95,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 1.0,
+    "costs_%_per_year": 0.002
+   },
+   "ewma": {
+    "yearly_%": 4.72,
+    "yearly_ups_downs_%": 4.88,
+    "per_risk": 0.969,
+    "max_drop_%": -6.88,
+    "worst_month_%": -2.11,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 10.6,
+    "costs_%_per_year": 0.013
+   },
+   "har": {
+    "yearly_%": 4.71,
+    "yearly_ups_downs_%": 4.96,
+    "per_risk": 0.953,
+    "max_drop_%": -7.24,
+    "worst_month_%": -2.23,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 43.6,
+    "costs_%_per_year": 0.064
+   },
+   "trees": {
+    "yearly_%": 4.68,
+    "yearly_ups_downs_%": 4.58,
+    "per_risk": 1.02,
+    "max_drop_%": -6.37,
+    "worst_month_%": -1.98,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 68.1,
+    "costs_%_per_year": 0.124
+   },
+   "vix": {
+    "yearly_%": 4.43,
+    "yearly_ups_downs_%": 4.89,
+    "per_risk": 0.909,
+    "max_drop_%": -7.78,
+    "worst_month_%": -2.35,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 13.9,
+    "costs_%_per_year": 0.018
+   },
+   "har_vix": {
+    "yearly_%": 4.47,
+    "yearly_ups_downs_%": 4.76,
+    "per_risk": 0.941,
+    "max_drop_%": -7.93,
+    "worst_month_%": -2.43,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 42.9,
+    "costs_%_per_year": 0.068
+   },
+   "trees_vix": {
+    "yearly_%": 4.27,
+    "yearly_ups_downs_%": 4.66,
+    "per_risk": 0.921,
+    "max_drop_%": -6.67,
+    "worst_month_%": -2.17,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 59.6,
+    "costs_%_per_year": 0.102
+   },
+   "garch": {
+    "yearly_%": 4.66,
+    "yearly_ups_downs_%": 4.76,
+    "per_risk": 0.982,
+    "max_drop_%": -6.32,
+    "worst_month_%": -2.01,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 36.0,
+    "costs_%_per_year": 0.052
+   },
+   "gjr": {
+    "yearly_%": 4.57,
+    "yearly_ups_downs_%": 4.74,
+    "per_risk": 0.966,
+    "max_drop_%": -6.4,
+    "worst_month_%": -2.11,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 42.4,
+    "costs_%_per_year": 0.066
+   },
+   "egarch": {
+    "yearly_%": 4.63,
+    "yearly_ups_downs_%": 4.69,
+    "per_risk": 0.99,
+    "max_drop_%": -6.16,
+    "worst_month_%": -1.89,
+    "avg_weight_%": 31.0,
+    "trades_per_year": 38.0,
+    "costs_%_per_year": 0.057
+   }
+  },
+  "vs_hold": {
+   "ewma": {
+    "per_risk_diff": 0.083,
+    "per_risk_ci95": [
+     -0.185,
+     0.31
+    ],
+    "max_drop_diff_points": 4.29,
+    "max_drop_ci95_points": [
+     -0.835,
+     6.683
+    ]
+   },
+   "har": {
+    "per_risk_diff": 0.067,
+    "per_risk_ci95": [
+     -0.164,
+     0.268
+    ],
+    "max_drop_diff_points": 3.93,
+    "max_drop_ci95_points": [
+     -0.739,
+     5.989
+    ]
+   },
+   "trees": {
+    "per_risk_diff": 0.134,
+    "per_risk_ci95": [
+     -0.178,
+     0.389
+    ],
+    "max_drop_diff_points": 4.8,
+    "max_drop_ci95_points": [
+     -0.392,
+     7.768
+    ]
+   },
+   "vix": {
+    "per_risk_diff": 0.023,
+    "per_risk_ci95": [
+     -0.216,
+     0.238
+    ],
+    "max_drop_diff_points": 3.39,
+    "max_drop_ci95_points": [
+     -1.046,
+     5.005
+    ]
+   },
+   "har_vix": {
+    "per_risk_diff": 0.055,
+    "per_risk_ci95": [
+     -0.263,
+     0.349
+    ],
+    "max_drop_diff_points": 3.24,
+    "max_drop_ci95_points": [
+     -1.445,
+     7.636
+    ]
+   },
+   "trees_vix": {
+    "per_risk_diff": 0.035,
+    "per_risk_ci95": [
+     -0.303,
+     0.334
+    ],
+    "max_drop_diff_points": 4.5,
+    "max_drop_ci95_points": [
+     -1.294,
+     7.967
+    ]
+   },
+   "garch": {
+    "per_risk_diff": 0.096,
+    "per_risk_ci95": [
+     -0.199,
+     0.349
+    ],
+    "max_drop_diff_points": 4.84,
+    "max_drop_ci95_points": [
+     -0.707,
+     7.319
+    ]
+   },
+   "gjr": {
+    "per_risk_diff": 0.08,
+    "per_risk_ci95": [
+     -0.225,
+     0.345
+    ],
+    "max_drop_diff_points": 4.76,
+    "max_drop_ci95_points": [
+     -0.83,
+     7.144
+    ]
+   },
+   "egarch": {
+    "per_risk_diff": 0.103,
+    "per_risk_ci95": [
+     -0.196,
+     0.374
+    ],
+    "max_drop_diff_points": 5.01,
+    "max_drop_ci95_points": [
+     -0.582,
+     7.718
+    ]
+   }
+  },
+  "crises_%": {
+   "2020 Covid": {
+    "hold_30": -11.03,
+    "ewma": -5.76,
+    "har": -6.55,
+    "trees": -5.91,
+    "vix": -6.49,
+    "har_vix": -6.25,
+    "trees_vix": -5.76,
+    "garch": -6.09,
+    "gjr": -6.03,
+    "egarch": -5.84
+   },
+   "2022 bear": {
+    "hold_30": -7.62,
+    "ewma": -4.94,
+    "har": -6.18,
+    "trees": -5.07,
+    "vix": -6.02,
+    "har_vix": -8.42,
+    "trees_vix": -6.35,
+    "garch": -5.6,
+    "gjr": -4.52,
+    "egarch": -4.66
+   },
+   "2025 tariff drop": {
+    "hold_30": -6.13,
+    "ewma": -4.62,
+    "har": -5.17,
+    "trees": -4.16,
+    "vix": -4.7,
+    "har_vix": -5.24,
+    "trees_vix": -4.97,
+    "garch": -4.99,
+    "gjr": -4.75,
+    "egarch": -4.86
+   }
+  }
+ },
+ "cash_tbill": {
+  "as_traded": {
+   "hold_30": {
+    "yearly_%": 7.2,
+    "yearly_ups_downs_%": 5.98,
+    "per_risk": 1.192,
+    "max_drop_%": -11.16,
+    "worst_month_%": -3.05,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 0.9,
+    "costs_%_per_year": 0.002
+   },
+   "ewma": {
+    "yearly_%": 6.11,
+    "yearly_ups_downs_%": 4.13,
+    "per_risk": 1.459,
+    "max_drop_%": -5.74,
+    "worst_month_%": -1.76,
+    "avg_weight_%": 26.2,
+    "trades_per_year": 11.3,
+    "costs_%_per_year": 0.014
+   },
+   "har": {
+    "yearly_%": 6.37,
+    "yearly_ups_downs_%": 4.55,
+    "per_risk": 1.379,
+    "max_drop_%": -6.55,
+    "worst_month_%": -2.0,
+    "avg_weight_%": 28.5,
+    "trades_per_year": 43.1,
+    "costs_%_per_year": 0.064
+   },
+   "trees": {
+    "yearly_%": 6.45,
+    "yearly_ups_downs_%": 4.35,
+    "per_risk": 1.457,
+    "max_drop_%": -5.94,
+    "worst_month_%": -1.85,
+    "avg_weight_%": 29.5,
+    "trades_per_year": 68.1,
+    "costs_%_per_year": 0.124
+   },
+   "vix": {
+    "yearly_%": 5.79,
+    "yearly_ups_downs_%": 4.14,
+    "per_risk": 1.381,
+    "max_drop_%": -6.51,
+    "worst_month_%": -1.91,
+    "avg_weight_%": 26.2,
+    "trades_per_year": 13.3,
+    "costs_%_per_year": 0.017
+   },
+   "har_vix": {
+    "yearly_%": 6.71,
+    "yearly_ups_downs_%": 5.21,
+    "per_risk": 1.273,
+    "max_drop_%": -8.2,
+    "worst_month_%": -2.63,
+    "avg_weight_%": 33.9,
+    "trades_per_year": 42.9,
+    "costs_%_per_year": 0.067
+   },
+   "trees_vix": {
+    "yearly_%": 6.24,
+    "yearly_ups_downs_%": 4.75,
+    "per_risk": 1.298,
+    "max_drop_%": -6.65,
+    "worst_month_%": -2.15,
+    "avg_weight_%": 31.6,
+    "trades_per_year": 59.6,
+    "costs_%_per_year": 0.102
+   },
+   "garch": {
+    "yearly_%": 6.53,
+    "yearly_ups_downs_%": 4.65,
+    "per_risk": 1.384,
+    "max_drop_%": -6.07,
+    "worst_month_%": -1.94,
+    "avg_weight_%": 30.3,
+    "trades_per_year": 36.0,
+    "costs_%_per_year": 0.052
+   },
+   "gjr": {
+    "yearly_%": 6.37,
+    "yearly_ups_downs_%": 4.55,
+    "per_risk": 1.378,
+    "max_drop_%": -6.01,
+    "worst_month_%": -1.94,
+    "avg_weight_%": 29.8,
+    "trades_per_year": 42.4,
+    "costs_%_per_year": 0.066
+   },
+   "egarch": {
+    "yearly_%": 6.44,
+    "yearly_ups_downs_%": 4.54,
+    "per_risk": 1.396,
+    "max_drop_%": -5.83,
+    "worst_month_%": -1.81,
+    "avg_weight_%": 30.0,
+    "trades_per_year": 37.7,
+    "costs_%_per_year": 0.056
+   }
+  },
+  "same_amount": {
+   "hold_30": {
+    "yearly_%": 7.2,
+    "yearly_ups_downs_%": 5.98,
+    "per_risk": 1.192,
+    "max_drop_%": -11.16,
+    "worst_month_%": -3.05,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 0.9,
+    "costs_%_per_year": 0.002
+   },
+   "ewma": {
+    "yearly_%": 6.71,
+    "yearly_ups_downs_%": 4.89,
+    "per_risk": 1.353,
+    "max_drop_%": -6.8,
+    "worst_month_%": -2.09,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 11.3,
+    "costs_%_per_year": 0.014
+   },
+   "har": {
+    "yearly_%": 6.68,
+    "yearly_ups_downs_%": 4.96,
+    "per_risk": 1.328,
+    "max_drop_%": -7.14,
+    "worst_month_%": -2.18,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 43.1,
+    "costs_%_per_year": 0.064
+   },
+   "trees": {
+    "yearly_%": 6.64,
+    "yearly_ups_downs_%": 4.59,
+    "per_risk": 1.424,
+    "max_drop_%": -6.26,
+    "worst_month_%": -1.95,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 68.1,
+    "costs_%_per_year": 0.124
+   },
+   "vix": {
+    "yearly_%": 6.33,
+    "yearly_ups_downs_%": 4.9,
+    "per_risk": 1.276,
+    "max_drop_%": -7.7,
+    "worst_month_%": -2.28,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 13.3,
+    "costs_%_per_year": 0.017
+   },
+   "har_vix": {
+    "yearly_%": 6.39,
+    "yearly_ups_downs_%": 4.77,
+    "per_risk": 1.322,
+    "max_drop_%": -7.51,
+    "worst_month_%": -2.41,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 42.9,
+    "costs_%_per_year": 0.067
+   },
+   "trees_vix": {
+    "yearly_%": 6.18,
+    "yearly_ups_downs_%": 4.66,
+    "per_risk": 1.31,
+    "max_drop_%": -6.53,
+    "worst_month_%": -2.11,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 59.6,
+    "costs_%_per_year": 0.102
+   },
+   "garch": {
+    "yearly_%": 6.61,
+    "yearly_ups_downs_%": 4.76,
+    "per_risk": 1.369,
+    "max_drop_%": -6.22,
+    "worst_month_%": -1.99,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 36.0,
+    "costs_%_per_year": 0.052
+   },
+   "gjr": {
+    "yearly_%": 6.51,
+    "yearly_ups_downs_%": 4.75,
+    "per_risk": 1.354,
+    "max_drop_%": -6.27,
+    "worst_month_%": -2.02,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 42.4,
+    "costs_%_per_year": 0.066
+   },
+   "egarch": {
+    "yearly_%": 6.56,
+    "yearly_ups_downs_%": 4.7,
+    "per_risk": 1.376,
+    "max_drop_%": -6.03,
+    "worst_month_%": -1.87,
+    "avg_weight_%": 31.1,
+    "trades_per_year": 37.7,
+    "costs_%_per_year": 0.056
+   }
+  },
+  "vs_hold": {
+   "ewma": {
+    "per_risk_diff": 0.162,
+    "per_risk_ci95": [
+     -0.138,
+     0.4
+    ],
+    "max_drop_diff_points": 4.36,
+    "max_drop_ci95_points": [
+     -0.422,
+     6.525
+    ]
+   },
+   "har": {
+    "per_risk_diff": 0.137,
+    "per_risk_ci95": [
+     -0.123,
+     0.35
+    ],
+    "max_drop_diff_points": 4.02,
+    "max_drop_ci95_points": [
+     -0.353,
+     5.892
+    ]
+   },
+   "trees": {
+    "per_risk_diff": 0.232,
+    "per_risk_ci95": [
+     -0.109,
+     0.5
+    ],
+    "max_drop_diff_points": 4.9,
+    "max_drop_ci95_points": [
+     0.006,
+     7.732
+    ]
+   },
+   "vix": {
+    "per_risk_diff": 0.085,
+    "per_risk_ci95": [
+     -0.173,
+     0.305
+    ],
+    "max_drop_diff_points": 3.46,
+    "max_drop_ci95_points": [
+     -0.631,
+     5.121
+    ]
+   },
+   "har_vix": {
+    "per_risk_diff": 0.131,
+    "per_risk_ci95": [
+     -0.237,
+     0.449
+    ],
+    "max_drop_diff_points": 3.65,
+    "max_drop_ci95_points": [
+     -0.907,
+     7.565
+    ]
+   },
+   "trees_vix": {
+    "per_risk_diff": 0.118,
+    "per_risk_ci95": [
+     -0.252,
+     0.435
+    ],
+    "max_drop_diff_points": 4.63,
+    "max_drop_ci95_points": [
+     -0.622,
+     7.949
+    ]
+   },
+   "garch": {
+    "per_risk_diff": 0.178,
+    "per_risk_ci95": [
+     -0.153,
+     0.446
+    ],
+    "max_drop_diff_points": 4.94,
+    "max_drop_ci95_points": [
+     -0.212,
+     7.056
+    ]
+   },
+   "gjr": {
+    "per_risk_diff": 0.162,
+    "per_risk_ci95": [
+     -0.171,
+     0.44
+    ],
+    "max_drop_diff_points": 4.89,
+    "max_drop_ci95_points": [
+     -0.279,
+     7.071
+    ]
+   },
+   "egarch": {
+    "per_risk_diff": 0.184,
+    "per_risk_ci95": [
+     -0.139,
+     0.463
+    ],
+    "max_drop_diff_points": 5.13,
+    "max_drop_ci95_points": [
+     -0.085,
+     7.443
+    ]
+   }
+  },
+  "crises_%": {
+   "2020 Covid": {
+    "hold_30": -11.02,
+    "ewma": -5.64,
+    "har": -6.44,
+    "trees": -5.79,
+    "vix": -6.38,
+    "har_vix": -6.13,
+    "trees_vix": -5.64,
+    "garch": -5.98,
+    "gjr": -5.91,
+    "egarch": -5.72
+   },
+   "2022 bear": {
+    "hold_30": -6.87,
+    "ewma": -4.24,
+    "har": -5.55,
+    "trees": -4.39,
+    "vix": -5.37,
+    "har_vix": -7.84,
+    "trees_vix": -5.71,
+    "garch": -4.95,
+    "gjr": -3.86,
+    "egarch": -4.0
+   },
+   "2025 tariff drop": {
+    "hold_30": -6.07,
+    "ewma": -4.13,
+    "har": -4.75,
+    "trees": -3.71,
+    "vix": -4.27,
+    "har_vix": -4.83,
+    "trees_vix": -4.55,
+    "garch": -4.57,
+    "gjr": -4.32,
+    "egarch": -4.43
+   }
+  }
+ },
+ "lines": [
+  "Core 15-45% by volatility forecast vs plain 30%, 2019-09-26 to 2026-10-02, after costs, cash earns 0. S&P 500 daily closes 2016-10-03 to 2026-10-02 (FRED), dividends 1.4% a year flat.",
+  "Forecast accuracy: ewma error 0.3998% corr 0.614, har error 0.3874% corr 0.668, trees error 0.3699% corr 0.44, vix error 0.4624% corr 0.727, har_vix error 0.4455% corr 0.626, trees_vix error 0.3686% corr 0.444, garch error 0.3672% corr 0.701, gjr error 0.3442% corr 0.736, egarch error 0.3381% corr 0.731",
+  "  hold_30  as traded:  +5.23%/yr, ups/downs  5.95%, max drop -11.17%, avg weight 31.0%, 1.0 trades/yr | same amount:  +5.23%/yr, per risk +0.886, max drop -11.17%",
+  "  ewma     as traded:  +4.00%/yr, ups/downs  4.13%, max drop  -5.85%, avg weight 26.3%, 10.6 trades/yr | same amount:  +4.72%/yr, per risk +0.969, max drop  -6.88%",
+  "  har      as traded:  +4.32%/yr, ups/downs  4.55%, max drop  -6.66%, avg weight 28.5%, 43.6 trades/yr | same amount:  +4.71%/yr, per risk +0.953, max drop  -7.24%",
+  "  trees    as traded:  +4.44%/yr, ups/downs  4.35%, max drop  -6.05%, avg weight 29.5%, 68.1 trades/yr | same amount:  +4.68%/yr, per risk +1.020, max drop  -6.37%",
+  "  vix      as traded:  +3.75%/yr, ups/downs  4.15%, max drop  -6.62%, avg weight 26.3%, 13.9 trades/yr | same amount:  +4.43%/yr, per risk +0.909, max drop  -7.78%",
+  "  har_vix  as traded:  +4.89%/yr, ups/downs  5.21%, max drop  -8.66%, avg weight 34.0%, 42.9 trades/yr | same amount:  +4.47%/yr, per risk +0.941, max drop  -7.93%",
+  "  trees_vix as traded:  +4.35%/yr, ups/downs  4.75%, max drop  -6.80%, avg weight 31.7%, 59.6 trades/yr | same amount:  +4.27%/yr, per risk +0.921, max drop  -6.67%",
+  "  garch    as traded:  +4.56%/yr, ups/downs  4.65%, max drop  -6.18%, avg weight 30.3%, 36.0 trades/yr | same amount:  +4.66%/yr, per risk +0.982, max drop  -6.32%",
+  "  gjr      as traded:  +4.39%/yr, ups/downs  4.55%, max drop  -6.15%, avg weight 29.8%, 42.4 trades/yr | same amount:  +4.57%/yr, per risk +0.966, max drop  -6.40%",
+  "  egarch   as traded:  +4.50%/yr, ups/downs  4.55%, max drop  -5.98%, avg weight 30.1%, 38.0 trades/yr | same amount:  +4.63%/yr, per risk +0.990, max drop  -6.16%",
+  "  ewma vs hold (same amount): per risk +0.083 (-0.185 to +0.310); max drop +4.29 points (-0.83 to +6.68)",
+  "  har vs hold (same amount): per risk +0.067 (-0.164 to +0.268); max drop +3.93 points (-0.74 to +5.99)",
+  "  trees vs hold (same amount): per risk +0.134 (-0.178 to +0.389); max drop +4.80 points (-0.39 to +7.77)",
+  "  vix vs hold (same amount): per risk +0.023 (-0.216 to +0.238); max drop +3.39 points (-1.05 to +5.00)",
+  "  har_vix vs hold (same amount): per risk +0.055 (-0.263 to +0.349); max drop +3.24 points (-1.45 to +7.64)",
+  "  trees_vix vs hold (same amount): per risk +0.035 (-0.303 to +0.334); max drop +4.50 points (-1.29 to +7.97)",
+  "  garch vs hold (same amount): per risk +0.096 (-0.199 to +0.349); max drop +4.84 points (-0.71 to +7.32)",
+  "  gjr vs hold (same amount): per risk +0.080 (-0.225 to +0.345); max drop +4.76 points (-0.83 to +7.14)",
+  "  egarch vs hold (same amount): per risk +0.103 (-0.196 to +0.374); max drop +5.01 points (-0.58 to +7.72)",
+  "  2020 Covid: hold_30 -11.03%, ewma -5.76%, har -6.55%, trees -5.91%, vix -6.49%, har_vix -6.25%, trees_vix -5.76%, garch -6.09%, gjr -6.03%, egarch -5.84%",
+  "  2022 bear: hold_30 -7.62%, ewma -4.94%, har -6.18%, trees -5.07%, vix -6.02%, har_vix -8.42%, trees_vix -6.35%, garch -5.60%, gjr -4.52%, egarch -4.66%",
+  "  2025 tariff drop: hold_30 -6.13%, ewma -4.62%, har -5.17%, trees -4.16%, vix -4.70%, har_vix -5.24%, trees_vix -4.97%, garch -4.99%, gjr -4.75%, egarch -4.86%",
+  "  With T-bill cash: ewma per risk +0.162 (-0.138 to +0.400), har per risk +0.137 (-0.123 to +0.350), trees per risk +0.232 (-0.109 to +0.500), vix per risk +0.085 (-0.173 to +0.305), har_vix per risk +0.131 (-0.237 to +0.449), trees_vix per risk +0.118 (-0.252 to +0.435), garch per risk +0.178 (-0.153 to +0.446), gjr per risk +0.162 (-0.171 to +0.440), egarch per risk +0.184 (-0.139 to +0.463)"
+ ]
+}

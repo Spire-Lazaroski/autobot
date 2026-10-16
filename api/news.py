@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from autobot import news
 
@@ -16,9 +16,46 @@ def collector_state() -> dict:
     return news_collector.collector_state()
 
 
+def supervisor_alive() -> bool:
+    import run_news
+    from autobot.liveconfig import pid_alive
+    try:
+        pid = int(json.loads(run_news.LOCK.read_text())["pid"])
+    except (OSError, ValueError, KeyError):
+        return False
+    return pid_alive(pid)
+
+
+def log_tail(n: int = 12) -> list:
+    """The collector log's last lines, shown on the News page while it is stopped (why it stopped)."""
+    import run_news
+    try:
+        with open(run_news.NEWS_LOG, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 8000))
+            return f.read().decode("utf-8", "replace").splitlines()[-n:]
+    except OSError:
+        return []
+
+
 @router.get("/api/news/status")
 def status():
-    return {"collector": collector_state(), "db": news.stats(), "symbols": news.configured_symbols()}
+    c = collector_state()
+    c["supervisor"] = supervisor_alive()      # alive while the collector is down = waiting to restart it
+    if not c.get("running"):
+        c["log_tail"] = log_tail()
+    return {"collector": c, "db": news.stats(), "symbols": news.configured_symbols()}
+
+
+@router.post("/api/news/start")
+def start():
+    """Start the news collector under its supervisor (it never trades, so no confirmation is asked)."""
+    if collector_state().get("running"):
+        raise HTTPException(409, "The news collector is already running.")
+    if supervisor_alive():
+        raise HTTPException(409, "Its supervisor is already running and will restart it (it waits after repeated crashes).")
+    from .live import start_detached
+    return {"ok": True, "pid": start_detached("run_news.py", "news_supervisor_stdout.log")}
 
 
 @router.get("/api/news/items")
