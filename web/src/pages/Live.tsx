@@ -49,6 +49,7 @@ interface Snapshot {
   log: string[];
   log_entries?: LogEntry[];
   news?: { running: boolean; supervisor: boolean };
+  paused?: string[];
   equity_today?: EquityRow[];
   jobs_vs_hold?: JobsVsHold | null;
   ok: boolean;
@@ -154,6 +155,9 @@ const ts = (s: string | number | null | undefined) => (s === null || s === undef
 export function Live() {
   const { data: d, connected } = useLiveSocket<Snapshot>();
   const [confirmStop, setConfirmStop] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirmClose, setConfirmClose] = useState<string[] | null>(null);
+  const toggle = (s: string) => setPicked((p) => { const n = new Set(p); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   const [sellCore, setSellCore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -167,7 +171,7 @@ export function Live() {
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false); setConfirmStop(false); setSellCore(false);
+      setBusy(false); setConfirmStop(false); setSellCore(false); setConfirmClose(null); setPicked(new Set());
     }
   };
 
@@ -261,7 +265,16 @@ export function Live() {
           <EquityChart rows={d.equity_today ?? []} fills={d.orders.filter((o) => o.status === "filled" && o.submitted_at)
             .map((o) => ({ t: Date.parse(String(o.submitted_at)) / 1000, side: String(o.side) }))} />
           <Section>Positions and trading jobs</Section>
-          <PositionsSplit positions={d.positions} longTerm={longTermSet}
+          {d.positions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 -mb-1">
+              <span className="text-[12px] text-muted">Close by hand: tick positions, then</span>
+              <button className="btn" disabled={!picked.size || busy} onClick={() => setConfirmClose([...picked])}>
+                <i className="bi bi-x-circle" aria-hidden="true" /> Close selected{picked.size ? ` (${picked.size})` : ""}</button>
+              <button className="btn btn-danger" disabled={busy} onClick={() => setConfirmClose(d.positions.map((p) => String(p.symbol)))}>
+                Close all positions</button>
+            </div>)}
+          <PositionsSplit positions={d.positions} longTerm={longTermSet} selected={picked} onToggle={toggle}
+            paused={d.paused ?? []} onResume={(s) => call("/live/resume", { symbols: [s] })}
             extra={(r) => { const pk = peakOf(st?.symbols, r.symbol); return pk ? `gave back ${fmt(pk.gave_back_pct, 2)}% from ${fmt(pk.peak, 2)}` : null; }} />
           <div className="grid grid-cols-1 gap-3">
             <Panel title="Bot view per symbol (last tick)">
@@ -342,6 +355,18 @@ export function Live() {
               </Panel>)}
           </div>
         </>
+      )}
+
+      {confirmClose && (
+        <Confirm title={`Close ${confirmClose.length === 1 ? confirmClose[0] : `${confirmClose.length} positions`} and pause ${confirmClose.length === 1 ? "it" : "them"}?`}
+          confirmLabel="Close and pause" danger busy={busy}
+          onCancel={() => setConfirmClose(null)} onConfirm={() => call("/live/close", { symbols: confirmClose, confirm: true })}>
+          Sells <b className="text-fg">{confirmClose.join(", ")}</b> with market orders
+          {d?.market && !d.market.is_open ? <> (the market is closed: <b className="text-fg">the orders wait for the next open</b>)</> : ""}.
+          {confirmClose.some((s) => longTermSet.has(s)) && <> This includes <b className="text-fg">long-term holdings</b> ({confirmClose.filter((s) => longTermSet.has(s)).join(", ")}).</>}
+          <div className="mt-2">They are <b className="text-fg">paused</b>: the bot won't buy them back (no job trades them, the core isn't
+            rebalanced, the rotation leaves the fund out) until you press <b className="text-fg">Resume</b>. The bot keeps running for everything else.</div>
+        </Confirm>
       )}
 
       {confirmStop && (
