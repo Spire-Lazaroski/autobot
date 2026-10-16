@@ -40,6 +40,14 @@ def min_materiality(symbol: str) -> int:
     return MATERIALITY["etf" if symbol in ETFS else "stock"]
 
 
+def _no_stories(df: pd.DataFrame) -> pd.DataFrame:
+    """An empty result that still has the receive-time column the report filters on (a new server whose news
+    archive has nothing for the day used to crash the daily report here)."""
+    df = df.copy()
+    df["t_info"] = pd.Series(dtype="datetime64[ns, UTC]")
+    return df
+
+
 def load(symbols: List[str], a: pd.Timestamp, b: pd.Timestamp) -> Optional[pd.DataFrame]:
     """Material stories (main or secondary subject) received in [a - 1 h, b) on the symbols:
     one row per story and symbol, with the time we could act on it (t_info). None when there
@@ -53,7 +61,8 @@ def load(symbols: List[str], a: pd.Timestamp, b: pd.Timestamp) -> Optional[pd.Da
         pass
     syms = [s for s in symbols if "/" not in s]
     if not syms:
-        return pd.DataFrame()
+        return _no_stories(pd.DataFrame(columns=["id", "symbol", "created_at", "received_at", "headline", "materiality",
+                                                 "category", "sentiment", "relevance", "scorer"]))
     lo = (a - TRADE_WINDOW - pd.Timedelta(days=1)).isoformat()  # created_at lower bound (received is later)
     q = f"""
       SELECT e.id, i.symbol, e.created_at, e.received_at, e.headline,
@@ -68,7 +77,7 @@ def load(symbols: List[str], a: pd.Timestamp, b: pd.Timestamp) -> Optional[pd.Da
     with news.connect() as con:
         df = pd.read_sql(q, con, params=(ns.PROMPT_VERSION, ns.RULES_VERSION, *syms, lo, b.isoformat()))
     if df.empty:
-        return df
+        return _no_stories(df)
     created = pd.to_datetime(df.created_at, utc=True, format="ISO8601")
     recv = pd.to_datetime(df.received_at, utc=True, format="ISO8601")
     from .event_study import BACKFILL_DELAY

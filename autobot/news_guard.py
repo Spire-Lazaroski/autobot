@@ -54,6 +54,7 @@ def _story_rows(symbol: str) -> pd.DataFrame:
     with news.connect() as con:
         df = pd.read_sql(q, con, params=(symbol, symbol, ns.PROMPT_VERSION, symbol, ns.RULES_VERSION))
     if df.empty:
+        df["t_info"] = pd.Series(dtype="datetime64[ns, UTC]")   # empty, but with the column callers filter on
         return df
     created = pd.to_datetime(df.created_at, utc=True, format="ISO8601")
     recv = pd.to_datetime(df.received_at, utc=True, format="ISO8601")
