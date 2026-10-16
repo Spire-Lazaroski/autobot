@@ -4,6 +4,7 @@ import { CandleChart, type PriceMark } from "../components/CandleChart";
 import { C } from "../lib/chart";
 import { Confirm } from "../components/Confirm";
 import { JobsEditor } from "../components/JobsEditor";
+import { SetupChooser } from "../components/SetupChooser";
 import { SortTable } from "../components/SortTable";
 import { ErrorBox, Panel, Spinner } from "../components/ui";
 import { Chip, CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, Section, ShareBar, SplitBar, Tile, toneOf,
@@ -264,6 +265,7 @@ export function Live() {
           </div>
           <EquityChart rows={d.equity_today ?? []} fills={d.orders.filter((o) => o.status === "filled" && o.submitted_at)
             .map((o) => ({ t: Date.parse(String(o.submitted_at)) / 1000, side: String(o.side) }))} />
+          <SetupChooser />
           <Section>Positions and trading jobs</Section>
           {d.positions.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 -mb-1">

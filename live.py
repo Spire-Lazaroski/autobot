@@ -246,6 +246,10 @@ class Bot:
         if not diff:
             return
         old_syms = {s for j in self.jobs for s in j["symbols"]}
+        if (self.cfg.get("core") or {}) != (new.get("core") or {}):
+            self.core_day = None      # a new core size (e.g. another setup): rebalance at the next open tick
+        if (self.cfg.get("rotation") or {}) != (new.get("rotation") or {}):
+            self.rot_month = None     # the sleeve re-decides at the next open tick instead of next month
         self._apply(new)
         for line in diff:
             log.warning("CONFIG %s", line)
