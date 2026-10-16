@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toLogin } from "./api";
 
 /** Subscribe to /ws/live (pushes a snapshot every 3 s). Reconnects after drops. */
 export function useLiveSocket<T>() {
@@ -21,8 +22,9 @@ export function useLiveSocket<T>() {
           /* ignore a malformed frame */
         }
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         setConnected(false);
+        if (e.code === 4401) { closed = true; toLogin(); return; }   // the session ended: sign in again
         if (!closed) retry.current = window.setTimeout(connect, 2000);
       };
       ws.onerror = () => ws?.close();

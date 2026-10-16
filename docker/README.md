@@ -12,6 +12,7 @@ the paper bot. Paper trading only.
 | Stop time | at least **120 seconds** before a forced kill | the bot closes the trading jobs' positions on a stop |
 | Password | the panel's access password, on **every** path (incl. `/ws/live`) | the lab has no login of its own |
 | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | your Alpaca **paper** keys | check them: some panels fill names ending in `_KEY` with random values |
+| `LAB_USER`, `LAB_PASSWORD_HASH` | your user name, and the hash from `python -m api.auth hash` (run on the PC; the password itself is never stored) | the app's own sign-in page; set them **before** deploying, or nobody can sign in |
 | `AUTOSTART_BOT` | keep `0` (default) | start the bot from the lab's Live page after each update. During an update the old version runs on for about 30 s, so `1` could briefly start a second bot |
 
 Not needed: `ANTHROPIC_API_KEY` (the AI judge has ended and the news uses the free keyword rules). Leaving it out
