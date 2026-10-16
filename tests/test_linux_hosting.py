@@ -10,6 +10,7 @@ def test_lab_start_detaches_the_bot_on_linux(monkeypatch, tmp_path):
     import api.live as L
     from api.main import app
     monkeypatch.setattr(L, "bot_state", lambda: {"running": False, "unresponsive": False, "pid": None})
+    monkeypatch.setattr(L, "news_state", lambda: {"running": True, "supervisor": True})
     monkeypatch.setattr(L, "STOP_FILE", tmp_path / "STOP")
     monkeypatch.setattr(L, "LOGS", tmp_path)
     monkeypatch.setattr(L.sys, "platform", "linux")
@@ -95,8 +96,7 @@ def test_container_files():
     assert "ANTHROPIC" not in compose                   # no paid API key in the container by default
 
 
-def test_news_page_can_start_the_collector_and_shows_why_it_stopped(monkeypatch, tmp_path):
-    import api.live as L
+def test_news_page_shows_why_the_collector_stopped(monkeypatch, tmp_path):
     import api.news as N
     import run_news
     from api.main import app
@@ -105,17 +105,8 @@ def test_news_page_can_start_the_collector_and_shows_why_it_stopped(monkeypatch,
     monkeypatch.setattr(run_news, "NEWS_LOG", log)
     monkeypatch.setattr(N, "collector_state", lambda: {"running": False})
     monkeypatch.setattr(N, "supervisor_alive", lambda: False)
-    started = []
-    monkeypatch.setattr(L, "start_detached", lambda script, out: started.append(script) or 99)
-    c = TestClient(app)
-    st = c.get("/api/news/status").json()["collector"]
+    st = TestClient(app).get("/api/news/status").json()["collector"]
     assert st["supervisor"] is False and st["log_tail"][-1] == "ERROR backfill failed (SSLError)"
-    r = c.post("/api/news/start", json={})
-    assert r.status_code == 200 and started == ["run_news.py"]
-    monkeypatch.setattr(N, "supervisor_alive", lambda: True)          # waiting to restart it: no second copy
-    assert c.post("/api/news/start", json={}).status_code == 409
-    monkeypatch.setattr(N, "collector_state", lambda: {"running": True})
-    assert c.post("/api/news/start", json={}).status_code == 409 and started == ["run_news.py"]
 
 
 def test_study_results_are_seeded_without_overwriting():

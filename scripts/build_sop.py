@@ -251,11 +251,11 @@ def build(f: dict) -> list:
     # 3
     B += [("h2", "3. Starting the bot")]
     B += [("ol", [
-        "On the <b>Live</b> page press <b>▶ Start bot</b> (top right), or double-click <b>start_bot.bat</b> "
-        "(this one also restarts the bot after a crash).",
+        "On the <b>Live</b> page press <b>▶ Start</b> (top right). It starts whatever is stopped: the bot, under its "
+        "supervisor (which restarts it after a crash), and the news collector. On the PC, <b>start_bot.bat</b> does the same for the bot.",
         "Within a few seconds the band changes to <b>BOT RUNNING</b> with a green dot and <i>beat 1s</i>. The beat number must stay small (under 10 seconds).",
         f"Wait for the first tick: within one {tf} bar, the band's <i>last tick</i> shows the current time and the <i>Bot view per symbol</i> table fills in.",
-        "If Start is greyed out, a bot is already running (or a stuck one is still alive, shown as <i>unresponsive</i>). Never start a second bot.",
+        "If Start is greyed out, the bot and the news collector are already running (or a stuck bot is still alive, shown as <i>unresponsive</i>). Never start a second bot.",
     ])]
     B += [("img", "img/live_state.png", "The status band when running: BOT RUNNING, the last tick, the heartbeat, the account value and the day's result.")]
     B += [("h3", "Reading the Live page")]

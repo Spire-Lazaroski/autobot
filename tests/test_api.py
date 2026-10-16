@@ -111,13 +111,31 @@ def test_stop_needs_confirmation():
     assert r.status_code == 400
 
 
-def test_start_refused_while_running(monkeypatch):
+def test_start_refused_while_everything_runs(monkeypatch):
     import api.live as L
-    monkeypatch.setattr(L, "bot_state", lambda: {"running": True, "pid": 4242})
+    monkeypatch.setattr(L, "bot_state", lambda: {"running": True, "unresponsive": False, "pid": 4242})
+    monkeypatch.setattr(L, "news_state", lambda: {"running": True, "supervisor": True})
     called = []
     monkeypatch.setattr(L.subprocess, "Popen", lambda *a, **k: called.append(a))
     r = client.post("/api/live/start")
     assert r.status_code == 409 and not called
+
+
+def test_one_start_starts_only_what_is_stopped(monkeypatch):
+    import api.live as L
+    started = []
+    monkeypatch.setattr(L, "start_detached", lambda script, out: started.append(script) or 7)
+    monkeypatch.setattr(L, "bot_state", lambda: {"running": True, "unresponsive": False, "pid": 4242})
+    monkeypatch.setattr(L, "news_state", lambda: {"running": False, "supervisor": False})
+    r = client.post("/api/live/start")
+    assert r.status_code == 200 and started == ["run_news.py"]        # the running bot is left alone
+    started.clear()
+    monkeypatch.setattr(L, "bot_state", lambda: {"running": False, "unresponsive": False, "pid": None})
+    monkeypatch.setattr(L, "news_state", lambda: {"running": True, "supervisor": True})
+    monkeypatch.setattr(L, "STOP_FILE", L.LOGS / "_test_no_stop_file")
+    r = client.post("/api/live/start")
+    assert r.status_code == 200 and started == ["run_bot.py"]         # the bot under its supervisor
+    assert "the bot" in r.json()["message"]
 
 
 def test_overnight_study_job_on_demo_data():

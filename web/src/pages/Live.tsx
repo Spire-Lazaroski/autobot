@@ -48,6 +48,7 @@ interface Snapshot {
   trades: Row[];
   log: string[];
   log_entries?: LogEntry[];
+  news?: { running: boolean; supervisor: boolean };
   equity_today?: EquityRow[];
   jobs_vs_hold?: JobsVsHold | null;
   ok: boolean;
@@ -157,6 +158,7 @@ export function Live() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const newsUp = !d?.news || d.news.running || d.news.supervisor;   // unknown counts as up: no needless Start
   const call = async (path: string, body: unknown) => {
     setBusy(true); setMsg(null);
     try {
@@ -218,7 +220,9 @@ export function Live() {
         </div>
         <div className="min-w-0"><BandSparkline values={(d?.equity_today ?? []).map((r) => r.equity)} /></div>
         <div className="flex gap-2 justify-end">
-          <button className="btn btn-primary" disabled={!bot || alive || busy} onClick={() => call("/live/start", {})}>▶ Start bot</button>
+          <button className="btn btn-primary" disabled={!bot || busy || bot.unresponsive || (alive && newsUp)}
+            title="Starts whatever is stopped: the bot (under its supervisor) and the news collector"
+            onClick={() => call("/live/start", {})}>▶ Start</button>
           <button className="btn btn-danger" disabled={!alive || busy || bot?.stop_requested} onClick={() => setConfirmStop(true)}>⏹ Stop + flatten</button>
         </div>
         {msg && <div className={`md:col-span-5 text-[12px] ${msg.ok ? "text-up" : "text-down"}`}>{msg.text}</div>}

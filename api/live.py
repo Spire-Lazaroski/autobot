@@ -198,7 +198,7 @@ def snapshot() -> Dict:
             return _snap["data"]
     data = {"time": int(time.time()), "bot": bot_state(), "status": _read_json(LOGS / "status.json"),
             "trades": _trades(), "log": _log_tail(), "log_entries": _log_entries(_log_tail(120)),
-            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), **_account()}
+            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), "news": news_state(), **_account()}
     with _snap_lock:
         _snap.update(at=time.time(), data=data)
     return data
@@ -263,17 +263,38 @@ class StopReq(BaseModel):
     include_core: bool = False   # also sell the core holding (live.core); off = the bot keeps it
 
 
+def news_state() -> Dict:
+    """The news collector as the Live page's Start sees it: running, or its supervisor alive (waiting to restart it)."""
+    from .news import collector_state, supervisor_alive
+    try:
+        return {"running": bool(collector_state().get("running")), "supervisor": supervisor_alive()}
+    except Exception:  # noqa: BLE001  the Live page must never fail because of the news side
+        return {"running": False, "supervisor": False}
+
+
 @router.post("/api/live/start")
 def live_start():
+    """The one Start: whatever is stopped starts, the bot under its supervisor (restarts after a crash, at most 3
+    times an hour) and the news collector under its own. Stop + flatten stays separate and stops the bot only."""
     st = bot_state()
-    if st["running"]:
-        raise HTTPException(409, f"A bot is already running (pid {st['pid']}).")
     if st["unresponsive"]:
         raise HTTPException(409, f"Bot process {st['pid']} is still alive but its heartbeat is "
                                  f"{st['heartbeat_age_s']:.0f}s old. Stop it first (Stop + flatten, or end "
                                  "the process) so two bots can't trade at once.")
-    STOP_FILE.unlink(missing_ok=True)
-    return {"ok": True, "pid": start_detached("live.py", "bot_stdout.log")}
+    ns = news_state()
+    if st["running"] and (ns["running"] or ns["supervisor"]):
+        raise HTTPException(409, f"Everything is already running (bot pid {st['pid']}, news collector).")
+    started = []
+    out: Dict = {"ok": True}
+    if not st["running"]:
+        STOP_FILE.unlink(missing_ok=True)
+        out["pid"] = start_detached("run_bot.py", "bot_supervisor_stdout.log")
+        started.append("the bot")
+    if not (ns["running"] or ns["supervisor"]):
+        out["news_pid"] = start_detached("run_news.py", "news_supervisor_stdout.log")
+        started.append("the news collector")
+    out["message"] = f"Started {' and '.join(started)}. The bot acts a few seconds after each bar closes."
+    return out
 
 
 def start_detached(script: str, out_name: str) -> int:

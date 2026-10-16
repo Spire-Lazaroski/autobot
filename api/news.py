@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from autobot import news
 
@@ -46,16 +46,6 @@ def status():
         c["log_tail"] = log_tail()
     return {"collector": c, "db": news.stats(), "symbols": news.configured_symbols()}
 
-
-@router.post("/api/news/start")
-def start():
-    """Start the news collector under its supervisor (it never trades, so no confirmation is asked)."""
-    if collector_state().get("running"):
-        raise HTTPException(409, "The news collector is already running.")
-    if supervisor_alive():
-        raise HTTPException(409, "Its supervisor is already running and will restart it (it waits after repeated crashes).")
-    from .live import start_detached
-    return {"ok": True, "pid": start_detached("run_news.py", "news_supervisor_stdout.log")}
 
 
 @router.get("/api/news/items")
