@@ -32,8 +32,9 @@ COOKIE = "spire_session"
 SHORT_S, LONG_S = 12 * 3600, 30 * 86400
 MAX_FAILS, FAIL_WINDOW_S, LOCK_S = 5, 900, 900
 ITERATIONS = 600_000
-OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/health", "/favicon.ico")
-OPEN_PREFIXES = ("/assets/",)                 # the built JS/CSS (code only, no data): the login page needs its own
+OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/health", "/favicon.ico",
+              "/manifest.webmanifest", "/sw.js")                # the phone app's description and helper: no data
+OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code only, no data): the login page needs its own
 
 _fails: Dict[str, deque] = defaultdict(deque)
 _locked: Dict[str, float] = {}

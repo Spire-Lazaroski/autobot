@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, toLogin } from "../lib/api";
+import { InstallApp } from "./InstallApp";
 /**
  * The Spire Analytics header, reproduced from partials/spire_header.html
  * (its CSS lives in brand.css, copied rule for rule). On screens <= 760px the
@@ -38,6 +39,7 @@ export function SpireHeader({ active, title, status }: { active: string; title?:
               <i className={`bi ${n.icon}`} /> {n.label}
             </a>
           ))}
+          <InstallApp />
           <SignOut />
         </nav>
       </header>

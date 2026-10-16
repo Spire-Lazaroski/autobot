@@ -6,6 +6,9 @@ import "bootstrap-icons/font/bootstrap-icons.css";
 import "./brand.css";
 import "./index.css";
 import { SettingsProvider } from "./lib/settings";
+import { registerServiceWorker } from "./components/InstallApp";
+
+registerServiceWorker();
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
