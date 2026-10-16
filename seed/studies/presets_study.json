@@ -1,0 +1,132 @@
+{
+ "generated": "2026-10-16T19:05:17+00:00",
+ "note": "Monthly backtest after costs, cash at the T-bill rate; past results, no promise of future ones.",
+ "presets": {
+  "careful": {
+   "label": "Careful",
+   "about": "Smaller holdings, more cash: the smallest drops.",
+   "core": {
+    "allocation_pct": 20,
+    "min_pct": 10,
+    "max_pct": 30
+   },
+   "rotation": {
+    "allocation_pct": 30
+   }
+  },
+  "balanced": {
+   "label": "Balanced",
+   "about": "Today's setup: the core around 30% and the sector sleeve up to 40%.",
+   "core": {
+    "allocation_pct": 30,
+    "min_pct": 15,
+    "max_pct": 45
+   },
+   "rotation": {
+    "allocation_pct": 40
+   }
+  },
+  "growth": {
+   "label": "Growth",
+   "about": "Larger holdings, little cash: more return, deeper drops.",
+   "core": {
+    "allocation_pct": 40,
+    "min_pct": 20,
+    "max_pct": 60
+   },
+   "rotation": {
+    "allocation_pct": 40
+   }
+  }
+ },
+ "samples": {
+  "Sector ETFs 2017-2026": {
+   "careful": {
+    "from": "2017-01",
+    "to": "2026-10",
+    "yearly_%": 5.9,
+    "worst_drop_%": -6.6,
+    "worst_year_%": -4.5,
+    "volatility_%": 4.8,
+    "avg_invested_%": 36.0
+   },
+   "balanced": {
+    "from": "2017-01",
+    "to": "2026-10",
+    "yearly_%": 7.3,
+    "worst_drop_%": -9.9,
+    "worst_year_%": -7.4,
+    "volatility_%": 6.8,
+    "avg_invested_%": 51.0
+   },
+   "growth": {
+    "from": "2017-01",
+    "to": "2026-10",
+    "yearly_%": 8.4,
+    "worst_drop_%": -12.2,
+    "worst_year_%": -9.4,
+    "volatility_%": 8.1,
+    "avg_invested_%": 60.0
+   },
+   "market": {
+    "from": "2017-01",
+    "to": "2026-10",
+    "yearly_%": 15.2,
+    "worst_drop_%": -23.9,
+    "worst_year_%": -18.2,
+    "volatility_%": 15.4,
+    "avg_invested_%": 100.0
+   }
+  },
+  "US industries 1927-2026": {
+   "careful": {
+    "from": "1927-07",
+    "to": "2026-08",
+    "yearly_%": 7.0,
+    "worst_drop_%": -20.7,
+    "worst_year_%": -10.8,
+    "volatility_%": 5.8,
+    "avg_invested_%": 40.0
+   },
+   "balanced": {
+    "from": "1927-07",
+    "to": "2026-08",
+    "yearly_%": 8.5,
+    "worst_drop_%": -30.6,
+    "worst_year_%": -16.0,
+    "volatility_%": 8.3,
+    "avg_invested_%": 57.0
+   },
+   "growth": {
+    "from": "1927-07",
+    "to": "2026-08",
+    "yearly_%": 9.3,
+    "worst_drop_%": -37.5,
+    "worst_year_%": -19.9,
+    "volatility_%": 10.0,
+    "avg_invested_%": 68.0
+   },
+   "market": {
+    "from": "1927-07",
+    "to": "2026-08",
+    "yearly_%": 10.3,
+    "worst_drop_%": -83.7,
+    "worst_year_%": -43.8,
+    "volatility_%": 18.4,
+    "avg_invested_%": 100.0
+   }
+  }
+ },
+ "lines": [
+  "[Sector ETFs 2017-2026]",
+  "  careful: +5.9%/yr, worst drop -7%, worst year -4%, avg invested 36%",
+  "  balanced: +7.3%/yr, worst drop -10%, worst year -7%, avg invested 51%",
+  "  growth: +8.4%/yr, worst drop -12%, worst year -9%, avg invested 60%",
+  "  market: +15.2%/yr, worst drop -24%, worst year -18%, avg invested 100%",
+  "[US industries 1927-2026]",
+  "  careful: +7.0%/yr, worst drop -21%, worst year -11%, avg invested 40%",
+  "  balanced: +8.5%/yr, worst drop -31%, worst year -16%, avg invested 57%",
+  "  growth: +9.3%/yr, worst drop -38%, worst year -20%, avg invested 68%",
+  "  market: +10.3%/yr, worst drop -84%, worst year -44%, avg invested 100%"
+ ]
+}

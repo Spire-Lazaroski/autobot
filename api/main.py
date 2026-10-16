@@ -14,6 +14,7 @@ import pandas as pd
 import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from autobot.backtest import ruled_signal
 from autobot.backtest import (CostModel, best_per_strategy, compare_strategies, fills, metrics,
@@ -175,6 +176,42 @@ def holdings_studies():
     except (OSError, ValueError, KeyError):
         out["rotation"] = None
     return out
+
+
+class SetupReq(BaseModel):
+    name: str
+    confirm: bool = False
+
+
+@app.get("/api/setups")
+def setups():
+    """The three setups (autobot.presets), which one config.yaml matches, and their backtest."""
+    from autobot import presets
+    cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    return {"presets": presets.PRESETS, "current": presets.current(cfg["live"]), "study": presets.saved()}
+
+
+@app.post("/api/setups")
+def choose_setup(req: SetupReq):
+    """Switch the long-term holdings to a setup (core and rotation sizes only). The bot reads it at its next bar
+    and rebalances at the next open tick."""
+    from autobot import presets
+    if req.name not in presets.PRESETS:
+        raise HTTPException(404, f"unknown setup {req.name}")
+    if not req.confirm:
+        raise HTTPException(400, "Changing the setup resizes the long-term holdings. Send {\"confirm\": true}.")
+    cfg = presets.apply(yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")), req.name)
+    _validate_config(cfg)
+    target = os.path.realpath(CONFIG_PATH)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".yaml.tmp")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+    os.replace(tmp, target)
+    p = presets.PRESETS[req.name]
+    return {"ok": True, "current": req.name,
+            "message": f"Setup changed to {p['label']}: core around {p['core']['allocation_pct']}% "
+                       f"({p['core']['min_pct']}-{p['core']['max_pct']}%), sector sleeve up to {p['rotation']['allocation_pct']}%. "
+                       "The bot rebalances at its next tick while the market is open (otherwise at the next open)."}
 
 
 @app.get("/api/trade-rules")

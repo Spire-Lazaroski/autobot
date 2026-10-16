@@ -11,5 +11,6 @@ start, **only where the file is missing**: a study re-run on the server is never
 | `event_study.json` | News: market impact of news |
 | `news_guard_study.json` | News: does the news guard help? |
 | `recal_fix_study.json` | Recalibrate: the recalibration check |
+| `presets_study.json` | Live: the three setups' expected return and worst drop |
 
 To refresh one after re-running its study on the PC, copy the new file from `data/` over the one here and commit.
