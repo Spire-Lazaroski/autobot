@@ -26,6 +26,7 @@ from autobot.strategies import STRATEGIES, get_signal
 from autobot.liveconfig import validate_live
 
 from . import jobs
+from .connect import router as connect_router
 from .live import router as live_router
 from .news import router as news_router
 from .recal import router as recal_router
@@ -41,6 +42,7 @@ app.include_router(live_router)
 app.include_router(reports_router)
 app.include_router(news_router)
 app.include_router(recal_router)
+app.include_router(connect_router)
 
 
 @app.on_event("startup")
