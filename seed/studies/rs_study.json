@@ -1,0 +1,1097 @@
+{
+ "generated": "2026-10-07T18:09:52+00:00",
+ "rule": {
+  "top": 3,
+  "trend_months": 10,
+  "vol_target": 0.12
+ },
+ "french": {
+  "assets": [
+   "NoDur",
+   "Durbl",
+   "Manuf",
+   "Enrgy",
+   "HiTec",
+   "Telcm",
+   "Shops",
+   "Hlth",
+   "Utils",
+   "Other"
+  ],
+  "series": {},
+  "whole": {
+   "plain": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 12.87,
+    "volatility_%": 18.4,
+    "worst_drop_%": -74.2,
+    "sharpe": 0.58,
+    "avg_invested_%": 99.9
+   },
+   "dual": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 11.81,
+    "volatility_%": 15.0,
+    "worst_drop_%": -65.3,
+    "sharpe": 0.61,
+    "avg_invested_%": 81.6
+   },
+   "full": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.01,
+    "volatility_%": 9.8,
+    "worst_drop_%": -27.8,
+    "sharpe": 0.69,
+    "avg_invested_%": 61.2
+   },
+   "market": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.28,
+    "volatility_%": 18.4,
+    "worst_drop_%": -83.7,
+    "sharpe": 0.45,
+    "avg_invested_%": 100.0
+   },
+   "equal mix": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.95,
+    "volatility_%": 17.9,
+    "worst_drop_%": -81.9,
+    "sharpe": 0.49,
+    "avg_invested_%": 100.0
+   },
+   "market, vol-sized": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.22,
+    "volatility_%": 12.5,
+    "worst_drop_%": -46.2,
+    "sharpe": 0.51,
+    "avg_invested_%": 80.5
+   }
+  },
+  "vs_market": {
+   "plain": {
+    "%_per_year": 2.35,
+    "ci95": [
+     0.86,
+     3.84
+    ],
+    "significant": true
+   },
+   "dual": {
+    "%_per_year": 0.82,
+    "ci95": [
+     -1.72,
+     3.36
+    ],
+    "significant": false
+   },
+   "full": {
+    "%_per_year": -1.46,
+    "ci95": [
+     -4.19,
+     1.27
+    ],
+    "significant": false
+   },
+   "equal mix": {
+    "%_per_year": 0.5,
+    "ci95": [
+     -0.05,
+     1.06
+    ],
+    "significant": false
+   },
+   "market, vol-sized": {
+    "%_per_year": -1.88,
+    "ci95": [
+     -3.59,
+     -0.16
+    ],
+    "significant": true
+   }
+  },
+  "vs_market_same_vol": {
+   "plain": {
+    "%_per_year": 2.36,
+    "ci95": [
+     0.87,
+     3.85
+    ],
+    "significant": true
+   },
+   "dual": {
+    "%_per_year": 2.92,
+    "ci95": [
+     0.2,
+     5.64
+    ],
+    "significant": true
+   },
+   "full": {
+    "%_per_year": 4.52,
+    "ci95": [
+     1.59,
+     7.46
+    ],
+    "significant": true
+   },
+   "market, vol-sized": {
+    "%_per_year": 1.15,
+    "ci95": [
+     -0.38,
+     2.67
+    ],
+    "significant": false
+   }
+  },
+  "full_vs_vol_sized_market_same_vol": {
+   "%_per_year": 2.29,
+   "ci95": [
+    0.75,
+    3.83
+   ],
+   "significant": true
+  },
+  "periods": {
+   "1927-1949": {
+    "plain": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 9.55,
+     "volatility_%": 25.4,
+     "worst_drop_%": -74.2,
+     "sharpe": 0.46,
+     "avg_invested_%": 99.6
+    },
+    "dual": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 8.76,
+     "volatility_%": 19.3,
+     "worst_drop_%": -65.3,
+     "sharpe": 0.49,
+     "avg_invested_%": 70.9
+    },
+    "full": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.96,
+     "volatility_%": 10.2,
+     "worst_drop_%": -27.8,
+     "sharpe": 0.73,
+     "avg_invested_%": 45.2
+    },
+    "market": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 5.67,
+     "volatility_%": 27.2,
+     "worst_drop_%": -83.7,
+     "sharpe": 0.31,
+     "avg_invested_%": 100.0
+    },
+    "equal mix": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 6.85,
+     "volatility_%": 27.0,
+     "worst_drop_%": -81.9,
+     "sharpe": 0.35,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.01,
+     "volatility_%": 13.5,
+     "worst_drop_%": -46.2,
+     "sharpe": 0.51,
+     "avg_invested_%": 66.1
+    },
+    "full_vs_market": {
+     "%_per_year": -0.97,
+     "ci95": [
+      -10.43,
+      8.49
+     ],
+     "significant": false
+    },
+    "full_vs_market_same_vol": {
+     "%_per_year": 11.34,
+     "ci95": [
+      1.03,
+      21.65
+     ],
+     "significant": true
+    }
+   },
+   "1950-1998": {
+    "plain": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 15.23,
+     "volatility_%": 15.2,
+     "worst_drop_%": -42.3,
+     "sharpe": 0.68,
+     "avg_invested_%": 100.0
+    },
+    "dual": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 13.99,
+     "volatility_%": 13.3,
+     "worst_drop_%": -27.2,
+     "sharpe": 0.67,
+     "avg_invested_%": 84.6
+    },
+    "full": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 12.3,
+     "volatility_%": 10.2,
+     "worst_drop_%": -17.9,
+     "sharpe": 0.69,
+     "avg_invested_%": 67.7
+    },
+    "market": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 13.15,
+     "volatility_%": 14.5,
+     "worst_drop_%": -46.5,
+     "sharpe": 0.58,
+     "avg_invested_%": 100.0
+    },
+    "equal mix": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 13.73,
+     "volatility_%": 13.7,
+     "worst_drop_%": -45.6,
+     "sharpe": 0.64,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 11.49,
+     "volatility_%": 12.3,
+     "worst_drop_%": -38.5,
+     "sharpe": 0.54,
+     "avg_invested_%": 87.0
+    },
+    "full_vs_market": {
+     "%_per_year": -1.29,
+     "ci95": [
+      -3.64,
+      1.05
+     ],
+     "significant": false
+    },
+    "full_vs_market_same_vol": {
+     "%_per_year": 1.65,
+     "ci95": [
+      -0.76,
+      4.06
+     ],
+     "significant": false
+    }
+   },
+   "1999-2026 (after publication)": {
+    "plain": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 11.5,
+     "volatility_%": 16.7,
+     "worst_drop_%": -39.6,
+     "sharpe": 0.62,
+     "avg_invested_%": 100.0
+    },
+    "dual": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 10.51,
+     "volatility_%": 13.7,
+     "worst_drop_%": -20.7,
+     "sharpe": 0.65,
+     "avg_invested_%": 84.9
+    },
+    "full": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.69,
+     "volatility_%": 8.6,
+     "worst_drop_%": -12.9,
+     "sharpe": 0.67,
+     "avg_invested_%": 62.8
+    },
+    "market": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 9.11,
+     "volatility_%": 15.6,
+     "worst_drop_%": -50.3,
+     "sharpe": 0.51,
+     "avg_invested_%": 100.0
+    },
+    "equal mix": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 9.48,
+     "volatility_%": 14.8,
+     "worst_drop_%": -48.1,
+     "sharpe": 0.55,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.09,
+     "volatility_%": 12.0,
+     "worst_drop_%": -41.0,
+     "sharpe": 0.47,
+     "avg_invested_%": 80.7
+    },
+    "full_vs_market": {
+     "%_per_year": -2.18,
+     "ci95": [
+      -6.59,
+      2.24
+     ],
+     "significant": false
+    },
+    "full_vs_market_same_vol": {
+     "%_per_year": 2.61,
+     "ci95": [
+      -2.19,
+      7.4
+     ],
+     "significant": false
+    }
+   }
+  }
+ },
+ "etf": {
+  "assets": [
+   "XLK",
+   "XLV",
+   "XLE",
+   "XLF",
+   "XLI",
+   "XLY",
+   "XLP",
+   "XLU",
+   "XLB",
+   "XLRE",
+   "XLC"
+  ],
+  "series": {},
+  "whole": {
+   "plain": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 14.74,
+    "volatility_%": 14.8,
+    "worst_drop_%": -15.8,
+    "sharpe": 0.84,
+    "avg_invested_%": 98.3
+   },
+   "dual": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 12.06,
+    "volatility_%": 12.8,
+    "worst_drop_%": -11.1,
+    "sharpe": 0.76,
+    "avg_invested_%": 90.1
+   },
+   "full": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 7.99,
+    "volatility_%": 8.9,
+    "worst_drop_%": -9.9,
+    "sharpe": 0.63,
+    "avg_invested_%": 64.2
+   },
+   "market": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 15.24,
+    "volatility_%": 15.4,
+    "worst_drop_%": -23.9,
+    "sharpe": 0.84,
+    "avg_invested_%": 100.0
+   },
+   "equal mix": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 12.01,
+    "volatility_%": 14.7,
+    "worst_drop_%": -22.7,
+    "sharpe": 0.68,
+    "avg_invested_%": 98.5
+   },
+   "market, vol-sized": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 11.14,
+    "volatility_%": 12.3,
+    "worst_drop_%": -18.8,
+    "sharpe": 0.72,
+    "avg_invested_%": 81.0
+   }
+  },
+  "vs_market": {
+   "plain": {
+    "%_per_year": -0.53,
+    "ci95": [
+     -5.32,
+     4.26
+    ],
+    "significant": false
+   },
+   "dual": {
+    "%_per_year": -3.2,
+    "ci95": [
+     -9.31,
+     2.91
+    ],
+    "significant": false
+   },
+   "full": {
+    "%_per_year": -7.34,
+    "ci95": [
+     -14.03,
+     -0.65
+    ],
+    "significant": true
+   },
+   "equal mix": {
+    "%_per_year": -2.97,
+    "ci95": [
+     -6.0,
+     0.06
+    ],
+    "significant": false
+   },
+   "market, vol-sized": {
+    "%_per_year": -4.08,
+    "ci95": [
+     -6.94,
+     -1.23
+    ],
+    "significant": true
+   }
+  },
+  "vs_market_same_vol": {
+   "plain": {
+    "%_per_year": -0.02,
+    "ci95": [
+     -4.89,
+     4.86
+    ],
+    "significant": false
+   },
+   "dual": {
+    "%_per_year": -1.16,
+    "ci95": [
+     -7.63,
+     5.31
+    ],
+    "significant": false
+   },
+   "full": {
+    "%_per_year": -3.25,
+    "ci95": [
+     -10.23,
+     3.73
+    ],
+    "significant": false
+   },
+   "market, vol-sized": {
+    "%_per_year": -1.8,
+    "ci95": [
+     -4.1,
+     0.5
+    ],
+    "significant": false
+   }
+  },
+  "full_vs_vol_sized_market_same_vol": {
+   "%_per_year": -1.15,
+   "ci95": [
+    -6.24,
+    3.94
+   ],
+   "significant": false
+  },
+  "periods": {}
+ },
+ "combine_french": {
+  "whole": {
+   "rotation 12m top 3 (section 23)": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.01,
+    "volatility_%": 9.8,
+    "worst_drop_%": -27.8,
+    "sharpe": 0.69,
+    "avg_invested_%": 61.2
+   },
+   "rotation 3+6+12m top 3": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.45,
+    "volatility_%": 10.0,
+    "worst_drop_%": -29.9,
+    "sharpe": 0.63,
+    "avg_invested_%": 63.6
+   },
+   "rotation 12m top 5": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.67,
+    "volatility_%": 9.0,
+    "worst_drop_%": -26.3,
+    "sharpe": 0.71,
+    "avg_invested_%": 60.7
+   },
+   "rotation 3+6+12m top 5": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.35,
+    "volatility_%": 9.1,
+    "worst_drop_%": -26.1,
+    "sharpe": 0.67,
+    "avg_invested_%": 61.9
+   },
+   "market": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.28,
+    "volatility_%": 18.4,
+    "worst_drop_%": -83.7,
+    "sharpe": 0.45,
+    "avg_invested_%": 100.0
+   },
+   "market, vol-sized (like B)": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.22,
+    "volatility_%": 12.5,
+    "worst_drop_%": -46.2,
+    "sharpe": 0.51,
+    "avg_invested_%": 80.5
+   },
+   "half B-like market + half rotation": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 9.41,
+    "volatility_%": 10.7,
+    "worst_drop_%": -36.5,
+    "sharpe": 0.59,
+    "avg_invested_%": 72.1
+   },
+   "half market + half rotation": {
+    "from": "1927-07",
+    "months": 1190,
+    "yearly_%": 10.12,
+    "volatility_%": 13.1,
+    "worst_drop_%": -63.6,
+    "sharpe": 0.55,
+    "avg_invested_%": 81.8
+   }
+  },
+  "vs_market_same_vol": {
+   "rotation 12m top 3 (section 23)": {
+    "%_per_year": 4.52,
+    "ci95": [
+     1.59,
+     7.46
+    ],
+    "significant": true
+   },
+   "rotation 3+6+12m top 3": {
+    "%_per_year": 3.35,
+    "ci95": [
+     0.46,
+     6.23
+    ],
+    "significant": true
+   },
+   "rotation 12m top 5": {
+    "%_per_year": 4.91,
+    "ci95": [
+     2.05,
+     7.76
+    ],
+    "significant": true
+   },
+   "rotation 3+6+12m top 5": {
+    "%_per_year": 4.18,
+    "ci95": [
+     1.34,
+     7.03
+    ],
+    "significant": true
+   },
+   "market, vol-sized (like B)": {
+    "%_per_year": 1.15,
+    "ci95": [
+     -0.38,
+     2.67
+    ],
+    "significant": false
+   },
+   "half B-like market + half rotation": {
+    "%_per_year": 2.66,
+    "ci95": [
+     0.68,
+     4.64
+    ],
+    "significant": true
+   },
+   "half market + half rotation": {
+    "%_per_year": 1.95,
+    "ci95": [
+     0.93,
+     2.97
+    ],
+    "significant": true
+   }
+  },
+  "correlation": {
+   "rotation vs market": 0.68,
+   "rotation vs B-like market": 0.81,
+   "rotation vs market in the market's worst 10% of months": -3.24,
+   "market's worst 10% of months, average %": -8.97
+  },
+  "periods": {
+   "1927-1949": {
+    "rotation 12m top 3 (section 23)": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.96,
+     "volatility_%": 10.2,
+     "worst_drop_%": -27.8,
+     "sharpe": 0.73,
+     "avg_invested_%": 45.2
+    },
+    "rotation 3+6+12m top 3": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.45,
+     "volatility_%": 10.4,
+     "worst_drop_%": -29.9,
+     "sharpe": 0.67,
+     "avg_invested_%": 45.8
+    },
+    "rotation 12m top 5": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.47,
+     "volatility_%": 9.5,
+     "worst_drop_%": -26.3,
+     "sharpe": 0.72,
+     "avg_invested_%": 44.2
+    },
+    "rotation 3+6+12m top 5": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.21,
+     "volatility_%": 9.5,
+     "worst_drop_%": -26.1,
+     "sharpe": 0.7,
+     "avg_invested_%": 44.8
+    },
+    "market": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 5.67,
+     "volatility_%": 27.2,
+     "worst_drop_%": -83.7,
+     "sharpe": 0.31,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized (like B)": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.01,
+     "volatility_%": 13.5,
+     "worst_drop_%": -46.2,
+     "sharpe": 0.51,
+     "avg_invested_%": 66.1
+    },
+    "half B-like market + half rotation": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.32,
+     "volatility_%": 11.3,
+     "worst_drop_%": -36.5,
+     "sharpe": 0.61,
+     "avg_invested_%": 56.0
+    },
+    "half market + half rotation": {
+     "from": "1927-07",
+     "months": 270,
+     "yearly_%": 7.2,
+     "volatility_%": 17.2,
+     "worst_drop_%": -63.6,
+     "sharpe": 0.44,
+     "avg_invested_%": 72.9
+    }
+   },
+   "1950-1998": {
+    "rotation 12m top 3 (section 23)": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 12.3,
+     "volatility_%": 10.2,
+     "worst_drop_%": -17.9,
+     "sharpe": 0.69,
+     "avg_invested_%": 67.7
+    },
+    "rotation 3+6+12m top 3": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 11.77,
+     "volatility_%": 10.5,
+     "worst_drop_%": -19.1,
+     "sharpe": 0.63,
+     "avg_invested_%": 71.3
+    },
+    "rotation 12m top 5": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 12.1,
+     "volatility_%": 9.3,
+     "worst_drop_%": -16.2,
+     "sharpe": 0.73,
+     "avg_invested_%": 67.0
+    },
+    "rotation 3+6+12m top 5": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 11.79,
+     "volatility_%": 9.4,
+     "worst_drop_%": -16.2,
+     "sharpe": 0.69,
+     "avg_invested_%": 69.0
+    },
+    "market": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 13.15,
+     "volatility_%": 14.5,
+     "worst_drop_%": -46.5,
+     "sharpe": 0.58,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized (like B)": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 11.49,
+     "volatility_%": 12.3,
+     "worst_drop_%": -38.5,
+     "sharpe": 0.54,
+     "avg_invested_%": 87.0
+    },
+    "half B-like market + half rotation": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 11.68,
+     "volatility_%": 11.0,
+     "worst_drop_%": -25.7,
+     "sharpe": 0.6,
+     "avg_invested_%": 79.1
+    },
+    "half market + half rotation": {
+     "from": "1950-01",
+     "months": 588,
+     "yearly_%": 12.55,
+     "volatility_%": 11.9,
+     "worst_drop_%": -30.6,
+     "sharpe": 0.63,
+     "avg_invested_%": 85.6
+    }
+   },
+   "1999-2026 (after publication)": {
+    "rotation 12m top 3 (section 23)": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.69,
+     "volatility_%": 8.6,
+     "worst_drop_%": -12.9,
+     "sharpe": 0.67,
+     "avg_invested_%": 62.8
+    },
+    "rotation 3+6+12m top 3": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.07,
+     "volatility_%": 8.7,
+     "worst_drop_%": -14.9,
+     "sharpe": 0.6,
+     "avg_invested_%": 64.6
+    },
+    "rotation 12m top 5": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.24,
+     "volatility_%": 7.8,
+     "worst_drop_%": -13.4,
+     "sharpe": 0.68,
+     "avg_invested_%": 62.8
+    },
+    "rotation 3+6+12m top 5": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 6.85,
+     "volatility_%": 7.9,
+     "worst_drop_%": -13.1,
+     "sharpe": 0.62,
+     "avg_invested_%": 63.2
+    },
+    "market": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 9.11,
+     "volatility_%": 15.6,
+     "worst_drop_%": -50.3,
+     "sharpe": 0.51,
+     "avg_invested_%": 100.0
+    },
+    "market, vol-sized (like B)": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.09,
+     "volatility_%": 12.0,
+     "worst_drop_%": -41.0,
+     "sharpe": 0.47,
+     "avg_invested_%": 80.7
+    },
+    "half B-like market + half rotation": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 7.17,
+     "volatility_%": 9.6,
+     "worst_drop_%": -27.6,
+     "sharpe": 0.56,
+     "avg_invested_%": 72.7
+    },
+    "half market + half rotation": {
+     "from": "1999-01",
+     "months": 332,
+     "yearly_%": 8.27,
+     "volatility_%": 11.2,
+     "worst_drop_%": -33.3,
+     "sharpe": 0.59,
+     "avg_invested_%": 82.3
+    }
+   }
+  }
+ },
+ "combine_etf": {
+  "whole": {
+   "rotation 12m top 3 (section 23)": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 7.99,
+    "volatility_%": 8.9,
+    "worst_drop_%": -9.9,
+    "sharpe": 0.63,
+    "avg_invested_%": 64.2
+   },
+   "rotation 3+6+12m top 3": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 5.09,
+    "volatility_%": 9.4,
+    "worst_drop_%": -12.3,
+    "sharpe": 0.31,
+    "avg_invested_%": 66.0
+   },
+   "rotation 12m top 5": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 6.49,
+    "volatility_%": 7.9,
+    "worst_drop_%": -10.5,
+    "sharpe": 0.52,
+    "avg_invested_%": 61.1
+   },
+   "rotation 3+6+12m top 5": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 6.07,
+    "volatility_%": 8.5,
+    "worst_drop_%": -11.0,
+    "sharpe": 0.44,
+    "avg_invested_%": 63.2
+   },
+   "market": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 15.24,
+    "volatility_%": 15.4,
+    "worst_drop_%": -23.9,
+    "sharpe": 0.84,
+    "avg_invested_%": 100.0
+   },
+   "market, vol-sized (like B)": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 11.14,
+    "volatility_%": 12.3,
+    "worst_drop_%": -18.8,
+    "sharpe": 0.72,
+    "avg_invested_%": 81.0
+   },
+   "half B-like market + half rotation": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 8.16,
+    "volatility_%": 10.2,
+    "worst_drop_%": -14.6,
+    "sharpe": 0.58,
+    "avg_invested_%": 73.5
+   },
+   "half market + half rotation": {
+    "from": "2017-01",
+    "months": 118,
+    "yearly_%": 10.21,
+    "volatility_%": 11.6,
+    "worst_drop_%": -17.0,
+    "sharpe": 0.68,
+    "avg_invested_%": 83.0
+   }
+  },
+  "vs_market_same_vol": {
+   "rotation 12m top 3 (section 23)": {
+    "%_per_year": -3.25,
+    "ci95": [
+     -10.23,
+     3.73
+    ],
+    "significant": false
+   },
+   "rotation 3+6+12m top 3": {
+    "%_per_year": -8.15,
+    "ci95": [
+     -15.18,
+     -1.12
+    ],
+    "significant": true
+   },
+   "rotation 12m top 5": {
+    "%_per_year": -4.88,
+    "ci95": [
+     -11.44,
+     1.67
+    ],
+    "significant": false
+   },
+   "rotation 3+6+12m top 5": {
+    "%_per_year": -6.13,
+    "ci95": [
+     -12.72,
+     0.46
+    ],
+    "significant": false
+   },
+   "market, vol-sized (like B)": {
+    "%_per_year": -1.8,
+    "ci95": [
+     -4.1,
+     0.5
+    ],
+    "significant": false
+   },
+   "half B-like market + half rotation": {
+    "%_per_year": -4.03,
+    "ci95": [
+     -7.83,
+     -0.24
+    ],
+    "significant": true
+   },
+   "half market + half rotation": {
+    "%_per_year": -2.4,
+    "ci95": [
+     -5.07,
+     0.27
+    ],
+    "significant": false
+   }
+  },
+  "correlation": {
+   "rotation vs market": 0.74,
+   "rotation vs B-like market": 0.77,
+   "rotation vs market in the market's worst 10% of months": -4.28,
+   "market's worst 10% of months, average %": -7.52
+  },
+  "periods": {}
+ },
+ "lines": [
+  "French 10 industries, from 1927-07 (1190 months):",
+  "    plain              +12.87%/yr  vol  18.4%  worst drop  -74.2%  Sharpe 0.58  invested 99.9%",
+  "    dual               +11.81%/yr  vol  15.0%  worst drop  -65.3%  Sharpe 0.61  invested 81.6%",
+  "    full               +10.01%/yr  vol   9.8%  worst drop  -27.8%  Sharpe 0.69  invested 61.2%",
+  "    market             +10.28%/yr  vol  18.4%  worst drop  -83.7%  Sharpe 0.45  invested 100.0%",
+  "    equal mix          +10.95%/yr  vol  17.9%  worst drop  -81.9%  Sharpe 0.49  invested 100.0%",
+  "    market, vol-sized   +9.22%/yr  vol  12.5%  worst drop  -46.2%  Sharpe 0.51  invested 80.5%",
+  "    plain vs market: +2.35%/yr (+0.86 to +3.84); at the market's volatility: 2.36",
+  "    dual vs market: +0.82%/yr (-1.72 to +3.36); at the market's volatility: 2.92",
+  "    full vs market: -1.46%/yr (-4.19 to +1.27); at the market's volatility: 4.52",
+  "    equal mix vs market: +0.50%/yr (-0.05 to +1.06); at the market's volatility: n/a",
+  "    market, vol-sized vs market: -1.88%/yr (-3.59 to -0.16); at the market's volatility: 1.15",
+  "    full vs the vol-sized market, same volatility: +2.29%/yr (+0.75 to +3.83)",
+  "  1927-1949: full +7.96%/yr (drop -27.8%) vs market +5.67% (drop -83.7%); same vol: +11.34%/yr (+1.03 to +21.65)",
+  "  1950-1998: full +12.30%/yr (drop -17.9%) vs market +13.15% (drop -46.5%); same vol: +1.65%/yr (-0.76 to +4.06)",
+  "  1999-2026 (after publication): full +7.69%/yr (drop -12.9%) vs market +9.11% (drop -50.3%); same vol: +2.61%/yr (-2.19 to +7.40)",
+  "Sector ETFs, from 2017-01 (118 months):",
+  "    plain              +14.74%/yr  vol  14.8%  worst drop  -15.8%  Sharpe 0.84  invested 98.3%",
+  "    dual               +12.06%/yr  vol  12.8%  worst drop  -11.1%  Sharpe 0.76  invested 90.1%",
+  "    full                +7.99%/yr  vol   8.9%  worst drop   -9.9%  Sharpe 0.63  invested 64.2%",
+  "    market             +15.24%/yr  vol  15.4%  worst drop  -23.9%  Sharpe 0.84  invested 100.0%",
+  "    equal mix          +12.01%/yr  vol  14.7%  worst drop  -22.7%  Sharpe 0.68  invested 98.5%",
+  "    market, vol-sized  +11.14%/yr  vol  12.3%  worst drop  -18.8%  Sharpe 0.72  invested 81.0%",
+  "    plain vs market: -0.53%/yr (-5.32 to +4.26); at the market's volatility: -0.02",
+  "    dual vs market: -3.20%/yr (-9.31 to +2.91); at the market's volatility: -1.16",
+  "    full vs market: -7.34%/yr (-14.03 to -0.65); at the market's volatility: -3.25",
+  "    equal mix vs market: -2.97%/yr (-6.00 to +0.06); at the market's volatility: n/a",
+  "    market, vol-sized vs market: -4.08%/yr (-6.94 to -1.23); at the market's volatility: -1.8",
+  "    full vs the vol-sized market, same volatility: -1.15%/yr (-6.24 to +3.94)",
+  "Combinations, French 10 industries:",
+  "    rotation 12m top 3 (section 23) +10.01%/yr  vol   9.8%  worst drop  -27.8%  Sharpe 0.69  invested 61.2% | vs market at its volatility +4.52%/yr (+1.59 to +7.46)",
+  "    rotation 3+6+12m top 3  +9.45%/yr  vol  10.0%  worst drop  -29.9%  Sharpe 0.63  invested 63.6% | vs market at its volatility +3.35%/yr (+0.46 to +6.23)",
+  "    rotation 12m top 5  +9.67%/yr  vol   9.0%  worst drop  -26.3%  Sharpe 0.71  invested 60.7% | vs market at its volatility +4.91%/yr (+2.05 to +7.76)",
+  "    rotation 3+6+12m top 5  +9.35%/yr  vol   9.1%  worst drop  -26.1%  Sharpe 0.67  invested 61.9% | vs market at its volatility +4.18%/yr (+1.34 to +7.03)",
+  "    market             +10.28%/yr  vol  18.4%  worst drop  -83.7%  Sharpe 0.45  invested 100.0%",
+  "    market, vol-sized (like B)  +9.22%/yr  vol  12.5%  worst drop  -46.2%  Sharpe 0.51  invested 80.5% | vs market at its volatility +1.15%/yr (-0.38 to +2.67)",
+  "    half B-like market + half rotation  +9.41%/yr  vol  10.7%  worst drop  -36.5%  Sharpe 0.59  invested 72.1% | vs market at its volatility +2.66%/yr (+0.68 to +4.64)",
+  "    half market + half rotation +10.12%/yr  vol  13.1%  worst drop  -63.6%  Sharpe 0.55  invested 81.8% | vs market at its volatility +1.95%/yr (+0.93 to +2.97)",
+  "    {'rotation vs market': 0.68, 'rotation vs B-like market': 0.81, \"rotation vs market in the market's worst 10% of months\": -3.24, \"market's worst 10% of months, average %\": -8.97}",
+  "  1927-1949: rotation 12m top 3 (section 23) +8.0% (drop -27.8%); rotation 3+6+12m top 3 +7.5% (drop -29.9%); rotation 12m top 5 +7.5% (drop -26.3%); rotation 3+6+12m top 5 +7.2% (drop -26.1%); market +5.7% (drop -83.7%); market, vol-sized (like B) +7.0% (drop -46.2%); half B-like market + half rotation +7.3% (drop -36.5%); half market + half rotation +7.2% (drop -63.6%)",
+  "  1950-1998: rotation 12m top 3 (section 23) +12.3% (drop -17.9%); rotation 3+6+12m top 3 +11.8% (drop -19.1%); rotation 12m top 5 +12.1% (drop -16.2%); rotation 3+6+12m top 5 +11.8% (drop -16.2%); market +13.2% (drop -46.5%); market, vol-sized (like B) +11.5% (drop -38.5%); half B-like market + half rotation +11.7% (drop -25.7%); half market + half rotation +12.6% (drop -30.6%)",
+  "  1999-2026 (after publication): rotation 12m top 3 (section 23) +7.7% (drop -12.9%); rotation 3+6+12m top 3 +7.1% (drop -14.9%); rotation 12m top 5 +7.2% (drop -13.4%); rotation 3+6+12m top 5 +6.8% (drop -13.1%); market +9.1% (drop -50.3%); market, vol-sized (like B) +7.1% (drop -41.0%); half B-like market + half rotation +7.2% (drop -27.6%); half market + half rotation +8.3% (drop -33.3%)",
+  "Combinations, sector ETFs:",
+  "    rotation 12m top 3 (section 23)  +7.99%/yr  vol   8.9%  worst drop   -9.9%  Sharpe 0.63  invested 64.2% | vs market at its volatility -3.25%/yr (-10.23 to +3.73)",
+  "    rotation 3+6+12m top 3  +5.09%/yr  vol   9.4%  worst drop  -12.3%  Sharpe 0.31  invested 66.0% | vs market at its volatility -8.15%/yr (-15.18 to -1.12)",
+  "    rotation 12m top 5  +6.49%/yr  vol   7.9%  worst drop  -10.5%  Sharpe 0.52  invested 61.1% | vs market at its volatility -4.88%/yr (-11.44 to +1.67)",
+  "    rotation 3+6+12m top 5  +6.07%/yr  vol   8.5%  worst drop  -11.0%  Sharpe 0.44  invested 63.2% | vs market at its volatility -6.13%/yr (-12.72 to +0.46)",
+  "    market             +15.24%/yr  vol  15.4%  worst drop  -23.9%  Sharpe 0.84  invested 100.0%",
+  "    market, vol-sized (like B) +11.14%/yr  vol  12.3%  worst drop  -18.8%  Sharpe 0.72  invested 81.0% | vs market at its volatility -1.80%/yr (-4.10 to +0.50)",
+  "    half B-like market + half rotation  +8.16%/yr  vol  10.2%  worst drop  -14.6%  Sharpe 0.58  invested 73.5% | vs market at its volatility -4.03%/yr (-7.83 to -0.24)",
+  "    half market + half rotation +10.21%/yr  vol  11.6%  worst drop  -17.0%  Sharpe 0.68  invested 83.0% | vs market at its volatility -2.40%/yr (-5.07 to +0.27)",
+  "    {'rotation vs market': 0.74, 'rotation vs B-like market': 0.77, \"rotation vs market in the market's worst 10% of months\": -4.28, \"market's worst 10% of months, average %\": -7.52}"
+ ]
+}

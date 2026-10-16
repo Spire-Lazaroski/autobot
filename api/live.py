@@ -273,13 +273,17 @@ def live_start():
                                  f"{st['heartbeat_age_s']:.0f}s old. Stop it first (Stop + flatten, or end "
                                  "the process) so two bots can't trade at once.")
     STOP_FILE.unlink(missing_ok=True)
-    # keep running if the API restarts: its own process group (Windows) / session (Linux)
+    return {"ok": True, "pid": start_detached("live.py", "bot_stdout.log")}
+
+
+def start_detached(script: str, out_name: str) -> int:
+    """Start a repo script that keeps running if the API restarts: its own process group (Windows) / session (Linux)."""
     detach = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
               if sys.platform == "win32" else {"start_new_session": True})
-    out = open(LOGS / "bot_stdout.log", "a")
-    proc = subprocess.Popen([sys.executable, str(ROOT / "live.py")], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+    out = open(LOGS / out_name, "a")
+    proc = subprocess.Popen([sys.executable, str(ROOT / script)], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL, close_fds=True, **detach)
-    return {"ok": True, "pid": proc.pid}
+    return proc.pid
 
 
 @router.post("/api/live/stop")
