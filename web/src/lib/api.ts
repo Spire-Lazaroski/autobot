@@ -101,12 +101,21 @@ export interface Job<T = unknown> {
 
 export class ApiError extends Error {}
 
+/** To the sign-in page (the lab's own login, api/auth.py); in development Vite serves it as login.html. */
+export function toLogin() {
+  window.location.assign(import.meta.env.DEV ? "/login.html" : "/login");
+}
+
 export async function api<T>(path: string, body?: unknown, method?: string): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: method ?? (body === undefined ? "GET" : "POST"),
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (res.status === 401) {
+    toLogin();
+    throw new ApiError("Please sign in.");
+  }
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {

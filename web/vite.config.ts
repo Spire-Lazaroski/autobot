@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -9,6 +10,8 @@ export default defineConfig(({ mode }) => {
   const api = `127.0.0.1:${env.API_PORT || "8710"}`;
   return {
     plugins: [react(), tailwindcss()],
+    // two pages: the lab (index.html) and the sign-in page (login.html, served by the API at /login)
+    build: { rollupOptions: { input: { main: resolve(__dirname, "index.html"), login: resolve(__dirname, "login.html") } } },
     server: {
       host: "127.0.0.1",
       port: Number(env.WEB_PORT || 5190),

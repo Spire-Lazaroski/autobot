@@ -12,7 +12,7 @@ from typing import Dict, List
 
 import pandas as pd
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -33,6 +33,7 @@ from .reports import router as reports_router
 from .reports import start_scheduler
 from .models import CompareReq, DataReq, DetailReq, SearchReq, ShiftReq, WalkForwardReq
 from .serialize import frame, plain, records, times, values
+from .auth import AuthMiddleware
 from .settings import CONFIG_PATH, WEB_PORT
 
 app = FastAPI(title="autobot lab", version="0.1")
@@ -47,6 +48,7 @@ def _start_daily_report():
     start_scheduler()
 
 
+app.add_middleware(AuthMiddleware)   # the lab's own login (api/auth.py); open on the PC unless a password is set
 app.add_middleware(CORSMiddleware, allow_methods=["*"], allow_headers=["*"],
                    allow_origins=[f"http://127.0.0.1:{WEB_PORT}", f"http://localhost:{WEB_PORT}"])
 
@@ -99,6 +101,60 @@ def health():
     load_dotenv()
     return {"ok": True, "alpaca_keys": bool(os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_SECRET_KEY")),
             "strategies": len(STRATEGIES), "timeframes": list(TIMEFRAMES)}
+
+
+class LoginReq(BaseModel):
+    user: str
+    password: str
+    remember: bool = False
+
+
+@app.post("/api/login")
+def login(req: LoginReq, request: Request, response: Response):
+    from . import auth
+    addr = auth.client_addr({k.lower(): v for k, v in request.headers.items()}, request.client.host if request.client else None)
+    wait = auth.locked_for(addr)
+    if wait:
+        raise HTTPException(429, f"Too many wrong passwords. Try again in {int(wait // 60) + 1} minutes.")
+    if not auth.configured():
+        raise HTTPException(503, "No password is set for this lab yet (LAB_PASSWORD_HASH).")
+    ok_user = hmac_eq(req.user.strip(), auth.user())
+    if not (auth.check_password(req.password, auth.password_hash()) and ok_user):
+        auth.record_fail(addr)
+        raise HTTPException(401, "Wrong user name or password.")
+    auth.clear_fails(addr)
+    token, ttl = auth.make_session(auth.user(), req.remember)
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    response.set_cookie(auth.COOKIE, token, max_age=ttl, httponly=True, samesite="strict", secure=https, path="/")
+    return {"ok": True, "user": auth.user()}
+
+
+@app.post("/api/logout")
+def logout(response: Response):
+    from . import auth
+    response.delete_cookie(auth.COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/me")
+def me(request: Request):
+    from . import auth
+    return {"user": auth.session_user(request.cookies.get(auth.COOKIE)), "login_required": auth.required()}
+
+
+@app.get("/login")
+def login_page():
+    """The branded sign-in page (web/login.html, built into web/dist)."""
+    from fastapi.responses import FileResponse, HTMLResponse
+    page = CONFIG_PATH.parent / "web" / "dist" / "login.html"
+    if page.exists():
+        return FileResponse(page, headers={"cache-control": "no-store"})
+    return HTMLResponse("<p>Build the web app first (cd web && npm run build), or open the lab through Vite.</p>")
+
+
+def hmac_eq(a: str, b: str) -> bool:
+    import hmac
+    return hmac.compare_digest(a.encode(), b.encode())
 
 
 @app.get("/health")
