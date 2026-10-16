@@ -93,19 +93,71 @@ export function Users() {
   );
 }
 
-/** What an invited user sees until their own Alpaca paper account is connected (the next step). */
+interface AlpacaStatus { connected: boolean; method?: string; account_tail?: string; since?: number; oauth_available: boolean }
+
+/** An invited user's home until their own bot runs: connect the Alpaca paper account (Alpaca's own sign-in, or a
+ *  paper key pair), then the next steps. Never shows anything of the lab owner's account. */
 export function Welcome({ name }: { name: string }) {
+  const qc = useQueryClient();
+  const st = useQuery({ queryKey: ["alpaca-status"], queryFn: () => api<AlpacaStatus>("/alpaca/status") });
+  const [keyId, setKeyId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [askOff, setAskOff] = useState(false);
+  const back = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
+    back.get("alpaca") === "connected" ? { ok: true, text: "Your Alpaca paper account is connected." }
+      : back.get("alpaca_error") ? { ok: false, text: back.get("alpaca_error")! } : null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["alpaca-status"] });
+  const keys = useMutation({
+    mutationFn: () => api("/alpaca/keys", { key_id: keyId, secret_key: secret }),
+    onSuccess: () => { setKeyId(""); setSecret(""); setNotice({ ok: true, text: "Your Alpaca paper account is connected." }); refresh(); },
+  });
+  const off = useMutation({ mutationFn: () => api("/alpaca/disconnect", {}), onSuccess: () => { setNotice(null); refresh(); }, onSettled: () => setAskOff(false) });
+  const s = st.data;
+  const step = (n: number, done: boolean, title: string, body: React.ReactNode) => (
+    <li className="flex gap-3">
+      <span className={`shrink-0 h-6 w-6 rounded-full grid place-items-center text-[12px] font-semibold ${done ? "bg-up text-white" : "border border-line-2 text-muted"}`}>
+        {done ? <i className="bi bi-check-lg" /> : n}</span>
+      <div className="flex flex-col gap-1.5 min-w-0"><b className="text-[14px]">{title}</b>{body}</div>
+    </li>);
   return (
-    <div className="max-w-[640px] mx-auto mt-8 panel p-6 flex flex-col gap-3">
+    <div className="max-w-[680px] mx-auto mt-6 panel p-6 flex flex-col gap-4">
       <h1 className="text-[20px] font-semibold" style={{ fontFamily: "Manrope, sans-serif" }}>Welcome, {name}</h1>
-      <p className="text-[13.5px]">Your Spire Analytics account is ready. Your own paper-trading bot is being set up:</p>
-      <ol className="list-decimal pl-5 text-[13.5px] flex flex-col gap-1.5">
-        <li><b>Connect your Alpaca paper account</b>: you'll sign in on Alpaca's own page and allow the app to trade your
-          paper account only. Your Alpaca password never comes here.</li>
-        <li><b>Choose your setup</b>: Careful, Balanced or Growth, each with its expected return and worst drop.</li>
-        <li><b>Start</b>: your bot then trades your paper account every day. Paper only, no real money.</li>
+      <p className="text-[13.5px] text-muted">Your own paper-trading bot, in three steps. Paper only: no real money is ever used.</p>
+      {notice && <p className={`text-[13px] ${notice.ok ? "text-up" : "text-down"}`}>{notice.text}</p>}
+      <ol className="flex flex-col gap-4">
+        {step(1, !!s?.connected, "Connect your Alpaca paper account", s?.connected ? (
+          <div className="text-[13px] flex flex-wrap items-center gap-2">
+            <span>Connected: paper account ···{s.account_tail || "?"} ({s.method === "oauth" ? "through Alpaca" : "with your paper keys"}).</span>
+            <button className="btn" onClick={() => setAskOff(true)}>Disconnect</button>
+          </div>) : (
+          <div className="flex flex-col gap-2 text-[13px]">
+            {s?.oauth_available && (<>
+              <span>You sign in on Alpaca's own page and allow this app to trade <b>one paper account</b>. Your Alpaca password never comes here.</span>
+              <div><a className="btn btn-primary" href="/api/alpaca/connect"><i className="bi bi-link-45deg" aria-hidden="true" /> Connect with Alpaca</a></div>
+            </>)}
+            <details open={!s?.oauth_available} className="text-[12.5px]">
+              <summary className="cursor-pointer text-muted">{s?.oauth_available ? "Or use your paper API keys" : "Use your paper API keys"}</summary>
+              <p className="text-muted mt-1">Alpaca dashboard → switch to <b>Paper Trading</b> → API Keys → Generate. The key id starts with PK.
+                They are tested on Alpaca's paper service and kept encrypted.</p>
+              <div className="flex flex-col gap-2 mt-2 max-w-[420px]">
+                <input className="input" placeholder="Key id (PK…)" autoComplete="off" spellCheck={false} value={keyId} onChange={(e) => setKeyId(e.target.value)} />
+                <input className="input" placeholder="Secret key" type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                <div><button className="btn" disabled={!keyId || !secret || keys.isPending} onClick={() => keys.mutate()}>Connect with keys</button></div>
+                <ErrorBox error={keys.error} />
+              </div>
+            </details>
+          </div>))}
+        {step(2, false, "Choose your setup", <span className="text-[13px] text-muted">Careful, Balanced or Growth, each with its expected return and worst drop. Appears here next.</span>)}
+        {step(3, false, "Start", <span className="text-[13px] text-muted">Your bot then trades your paper account every day; you follow it here and in the phone app.</span>)}
       </ol>
-      <p className="text-[12.5px] text-muted">These steps appear here as soon as they are switched on. You can install the app on your phone from the header.</p>
+      <ErrorBox error={st.error ?? off.error} />
+      {askOff && (
+        <Confirm title="Disconnect your Alpaca paper account?" confirmLabel="Disconnect" danger busy={off.isPending}
+          onCancel={() => setAskOff(false)} onConfirm={() => off.mutate()}>
+          This app forgets its permission for your paper account. Nothing in your Alpaca account changes. To also remove the
+          app on Alpaca's side, open Alpaca's dashboard and revoke it there.
+        </Confirm>)}
     </div>
   );
 }

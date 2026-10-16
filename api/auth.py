@@ -33,11 +33,13 @@ SHORT_S, LONG_S = 12 * 3600, 30 * 86400
 MAX_FAILS, FAIL_WINDOW_S, LOCK_S = 5, 900, 900
 ITERATIONS = 600_000
 OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/api/signup", "/health", "/favicon.ico",
+              "/api/alpaca/callback",                          # Alpaca's return trip: tied to the user by a one-time state
               "/manifest.webmanifest", "/sw.js")                # the phone app's description and helper: no data
 OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code only, no data): the login page needs its own
 
 # what an invited user may reach before their own account is connected: their identity, sign-out, the app's shell
 USER_API = ("/api/me", "/api/logout", "/api/health")
+USER_PREFIXES = ("/api/alpaca/",)               # their own Alpaca connection
 
 _fails: Dict[str, deque] = defaultdict(deque)
 _locked: Dict[str, float] = {}
@@ -191,7 +193,7 @@ class AuthMiddleware:
         name = session_user(cookie_from_header(headers.get("cookie")))
         path = scope.get("path", "")
         if name and (role_of(name) == "admin" or not path.startswith(("/api/", "/ws/", "/reports/", "/docs/"))
-                     or path in USER_API):
+                     or path in USER_API or path.startswith(USER_PREFIXES)):
             return await self.app(scope, receive, send)
         if name:                                        # an invited user: nothing of the admin's account
             if scope["type"] == "websocket":
