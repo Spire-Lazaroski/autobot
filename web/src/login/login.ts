@@ -125,19 +125,31 @@ function form() {
   const f = document.getElementById("login") as HTMLFormElement;
   const err = document.getElementById("error") as HTMLParagraphElement;
   const go = document.getElementById("go") as HTMLButtonElement;
+  const invite = new URLSearchParams(window.location.search).get("invite");
+  const val = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
+  if (invite) {                       // an invite link: create the account instead of signing in
+    (f.querySelector("h1") as HTMLElement).textContent = "Create your account";
+    go.textContent = "Create account";
+    (document.getElementById("again-row") as HTMLElement).hidden = false;
+    (document.getElementById("hint") as HTMLElement).hidden = false;
+    (document.getElementById("password") as HTMLInputElement).autocomplete = "new-password";
+  }
   (document.getElementById("user") as HTMLInputElement).focus();
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
     err.hidden = true;
+    if (invite && val("password") !== val("password2")) {
+      err.textContent = "The two passwords don't match.";
+      err.hidden = false;
+      return;
+    }
     go.disabled = true;
     try {
-      const res = await fetch("/api/login", {
+      const remember = (document.getElementById("remember") as HTMLInputElement).checked;
+      const res = await fetch(invite ? "/api/signup" : "/api/login", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
-        body: JSON.stringify({
-          user: (document.getElementById("user") as HTMLInputElement).value,
-          password: (document.getElementById("password") as HTMLInputElement).value,
-          remember: (document.getElementById("remember") as HTMLInputElement).checked,
-        }),
+        body: JSON.stringify(invite ? { invite, user: val("user"), password: val("password"), remember }
+          : { user: val("user"), password: val("password"), remember }),
       });
       if (res.ok) { window.location.replace("/"); return; }
       const body = await res.json().catch(() => ({}));
@@ -146,6 +158,7 @@ function form() {
       err.textContent = "No connection to the lab.";
     }
     (document.getElementById("password") as HTMLInputElement).value = "";
+    (document.getElementById("password2") as HTMLInputElement).value = "";
     err.hidden = false;
     go.disabled = false;
   });

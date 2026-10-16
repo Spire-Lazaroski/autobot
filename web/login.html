@@ -27,6 +27,8 @@
         <h1>Sign in to the lab</h1>
         <label>User name<input id="user" name="username" autocomplete="username" required /></label>
         <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required /></label>
+        <label id="again-row" hidden>Password again<input id="password2" type="password" autocomplete="new-password" /></label>
+        <p class="hint" id="hint" hidden>Your invite is valid for 7 days. User name: lower-case letters, digits, "." "_" or "-". Password: at least 12 characters.</p>
         <label class="remember"><input id="remember" type="checkbox" /> Keep me signed in on this device (30 days)</label>
         <button type="submit" id="go">Sign in</button>
         <p class="error" id="error" role="alert" hidden></p>

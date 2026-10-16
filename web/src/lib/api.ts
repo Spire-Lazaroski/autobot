@@ -129,6 +129,13 @@ export async function api<T>(path: string, body?: unknown, method?: string): Pro
   return res.json() as Promise<T>;
 }
 
+export interface Me { user: string | null; role: "admin" | "user" | null; login_required: boolean }
+
+/** Who is signed in: "admin" (the lab's owner, or the PC without a login) or an invited "user". */
+export function useMe() {
+  return useQuery({ queryKey: ["me"], queryFn: () => api<Me>("/me"), staleTime: 300_000 });
+}
+
 export function useStrategies() {
   return useQuery({ queryKey: ["strategies"], queryFn: () => api<StrategyInfo[]>("/strategies"), staleTime: Infinity });
 }

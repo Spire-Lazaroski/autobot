@@ -118,15 +118,109 @@ def login(req: LoginReq, request: Request, response: Response):
         raise HTTPException(429, f"Too many wrong passwords. Try again in {int(wait // 60) + 1} minutes.")
     if not auth.configured():
         raise HTTPException(503, "No password is set for this lab yet (LAB_PASSWORD_HASH).")
-    ok_user = hmac_eq(req.user.strip(), auth.user())
-    if not (auth.check_password(req.password, auth.password_hash()) and ok_user):
+    from . import users
+    name = req.user.strip()
+    if hmac_eq(name, auth.user()):
+        ok = auth.check_password(req.password, auth.password_hash())
+    else:
+        u = users.get(name)
+        ok = bool(u and not u["disabled"] and auth.check_password(req.password, u["pw_hash"]))
+        name = u["name"] if u else name
+    if not ok:
         auth.record_fail(addr)
         raise HTTPException(401, "Wrong user name or password.")
     auth.clear_fails(addr)
-    token, ttl = auth.make_session(auth.user(), req.remember)
+    if auth.role_of(name) == "user":
+        users.touch_login(name)
+    _set_session(response, request, name, req.remember)
+    return {"ok": True, "user": name, "role": auth.role_of(name)}
+
+
+def _set_session(response: Response, request: Request, name: str, remember: bool):
+    from . import auth
+    token, ttl = auth.make_session(name, remember)
     https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
     response.set_cookie(auth.COOKIE, token, max_age=ttl, httponly=True, samesite="strict", secure=https, path="/")
-    return {"ok": True, "user": auth.user()}
+
+
+class SignupReq(BaseModel):
+    invite: str
+    user: str
+    password: str
+    remember: bool = False
+
+
+@app.post("/api/signup")
+def signup(req: SignupReq, request: Request, response: Response):
+    """Use an invite link: choose a user name and password (at least 12 characters)."""
+    from . import auth, users
+    addr = auth.client_addr({k.lower(): v for k, v in request.headers.items()}, request.client.host if request.client else None)
+    wait = auth.locked_for(addr)
+    if wait:
+        raise HTTPException(429, f"Too many tries. Try again in {int(wait // 60) + 1} minutes.")
+    if not users.invite_ok(req.invite):
+        auth.record_fail(addr)
+        raise HTTPException(400, "This invite link is not valid any more. Ask for a new one.")
+    if len(req.password) < 12:
+        raise HTTPException(400, "Choose a password of at least 12 characters.")
+    why = users.sign_up(req.invite, req.user, auth.make_hash(req.password), auth.user())
+    if why:
+        raise HTTPException(400, why)
+    name = req.user.strip().lower()
+    users.touch_login(name)
+    _set_session(response, request, name, req.remember)
+    return {"ok": True, "user": name, "role": "user"}
+
+
+def _admin(request: Request) -> str:
+    """The admin's name (the middleware already refuses invited users; on the PC without a login: 'local')."""
+    from . import auth
+    if not auth.required():
+        return "local"
+    name = auth.session_user(request.cookies.get(auth.COOKIE))
+    if auth.role_of(name or "") != "admin":
+        raise HTTPException(403, "Admins only.")
+    return name
+
+
+class InviteReq(BaseModel):
+    note: str = ""
+
+
+@app.get("/api/admin/users")
+def admin_users(request: Request):
+    from . import users
+    _admin(request)
+    return {"users": users.list_users(), "invites": users.list_invites(), "invite_days": users.INVITE_DAYS}
+
+
+@app.post("/api/admin/invites")
+def admin_invite(req: InviteReq, request: Request):
+    from . import users
+    inv = users.create_invite(req.note, _admin(request))
+    return {"ok": True, **inv}
+
+
+@app.delete("/api/admin/invites/{invite_id}")
+def admin_revoke(invite_id: int, request: Request):
+    from . import users
+    _admin(request)
+    if not users.revoke_invite(invite_id):
+        raise HTTPException(404, "No open invite with that number.")
+    return {"ok": True}
+
+
+class DisableReq(BaseModel):
+    disabled: bool
+
+
+@app.post("/api/admin/users/{name}/disable")
+def admin_disable(name: str, req: DisableReq, request: Request):
+    from . import users
+    _admin(request)
+    if not users.set_disabled(name, req.disabled):
+        raise HTTPException(404, "No such user.")
+    return {"ok": True}
 
 
 @app.post("/api/logout")
@@ -139,7 +233,9 @@ def logout(response: Response):
 @app.get("/api/me")
 def me(request: Request):
     from . import auth
-    return {"user": auth.session_user(request.cookies.get(auth.COOKIE)), "login_required": auth.required()}
+    name = auth.session_user(request.cookies.get(auth.COOKIE))
+    role = auth.role_of(name) if name else ("admin" if not auth.required() else None)   # the PC without a login: its owner
+    return {"user": name, "role": role, "login_required": auth.required()}
 
 
 @app.get("/login")

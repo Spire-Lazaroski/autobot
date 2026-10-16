@@ -40,6 +40,8 @@ def test_service_worker_never_keeps_account_data():
 
 
 def test_app_files_load_without_a_session(monkeypatch, tmp_path):
+    from api import users
+    monkeypatch.setattr(users, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(auth, "LOGS", tmp_path)
     monkeypatch.setattr(auth, "_key", None)
     monkeypatch.setenv("AUTH_REQUIRED", "1")

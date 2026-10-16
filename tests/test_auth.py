@@ -9,7 +9,9 @@ from api import auth
 
 @pytest.fixture
 def server(monkeypatch, tmp_path):
+    from api import users
     monkeypatch.setattr(auth, "LOGS", tmp_path)
+    monkeypatch.setattr(users, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(auth, "_key", None)
     monkeypatch.setenv("AUTH_REQUIRED", "1")
     monkeypatch.setenv("LAB_USER", "spire")
