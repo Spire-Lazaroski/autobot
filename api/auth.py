@@ -34,6 +34,7 @@ MAX_FAILS, FAIL_WINDOW_S, LOCK_S = 5, 900, 900
 ITERATIONS = 600_000
 OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/api/signup", "/health", "/favicon.ico",
               "/api/alpaca/callback",                          # Alpaca's return trip: tied to the user by a one-time state
+              "/terms", "/privacy", "/terms.html", "/privacy.html", "/legal.css",   # public: Terms of Use, Privacy Policy
               "/manifest.webmanifest", "/sw.js")                # the phone app's description and helper: no data
 OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code only, no data): the login page needs its own
 

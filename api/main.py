@@ -250,6 +250,26 @@ def login_page():
     return HTMLResponse("<p>Build the web app first (cd web && npm run build), or open the lab through Vite.</p>")
 
 
+@app.get("/terms")
+def terms_page():
+    """Terms of Use (public; linked from the Alpaca Connect app registration)."""
+    return _public_page("terms.html")
+
+
+@app.get("/privacy")
+def privacy_page():
+    """Privacy Policy (public)."""
+    return _public_page("privacy.html")
+
+
+def _public_page(name: str):
+    from fastapi.responses import FileResponse
+    for base in (CONFIG_PATH.parent / "web" / "dist", CONFIG_PATH.parent / "web" / "public"):
+        if (base / name).exists():
+            return FileResponse(base / name)
+    raise HTTPException(404, "not found")
+
+
 def hmac_eq(a: str, b: str) -> bool:
     import hmac
     return hmac.compare_digest(a.encode(), b.encode())

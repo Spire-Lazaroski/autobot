@@ -51,3 +51,18 @@ def test_app_files_load_without_a_session(monkeypatch, tmp_path):
     assert not auth.is_open("/api/live/snapshot") and not auth.is_open("/reports/x.html")
     from api.main import app
     assert TestClient(app).get("/api/strategies").status_code == 401
+
+
+def test_terms_and_privacy_are_public(monkeypatch, tmp_path):
+    from api import users
+    monkeypatch.setattr(users, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(auth, "LOGS", tmp_path)
+    monkeypatch.setattr(auth, "_key", None)
+    monkeypatch.setenv("AUTH_REQUIRED", "1")
+    monkeypatch.setenv("LAB_PASSWORD_HASH", auth.make_hash("a long test password"))
+    from api.main import app
+    c = TestClient(app)
+    for path, words in (("/terms", "Terms of Use"), ("/privacy", "Privacy Policy")):
+        r = c.get(path)
+        assert r.status_code == 200 and words in r.text and "paper" in r.text.lower(), path
+    assert c.get("/legal.css").status_code in (200, 404)        # served from the build on the server
