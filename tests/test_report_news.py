@@ -120,3 +120,11 @@ def test_collector_warning_counts_backfilled_stories(tmp_path, monkeypatch):
 
 def test_headline_html_codes_are_decoded():
     assert rn._cut("Tesla Bears Retreat: &#39;Don&#39;t Bet Against Musk&#39; &amp; more") == "Tesla Bears Retreat: 'Don't Bet Against Musk' & more"
+
+
+def test_a_day_without_news_still_makes_the_report(db):
+    """A new server: the news archive has nothing for the day. The report must still be written."""
+    a, b = pd.Timestamp("2026-10-16 04:00", tz="UTC"), pd.Timestamp("2026-10-17 04:00", tz="UTC")
+    st = rn.load(["AAPL", "SPY"], a, b)
+    assert st.empty and "t_info" in st.columns
+    rn.collect(["AAPL", "SPY"], a, b, "live")                    # used to fail: no attribute 't_info'
