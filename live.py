@@ -65,9 +65,12 @@ from autobot.liveconfig import bot_state, release_lock, validate_live, warmup_da
 from autobot.strategies import STRATEGIES
 
 ROOT = Path(__file__).resolve().parent
-LOGS = ROOT / "logs"
-LOGS.mkdir(exist_ok=True)
-STOP_FILE = ROOT / "STOP"
+# the bot's home: the repo for the lab's own bot; data/users/<name> for an invited user's bot (AUTOBOT_HOME, set by
+# api/userbots.py together with that user's own paper keys). Its config.yaml, logs/ and STOP file live there.
+HOME = Path(os.environ.get("AUTOBOT_HOME") or ROOT)
+LOGS = HOME / "logs"
+LOGS.mkdir(parents=True, exist_ok=True)
+STOP_FILE = HOME / "STOP"
 
 log = logging.getLogger("autobot")
 EXIT_OK, EXIT_STALLED, EXIT_ALREADY_RUNNING = 0, 3, 4
@@ -830,7 +833,7 @@ class Bot:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(ROOT / "config.yaml"))
+    ap.add_argument("--config", default=str(HOME / "config.yaml"))
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--flatten", action="store_true")
     a = ap.parse_args()

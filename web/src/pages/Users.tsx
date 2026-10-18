@@ -3,8 +3,10 @@ import { useState } from "react";
 import { Confirm } from "../components/Confirm";
 import { ErrorBox, Panel } from "../components/ui";
 import { api } from "../lib/api";
+import { fmt, signed } from "../lib/format";
 
-interface User { name: string; created: number; invited_by: string | null; note: string | null; disabled: number; last_login: number | null }
+interface User { name: string; created: number; invited_by: string | null; note: string | null; disabled: number; last_login: number | null;
+  setup?: string | null; jobs_on?: boolean | null; connected?: boolean; bot_running?: boolean }
 interface Invite { id: number; note: string | null; created: number; expires: number; used_by: string | null; used_at: number | null; state: string }
 interface Resp { users: User[]; invites: Invite[]; invite_days: number }
 
@@ -56,11 +58,14 @@ export function Users() {
         {d && d.users.length === 0 && <p className="text-[12.5px] text-muted">Nobody has joined yet.</p>}
         {d && d.users.length > 0 && (
           <table className="w-full text-[12.5px]">
-            <thead><tr className="text-muted text-[10.5px] uppercase text-left"><th>User</th><th>Note</th><th>Joined</th><th>Last sign-in</th><th>Status</th><th /></tr></thead>
+            <thead><tr className="text-muted text-[10.5px] uppercase text-left"><th>User</th><th>Note</th><th>Joined</th><th>Last sign-in</th><th>Alpaca</th><th>Setup</th><th>Bot</th><th>Status</th><th /></tr></thead>
             <tbody>{d.users.map((u) => (
               <tr key={u.name} className="border-t border-line/60">
                 <td className="num font-semibold py-1">{u.name}</td><td className="text-muted">{u.note || "–"}</td>
                 <td>{day(u.created)}</td><td>{day(u.last_login)}</td>
+                <td>{u.connected ? "connected" : "–"}</td>
+                <td>{u.setup ? `${u.setup}${u.jobs_on ? " + jobs" : ""}` : "–"}</td>
+                <td className={u.bot_running ? "text-up" : "text-muted"}>{u.bot_running ? "running" : "stopped"}</td>
                 <td className={u.disabled ? "text-down" : "text-up"}>{u.disabled ? "switched off" : "active"}</td>
                 <td className="text-right"><button className="btn" onClick={() => (u.disabled ? toggle.mutate(u) : setAskOff(u))}>
                   {u.disabled ? "Switch on" : "Switch off"}</button></td>
@@ -107,7 +112,9 @@ export function Welcome({ name }: { name: string }) {
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
     back.get("alpaca") === "connected" ? { ok: true, text: "Your Alpaca paper account is connected." }
       : back.get("alpaca_error") ? { ok: false, text: back.get("alpaca_error")! } : null);
-  const refresh = () => qc.invalidateQueries({ queryKey: ["alpaca-status"] });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["alpaca-status"] }); qc.invalidateQueries({ queryKey: ["my-bot"] }); };
+  const my = useQuery({ queryKey: ["my-bot"], queryFn: () => api<MyBot>("/my/bot"), refetchInterval: 15_000 });
+  const refreshMy = () => qc.invalidateQueries({ queryKey: ["my-bot"] });
   const keys = useMutation({
     mutationFn: () => api("/alpaca/keys", { key_id: keyId, secret_key: secret }),
     onSuccess: () => { setKeyId(""); setSecret(""); setNotice({ ok: true, text: "Your Alpaca paper account is connected." }); refresh(); },
@@ -149,10 +156,11 @@ export function Welcome({ name }: { name: string }) {
               </div>
             </details>
           </div>))}
-        {step(2, false, "Choose your setup", <span className="text-[13px] text-muted">Careful, Balanced or Growth, each with its expected return and worst drop. Appears here next.</span>)}
-        {step(3, false, "Start", <span className="text-[13px] text-muted">Your bot then trades your paper account every day; you follow it here and in the phone app.</span>)}
+        {step(2, !!my.data?.settings, "Choose your setup", <MySetup data={my.data} onSaved={refreshMy} />)}
+        {step(3, !!my.data?.bot.running, "Start", <MyStartStop data={my.data} onDone={refreshMy} />)}
       </ol>
-      <ErrorBox error={st.error ?? off.error} />
+      {my.data?.connected && <MyAccount data={my.data} />}
+      <ErrorBox error={st.error ?? off.error ?? my.error} />
       {askOff && (
         <Confirm title="Disconnect your Alpaca paper account?" confirmLabel="Disconnect" danger busy={off.isPending}
           onCancel={() => setAskOff(false)} onConfirm={() => off.mutate()}>
@@ -172,6 +180,136 @@ function AlpacaDisclosure() {
       information and authorization to place transactions in your account at your direction. Alpaca does not warrant or
       guarantee that Spire Analytics will work as advertised or expected. Before authorizing,{" "}
       <a className="underline" href="/terms" target="_blank" rel="noopener">learn more about Spire Analytics</a>.
+    </div>
+  );
+}
+
+interface PresetInfo { label: string; about: string; core: { allocation_pct: number; min_pct: number; max_pct: number }; rotation: { allocation_pct: number } }
+interface MyBot {
+  user: string; connected: boolean;
+  settings: null | { setup: string; jobs_on: boolean; want_running: boolean };
+  presets: Record<string, PresetInfo>;
+  study: null | { samples: Record<string, Record<string, { "yearly_%": number; "worst_drop_%": number }>> };
+  bot: { running: boolean; unresponsive: boolean; stop_requested?: boolean; heartbeat_age_s?: number };
+  account: null | { ok: boolean; equity?: number; cash?: number; day_pnl?: number; day_pnl_pct?: number; error?: string;
+    positions?: { symbol: string; qty: number; market_value: number; unrealized_pl: number; unrealized_plpc: number }[] };
+  trades: Record<string, string>[]; log: string[];
+}
+
+/** Step 2: the three setups (the same as the lab's, autobot/presets.py) and trading jobs on or off. */
+function MySetup({ data, onSaved }: { data?: MyBot; onSaved: () => void }) {
+  const [pick, setPick] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<boolean | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (b: { setup: string; jobs_on: boolean }) => api<{ message: string }>("/my/setup", b),
+    onSuccess: (r) => { setMsg(r.message); onSaved(); },
+  });
+  if (!data) return null;
+  if (!data.connected) return <span className="text-[13px] text-muted">After step 1.</span>;
+  const cur = pick ?? data.settings?.setup ?? "balanced";
+  const jobsOn = jobs ?? data.settings?.jobs_on ?? false;
+  const samples = Object.entries(data.study?.samples ?? {});
+  const changed = !data.settings || cur !== data.settings.setup || jobsOn !== data.settings.jobs_on;
+  return (
+    <div className="flex flex-col gap-2 text-[13px]">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {Object.entries(data.presets).map(([k, p]) => (
+          <button key={k} onClick={() => setPick(k)}
+            className={`text-left rounded-lg border p-2.5 flex flex-col gap-1 ${cur === k ? "border-accent bg-[rgb(212_160_23/0.08)]" : "border-line"}`}>
+            <b>{p.label}{data.settings?.setup === k ? " · in use" : ""}</b>
+            <span className="text-[12px] text-muted">{p.about}</span>
+            {samples.map(([label, rows]) => rows[k] && (
+              <span key={label} className="num text-[11.5px]">{label.replace(/^.* (\d{4}-\d{4})$/, "$1")}: {fmt(rows[k]["yearly_%"], 1)}%/yr,
+                worst drop {fmt(rows[k]["worst_drop_%"], 0)}%</span>))}
+          </button>))}
+      </div>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={jobsOn} onChange={(e) => setJobs(e.target.checked)} />
+        Also run the short-term trading jobs (they buy and sell during the day and close by 15:55 New York; our tests found
+        no edge after costs, so they are off by default)
+      </label>
+      <div className="flex items-center gap-2">
+        <button className="btn btn-primary" disabled={!changed || save.isPending} onClick={() => save.mutate({ setup: cur, jobs_on: jobsOn })}>
+          {data.settings ? "Save changes" : "Use this setup"}</button>
+        {msg && <span className="text-up text-[12.5px]">{msg}</span>}
+      </div>
+      <p className="text-[11.5px] text-muted">Past results from backtests, no promise of future ones. Paper trading only.</p>
+      <ErrorBox error={save.error} />
+    </div>
+  );
+}
+
+/** Step 3: the user's own Start and Stop. */
+function MyStartStop({ data, onDone }: { data?: MyBot; onDone: () => void }) {
+  const [ask, setAsk] = useState(false);
+  const [sellAll, setSellAll] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const start = useMutation({ mutationFn: () => api<{ message: string }>("/my/start", {}), onSuccess: (r) => { setMsg(r.message); onDone(); } });
+  const stop = useMutation({
+    mutationFn: () => api<{ message: string }>("/my/stop", { confirm: true, include_core: sellAll }),
+    onSuccess: (r) => { setMsg(r.message); onDone(); }, onSettled: () => { setAsk(false); setSellAll(false); },
+  });
+  if (!data) return null;
+  if (!data.connected || !data.settings) return <span className="text-[13px] text-muted">After steps 1 and 2.</span>;
+  const b = data.bot;
+  return (
+    <div className="flex flex-col gap-2 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-1.5">
+          <span className={`h-2.5 w-2.5 rounded-full ${b.running ? "bg-up animate-pulse" : "bg-dim"}`} />
+          <b>{b.running ? (b.stop_requested ? "stopping…" : "your bot is running") : "your bot is stopped"}</b></span>
+        <button className="btn btn-primary" disabled={b.running || start.isPending} onClick={() => start.mutate()}>▶ Start</button>
+        <button className="btn btn-danger" disabled={!b.running || !!b.stop_requested || stop.isPending} onClick={() => setAsk(true)}>⏹ Stop</button>
+      </div>
+      <span className="text-[12px] text-muted">It trades while the US market is open (15:30-22:00 your time) and keeps running day after day.</span>
+      {msg && <span className="text-up text-[12.5px]">{msg}</span>}
+      <ErrorBox error={start.error ?? stop.error} />
+      {ask && (
+        <Confirm title="Stop your bot?" confirmLabel="Stop" danger busy={stop.isPending} onCancel={() => setAsk(false)} onConfirm={() => stop.mutate()}>
+          Your bot sells the trading jobs' positions and stops. The long-term holdings (the S&amp;P 500 fund and the sector
+          funds) are kept unless you tick the box.
+          <label className="flex items-center gap-2 mt-3 text-fg">
+            <input type="checkbox" checked={sellAll} onChange={(e) => setSellAll(e.target.checked)} /> Also sell the long-term holdings
+          </label>
+        </Confirm>)}
+    </div>
+  );
+}
+
+/** The user's own paper account: value, today's change, holdings, the bot's latest orders. */
+function MyAccount({ data }: { data: MyBot }) {
+  const a = data.account;
+  return (
+    <div className="flex flex-col gap-3 border-t border-line pt-4">
+      <h2 className="text-[15px] font-semibold">Your paper account</h2>
+      {a && !a.ok && <p className="text-[12.5px] text-down">The account could not be read just now{a.error ? ` (${a.error})` : ""}.</p>}
+      {a?.ok && (<>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-line p-2.5"><div className="text-[10.5px] uppercase text-muted">Value</div>
+            <div className="num text-[18px] font-semibold">${fmt(a.equity, 0)}</div></div>
+          <div className="rounded-lg border border-line p-2.5"><div className="text-[10.5px] uppercase text-muted">Today</div>
+            <div className={`num text-[18px] font-semibold ${(a.day_pnl ?? 0) < 0 ? "text-down" : "text-up"}`}>{signed(a.day_pnl ?? 0)}</div>
+            <div className="num text-[11px] text-muted">{signed(a.day_pnl_pct ?? 0, 3)}%</div></div>
+          <div className="rounded-lg border border-line p-2.5"><div className="text-[10.5px] uppercase text-muted">Cash</div>
+            <div className="num text-[18px] font-semibold">${fmt(a.cash, 0)}</div></div>
+        </div>
+        {a.positions && a.positions.length > 0 ? (
+          <table className="w-full text-[12.5px]">
+            <thead><tr className="text-muted text-[10.5px] uppercase text-left"><th>Holding</th><th className="text-right">Qty</th>
+              <th className="text-right">Value</th><th className="text-right">P&amp;L</th></tr></thead>
+            <tbody>{a.positions.map((p) => (
+              <tr key={p.symbol} className="border-t border-line/60"><td className="num font-semibold py-1">{p.symbol}</td>
+                <td className="num text-right">{fmt(p.qty, 0)}</td><td className="num text-right">${fmt(p.market_value, 0)}</td>
+                <td className={`num text-right ${p.unrealized_pl < 0 ? "text-down" : "text-up"}`}>{signed(p.unrealized_plpc, 2)}%</td></tr>))}</tbody>
+          </table>) : <p className="text-[12.5px] text-muted">No holdings yet: the bot buys at the next market open after you start it.</p>}
+      </>)}
+      {data.trades.length > 0 && (
+        <details className="text-[12.5px]"><summary className="cursor-pointer text-muted">Your bot's latest orders ({data.trades.length})</summary>
+          <table className="w-full mt-1"><tbody>{data.trades.map((t, i) => (
+            <tr key={i} className="border-t border-line/60"><td className="num py-0.5 whitespace-nowrap">{(t.time ?? "").slice(0, 16).replace("T", " ")}</td>
+              <td className="num">{t.side} {t.qty} {t.symbol}</td><td className="text-muted">{t.reason}</td></tr>))}</tbody></table>
+        </details>)}
     </div>
   );
 }
