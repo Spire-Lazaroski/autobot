@@ -40,7 +40,7 @@ OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code
 
 # what an invited user may reach before their own account is connected: their identity, sign-out, the app's shell
 USER_API = ("/api/me", "/api/logout", "/api/health")
-USER_PREFIXES = ("/api/alpaca/",)               # their own Alpaca connection
+USER_PREFIXES = ("/api/alpaca/", "/api/my/")    # their own Alpaca connection and their own bot
 
 _fails: Dict[str, deque] = defaultdict(deque)
 _locked: Dict[str, float] = {}

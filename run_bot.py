@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent
-LOGS = ROOT / "logs"
+LOGS = Path(os.environ.get("AUTOBOT_HOME") or ROOT) / "logs"   # a user's bot: its own home (api/userbots.py)
 BOT_LOG = LOGS / "bot.log"
 OUT_LOG = LOGS / "bot_stdout.log"
 LOCK = LOGS / "run_bot.pid"

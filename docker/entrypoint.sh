@@ -30,6 +30,7 @@ rm -f /app/STOP
 # lock can point at an unrelated live process and make the new supervisor think one is already running (the news
 # collector stayed off for days that way). They have no heartbeat, unlike the bot's own lock, which is kept.
 rm -f /app/logs/run_news.pid /app/logs/run_bot.pid
+rm -f /app/data/users/*/logs/run_bot.pid /app/data/users/*/STOP 2>/dev/null || true   # invited users' bots: the same
 
 if [ -z "${ALPACA_API_KEY:-}" ] || [ -z "${ALPACA_SECRET_KEY:-}" ]; then
   echo "ALPACA_API_KEY / ALPACA_SECRET_KEY are not set: the lab starts, the bot and the news collector do not."
@@ -55,6 +56,8 @@ bot_up() {
 
 stop() {
   trap - TERM INT
+  python -m api.userbots stop-all 2>/dev/null &   # invited users' bots stop the same way (they come back after the update)
+  USERS_STOP=$!
   if bot_up; then
     echo "stopping the bot through the STOP file (the trading jobs are closed, the long-term holdings kept)"
     touch /app/STOP

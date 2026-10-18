@@ -21,8 +21,9 @@ from .data import TIMEFRAMES, synthetic_bars
 from .strategies import STRATEGIES, get_signal
 
 ROOT = Path(__file__).resolve().parent.parent
-PID_FILE = ROOT / "logs" / "bot.pid"
-STOP_FILE = ROOT / "STOP"
+HOME = Path(os.environ.get("AUTOBOT_HOME") or ROOT)   # see live.py: a user's bot runs in its own home
+PID_FILE = HOME / "logs" / "bot.pid"
+STOP_FILE = HOME / "STOP"
 HEARTBEAT_STALE_S = 90
 
 _probe = None
@@ -142,18 +143,20 @@ def pid_alive(pid: int) -> bool:
         return True
 
 
-def read_lock() -> Optional[Dict]:
+def read_lock(pid_file: Optional[Path] = None) -> Optional[Dict]:
     try:
-        return json.loads(PID_FILE.read_text())
+        return json.loads((pid_file or PID_FILE).read_text())
     except (OSError, ValueError):
         return None
 
 
-def bot_state() -> Dict:
+def bot_state(home: Optional[Path] = None) -> Dict:
     """running = pid alive AND heartbeat fresh.
     unresponsive = pid alive but heartbeat stale: maybe a stuck bot, maybe a reused pid.
-    Never start a second bot in either case (two bots would double-trade)."""
-    lock = read_lock()
+    Never start a second bot in either case (two bots would double-trade).
+    `home`: another bot's home (an invited user's bot, api/userbots.py); default this process's own."""
+    stop_file = (home / "STOP") if home else STOP_FILE
+    lock = read_lock(home / "logs" / "bot.pid" if home else None)
     if not lock:
         return {"running": False, "unresponsive": False}
     age = time.time() - float(lock.get("heartbeat", 0))
@@ -161,7 +164,7 @@ def bot_state() -> Dict:
     fresh = age < HEARTBEAT_STALE_S
     return {"running": alive and fresh, "unresponsive": alive and not fresh, "pid": lock.get("pid"),
             "started": lock.get("started"), "heartbeat_age_s": round(age, 1), "process_alive": alive,
-            "stop_requested": STOP_FILE.exists()}
+            "stop_requested": stop_file.exists()}
 
 
 def write_lock(started: float) -> bool:

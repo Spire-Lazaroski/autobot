@@ -27,6 +27,7 @@ from autobot.liveconfig import validate_live
 
 from . import jobs
 from .connect import router as connect_router
+from .my import router as my_router
 from .live import router as live_router
 from .news import router as news_router
 from .recal import router as recal_router
@@ -43,11 +44,14 @@ app.include_router(reports_router)
 app.include_router(news_router)
 app.include_router(recal_router)
 app.include_router(connect_router)
+app.include_router(my_router)
 
 
 @app.on_event("startup")
 def _start_daily_report():
     start_scheduler()
+    from . import userbots
+    userbots.background()     # invited users' bots: resume the ones that were running, keep their configs in sync
 
 
 app.add_middleware(AuthMiddleware)   # the lab's own login (api/auth.py); open on the PC unless a password is set
@@ -192,8 +196,14 @@ class InviteReq(BaseModel):
 @app.get("/api/admin/users")
 def admin_users(request: Request):
     from . import users
+    from . import credentials, userbots
     _admin(request)
-    return {"users": users.list_users(), "invites": users.list_invites(), "invite_days": users.INVITE_DAYS}
+    rows = users.list_users()
+    for u in rows:
+        st = userbots.settings(u["name"]) or {}
+        u.update(setup=st.get("setup"), jobs_on=st.get("jobs_on"), connected=credentials.status(u["name"]).get("connected", False),
+                 bot_running=userbots.state(u["name"])["running"])
+    return {"users": rows, "invites": users.list_invites(), "invite_days": users.INVITE_DAYS}
 
 
 @app.post("/api/admin/invites")
@@ -219,9 +229,12 @@ class DisableReq(BaseModel):
 @app.post("/api/admin/users/{name}/disable")
 def admin_disable(name: str, req: DisableReq, request: Request):
     from . import users
+    from . import userbots
     _admin(request)
     if not users.set_disabled(name, req.disabled):
         raise HTTPException(404, "No such user.")
+    if req.disabled and userbots.state(name)["running"]:
+        userbots.stop(name)          # a switched-off user's bot stops too (job positions closed, holdings kept)
     return {"ok": True}
 
 
