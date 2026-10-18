@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from autobot.data import TIMEFRAMES, _download, _keys, is_crypto, with_timeout
@@ -69,11 +69,11 @@ def _order_json(o) -> Dict:
             "status": _enum(o.status), "submitted_at": _ts(o.submitted_at), "filled_at": _ts(o.filled_at)}
 
 
-def _account() -> Dict:
+def _account(tc=None) -> Dict:
     try:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
-        tc = _client()
+        tc = tc or _client()
         a = tc.get_account()
         eq, last = _f(a.equity), _f(a.last_equity)
         positions = [{"symbol": p.symbol, "side": _enum(p.side), "qty": _f(p.qty), "avg_entry_price": _f(p.avg_entry_price),
@@ -100,8 +100,8 @@ def _read_json(path) -> Optional[Dict]:
         return None
 
 
-def _trades(limit=100) -> List[Dict]:
-    f = LOGS / "trades.csv"
+def _trades(limit=100, logs=None) -> List[Dict]:
+    f = (logs or LOGS) / "trades.csv"
     if not f.exists():
         return []
     with open(f, newline="") as fh:
@@ -109,8 +109,8 @@ def _trades(limit=100) -> List[Dict]:
     return rows[-limit:][::-1]
 
 
-def _log_tail(n=60) -> List[str]:
-    f = LOGS / "bot.log"
+def _log_tail(n=60, logs=None) -> List[str]:
+    f = (logs or LOGS) / "bot.log"
     if not f.exists():
         return []
     with open(f, "rb") as fh:
@@ -120,10 +120,10 @@ def _log_tail(n=60) -> List[str]:
     return lines[-n:]
 
 
-def _equity_today(max_lines: int = 3000) -> List[Dict]:
+def _equity_today(max_lines: int = 3000, logs=None) -> List[Dict]:
     """The latest trading day's rows of logs/equity.jsonl (written by the bot each tick while the market
     is open): time (unix s), equity, long-term holdings' value and today's P&L split."""
-    f = LOGS / "equity.jsonl"
+    f = (logs or LOGS) / "equity.jsonl"
     if not f.exists():
         return []
     with open(f, "rb") as fh:
@@ -192,41 +192,79 @@ def _jobs_vs_hold() -> Optional[Dict]:
     return _jvh["data"]
 
 
-def snapshot() -> Dict:
-    """Everything the Live page shows. Shared by all WebSocket clients and cached for a
-    moment, so several open tabs don't multiply Alpaca requests (3 per refresh)."""
+_snaps: Dict[str, Dict[str, Any]] = {}
+
+
+def _cfg_logs(v):
+    """config.yaml and logs/ of the account: an invited user's home, or this module's lab paths (as before)."""
+    return (v.cfg_path, v.logs) if v.is_user else (CONFIG_PATH, LOGS)
+
+
+def _forget(v=None):
+    """Drop a cached snapshot so the next push shows a change at once."""
+    from .viewer import LAB
     with _snap_lock:
-        if _snap["data"] is not None and time.time() - _snap["at"] < PUSH_SECONDS - 0.5:
-            return _snap["data"]
-    data = {"time": int(time.time()), "bot": bot_state(), "status": _read_json(LOGS / "status.json"),
-            "trades": _trades(), "log": _log_tail(), "log_entries": _log_entries(_log_tail(120)),
-            "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), "news": news_state(), "paused": _paused(),
-            **_account()}
+        _snaps.pop((v or LAB).key, None)
+
+
+def snapshot(v=None) -> Dict:
+    """Everything the Live page shows, for one account: the lab's own (default) or an invited user's
+    (api/viewer.py: their bot's home and their own paper keys). Cached a moment per account, so several open tabs
+    don't multiply Alpaca requests (3 per refresh)."""
+    from .viewer import LAB, trading_client
+    v = v or LAB
     with _snap_lock:
-        _snap.update(at=time.time(), data=data)
+        hit = _snaps.get(v.key)
+        if hit and time.time() - hit["at"] < PUSH_SECONDS - 0.5:
+            return hit["data"]
+    if v.is_user:
+        from . import userbots
+        try:
+            acct = _account(trading_client(v))
+        except RuntimeError as e:
+            acct = {"ok": False, "error": str(e), "positions": [], "orders": []}
+        data = {"time": int(time.time()), "bot": userbots.state(v.user), "status": _read_json(v.logs / "status.json"),
+                "trades": _trades(logs=v.logs), "log": _log_tail(logs=v.logs), "log_entries": _log_entries(_log_tail(120, v.logs)),
+                "equity_today": _equity_today(logs=v.logs), "jobs_vs_hold": None,
+                "news": {"running": True, "supervisor": True},      # the news collector is the lab's, not the user's to start
+                "paused": _paused(v.cfg_path), "viewer": "user", **acct}
+    else:
+        data = {"time": int(time.time()), "bot": bot_state(), "status": _read_json(LOGS / "status.json"),
+                "trades": _trades(), "log": _log_tail(), "log_entries": _log_entries(_log_tail(120)),
+                "equity_today": _equity_today(), "jobs_vs_hold": _jobs_vs_hold(), "news": news_state(), "paused": _paused(),
+                "viewer": "lab", **_account()}
+    with _snap_lock:
+        _snaps[v.key] = {"at": time.time(), "data": data}
     return data
 
 
 @router.get("/api/live/snapshot")
-def live_snapshot():
-    return snapshot()
+def live_snapshot(request: Request):
+    from .viewer import of
+    return snapshot(of(request))
 
 
 @router.websocket("/ws/live")
 async def live_ws(ws: WebSocket):
+    from . import auth
+    from .viewer import from_cookie
+    v = from_cookie(ws.cookies.get(auth.COOKIE))      # the signed-in account's own snapshot
     await ws.accept()
     try:
         while True:
-            await ws.send_text(json.dumps(await asyncio.to_thread(snapshot), default=str))
+            await ws.send_text(json.dumps(await asyncio.to_thread(snapshot, v), default=str))
             await asyncio.sleep(PUSH_SECONDS)
     except (WebSocketDisconnect, RuntimeError):
         pass
 
 
 @router.get("/api/live/candles")
-def live_candles(symbol: str, timeframe: Optional[str] = None, bars: int = 300):
-    """Recent bars for one symbol plus the paper account's actual fills in that window."""
-    cfg = yaml.safe_load(CONFIG_PATH.read_text())
+def live_candles(request: Request, symbol: str, timeframe: Optional[str] = None, bars: int = 300):
+    """Recent bars for one symbol plus the signed-in account's actual fills in that window."""
+    from .viewer import of, trading_client
+    v = of(request)
+    cfg_path, _ = _cfg_logs(v)
+    cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else yaml.safe_load(CONFIG_PATH.read_text())
     tf = timeframe or cfg["live"]["timeframe"]
     if tf not in TIMEFRAMES:
         raise HTTPException(422, f"timeframe must be one of {list(TIMEFRAMES)}")
@@ -242,7 +280,7 @@ def live_candles(symbol: str, timeframe: Optional[str] = None, bars: int = 300):
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
         start = df.index[0].to_pydatetime() if len(df) else None
-        orders = _client().get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=200, after=start,
+        orders = trading_client(v).get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=200, after=start,
                                                        symbols=[symbol]))
         step = pd.Timedelta(minutes=mins)
         for o in orders:
@@ -270,17 +308,18 @@ class ResumeReq(BaseModel):
     symbols: List[str]
 
 
-def _paused() -> List[str]:
+def _paused(cfg_path=None) -> List[str]:
     try:
-        return list((yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}).get("live", {}).get("paused") or [])
+        return list((yaml.safe_load((cfg_path or CONFIG_PATH).read_text(encoding="utf-8")) or {}).get("live", {}).get("paused") or [])
     except (OSError, ValueError):
         return []
 
 
-def _write_paused(paused: List[str]):
+def _write_paused(paused: List[str], cfg_path=None):
     """Rewrite live.paused in config.yaml (validated, atomic, through the server's symlink); the bot reads it at
-    its next bar."""
-    cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    its next bar. An invited user's config.yaml keeps it when it is re-synced (api/userbots.write_config)."""
+    cfg_path = cfg_path or CONFIG_PATH
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     live = cfg["live"]
     if paused:
         live["paused"] = sorted(set(paused))
@@ -289,7 +328,7 @@ def _write_paused(paused: List[str]):
     errs = validate_live(live)
     if errs:
         raise HTTPException(422, "; ".join(errs))
-    target = os.path.realpath(CONFIG_PATH)
+    target = os.path.realpath(cfg_path)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".yaml.tmp")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
@@ -297,7 +336,7 @@ def _write_paused(paused: List[str]):
 
 
 @router.post("/api/live/close")
-def live_close(req: CloseReq):
+def live_close(req: CloseReq, request: Request):
     """Close positions by hand (any of them, long-term holdings included) and pause those symbols, so the bot
     doesn't buy them back: no job trades them, the core isn't rebalanced, the rotation leaves the fund out, until
     Resume. The pause is written first; then a market order per position (paper). With the market closed the
@@ -307,9 +346,14 @@ def live_close(req: CloseReq):
     syms = sorted({s.strip().upper() for s in req.symbols if s.strip()})
     if not syms:
         raise HTTPException(400, "No symbols given.")
-    tc = _client()
+    from .viewer import of, trading_client
+    v = of(request)
+    if v.is_user and not v.cfg_path.exists():
+        raise HTTPException(400, "Choose your setup first.")
+    tc = trading_client(v)
+    cfg_path, logs = _cfg_logs(v)
     held = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
-    _write_paused(_paused() + syms)
+    _write_paused(_paused(cfg_path) + syms, cfg_path)
     results = []
     for s in syms:
         key = s.replace("/", "")
@@ -324,28 +368,32 @@ def live_close(req: CloseReq):
     try:
         from autobot.decisions import Recorder
         done = [r["symbol"] for r in results if r.get("qty")]
-        Recorder(LOGS / "decisions.jsonl").event(
+        logs.mkdir(parents=True, exist_ok=True)
+        Recorder(logs / "decisions.jsonl").event(
             "manual_close", f"Closed by hand and paused: {', '.join(done) if done else 'nothing held'}"
                             f"{'; paused without a position: ' + ', '.join(r['symbol'] for r in results if not r.get('qty')) if len(done) < len(results) else ''}.",
             symbols=syms)
     except Exception:  # noqa: BLE001  the record is for reports; the close itself already happened
         pass
-    _snap["data"] = None   # the next push shows it
+    _forget(v)   # the next push shows it
     failed = [f"{r['symbol']} ({r['error']})" for r in results if not r["ok"]]
     msg = (f"Sell orders sent for {', '.join(r['symbol'] for r in results if r.get('qty')) or 'nothing (no position)'}; "
            f"paused: {', '.join(syms)}. The bot leaves them alone until you press Resume."
            + (f" Not closed: {'; '.join(failed)}." if failed else ""))
-    return {"ok": not failed, "results": results, "paused": _paused(), "message": msg}
+    return {"ok": not failed, "results": results, "paused": _paused(cfg_path), "message": msg}
 
 
 @router.post("/api/live/resume")
-def live_resume(req: ResumeReq):
+def live_resume(req: ResumeReq, request: Request):
     """Hand symbols back to the bot: jobs trade them again from their next bar, the core rebalances at the next
     open, a rotation fund is bought again at the next monthly decision if it is still chosen."""
+    from .viewer import of
+    v = of(request)
+    cfg_path, _ = _cfg_logs(v)
     syms = {s.strip().upper() for s in req.symbols}
-    _write_paused([s for s in _paused() if s not in syms])
-    _snap["data"] = None
-    return {"ok": True, "paused": _paused(), "message": f"Resumed {', '.join(sorted(syms))}: the bot follows its rules for them again."}
+    _write_paused([s for s in _paused(cfg_path) if s not in syms], cfg_path)
+    _forget(v)
+    return {"ok": True, "paused": _paused(cfg_path), "message": f"Resumed {', '.join(sorted(syms))}: the bot follows its rules for them again."}
 
 
 class StopReq(BaseModel):
@@ -363,9 +411,20 @@ def news_state() -> Dict:
 
 
 @router.post("/api/live/start")
-def live_start():
+def live_start(request: Request):
     """The one Start: whatever is stopped starts, the bot under its supervisor (restarts after a crash, at most 3
-    times an hour) and the news collector under its own. Stop + flatten stays separate and stops the bot only."""
+    times an hour) and the news collector under its own. Stop + flatten stays separate and stops the bot only.
+    An invited user's Start starts their own bot only (api/userbots.py)."""
+    from .viewer import of
+    v = of(request)
+    if v.is_user:
+        from . import userbots
+        try:
+            pid = userbots.start(v.user)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        _forget(v)
+        return {"ok": True, "pid": pid, "message": "Your bot is starting. It acts a few seconds after each bar closes."}
     st = bot_state()
     if st["unresponsive"]:
         raise HTTPException(409, f"Bot process {st['pid']} is still alive but its heartbeat is "
@@ -398,9 +457,20 @@ def start_detached(script: str, out_name: str) -> int:
 
 
 @router.post("/api/live/stop")
-def live_stop(req: StopReq):
+def live_stop(req: StopReq, request: Request):
     if not req.confirm:
         raise HTTPException(400, "Stop closes every position. Send {\"confirm\": true}.")
+    from .viewer import of
+    v = of(request)
+    if v.is_user:
+        from . import userbots
+        s = userbots.state(v.user)
+        if not (s["running"] or s["unresponsive"]):
+            raise HTTPException(409, "Your bot isn't running, so there's nothing to stop.")
+        userbots.stop(v.user, req.include_core)
+        _forget(v)
+        return {"ok": True, "message": "Stop requested: your bot will close its positions"
+                                       + ("" if req.include_core else " except the long-term holdings") + " and stop."}
     st = bot_state()
     if not (st["running"] or st["unresponsive"]):
         raise HTTPException(409, "The bot isn't running, so there's nothing to stop.")

@@ -39,8 +39,15 @@ OPEN_PATHS = ("/login", "/login.html", "/api/login", "/api/logout", "/api/signup
 OPEN_PREFIXES = ("/assets/", "/icons/")                 # the built JS/CSS (code only, no data): the login page needs its own
 
 # what an invited user may reach before their own account is connected: their identity, sign-out, the app's shell
-USER_API = ("/api/me", "/api/logout", "/api/health")
-USER_PREFIXES = ("/api/alpaca/", "/api/my/")    # their own Alpaca connection and their own bot
+USER_API = ("/api/me", "/api/logout", "/api/health", "/api/strategies",
+            # their own account through the same pages as the lab (each route answers for the signed-in user only,
+            # api/viewer.py): Live, Setup, Reports
+            "/api/live/snapshot", "/api/live/candles", "/api/live/start", "/api/live/stop", "/api/live/close",
+            "/api/live/resume", "/api/setups", "/api/reports", "/api/reports/live", "/ws/live")
+USER_PREFIXES = ("/api/alpaca/", "/api/my/", "/api/jobs/",   # their connection, their bot, their report's progress
+                 "/reports/", "/docs/")                      # their own reports (served from their folder), the Help
+USER_READ_ONLY = ("/api/news/status", "/api/news/items", "/api/news/scores", "/api/news/impact",
+                  "/api/news/guard-study")                   # the shared market news: reading only (no Claude, no studies)
 
 _fails: Dict[str, deque] = defaultdict(deque)
 _locked: Dict[str, float] = {}
@@ -193,8 +200,10 @@ class AuthMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         name = session_user(cookie_from_header(headers.get("cookie")))
         path = scope.get("path", "")
+        method = scope.get("method", "GET")
         if name and (role_of(name) == "admin" or not path.startswith(("/api/", "/ws/", "/reports/", "/docs/"))
-                     or path in USER_API or path.startswith(USER_PREFIXES)):
+                     or path in USER_API or path.startswith(USER_PREFIXES)
+                     or (path in USER_READ_ONLY and method == "GET")):
             return await self.app(scope, receive, send)
         if name:                                        # an invited user: nothing of the admin's account
             if scope["type"] == "websocket":

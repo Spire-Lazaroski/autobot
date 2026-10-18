@@ -12,6 +12,8 @@ PW = "correct horse battery"
 def lab(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "LOGS", tmp_path)
     monkeypatch.setattr(users, "DB_PATH", tmp_path / "users.db")
+    from api import userbots
+    monkeypatch.setattr(userbots, "USERS_HOME", tmp_path / "users")      # users' homes: never the real data/users
     monkeypatch.setattr(auth, "_key", None)
     monkeypatch.setenv("AUTH_REQUIRED", "1")
     monkeypatch.setenv("LAB_USER", "spire")
@@ -52,14 +54,14 @@ def test_invited_user_sees_nothing_of_the_admins_account(lab):
     token = _invite(lab)
     guest = TestClient(lab)
     guest.post("/api/signup", json={"invite": token, "user": "ana", "password": "a long password 1"})
-    for path in ("/api/live/snapshot", "/api/config", "/api/admin/users", "/api/reports", "/reports/x.html"):
+    for path in ("/api/config", "/api/admin/users", "/api/recal/proposal", "/api/universe"):
         assert guest.get(path).status_code == 403, path
-    assert guest.post("/api/live/start").status_code == 403
-    assert guest.post("/api/live/close", json={"symbols": ["VOO"], "confirm": True}).status_code == 403
-    assert guest.post("/api/setups", json={"name": "growth", "confirm": True}).status_code == 403
-    with pytest.raises(Exception):
-        with guest.websocket_connect("/ws/live") as ws:
-            ws.receive_json()
+    assert guest.put("/api/config", json={}).status_code == 403
+    assert guest.post("/api/reports/backtest", json={}).status_code == 403
+    assert guest.get("/api/reports").json()["reports"] == []                     # their own (empty) folder, not the lab's
+    assert guest.get("/reports/x.html").status_code == 404
+    assert guest.post("/api/live/start").status_code == 409                       # their own bot: no setup / account yet
+    assert guest.post("/api/live/close", json={"symbols": ["VOO"], "confirm": True}).status_code == 400
     assert guest.get("/api/me").status_code == 200 and guest.get("/api/health").status_code == 200
 
 

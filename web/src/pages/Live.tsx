@@ -50,6 +50,7 @@ interface Snapshot {
   log: string[];
   log_entries?: LogEntry[];
   news?: { running: boolean; supervisor: boolean };
+  viewer?: "lab" | "user";
   paused?: string[];
   equity_today?: EquityRow[];
   jobs_vs_hold?: JobsVsHold | null;
@@ -339,7 +340,7 @@ export function Live() {
             </Panel>
           </div>
 
-          <JobsEditor botRunning={!!bot?.running} />
+          {d?.viewer !== "user" && <JobsEditor botRunning={!!bot?.running} />}
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             <Panel title="Config changes seen by the bot">

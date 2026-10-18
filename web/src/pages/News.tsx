@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { SortTable } from "../components/SortTable";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
-import { api, useJob, type Job, type Row } from "../lib/api";
+import { api, useJob, type Job, type Row, useMe } from "../lib/api";
 import { fmt, nyTime } from "../lib/format";
 import { NewsGuardStudy } from "./NewsGuardStudy";
 import { NewsImpact } from "./NewsImpact";
@@ -96,6 +96,7 @@ interface ScoresRes {
 }
 
 function ScoresPanel({ symbols }: { symbols: string[] }) {
+  const me = useMe();   // invited users read the news; running studies stays the lab's
   const [scorer, setScorer] = useState<"rules" | "claude">("rules");
   const [cat, setCat] = useState("");
   const [sym, setSym] = useState("");
@@ -135,7 +136,7 @@ function ScoresPanel({ symbols }: { symbols: string[] }) {
         <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px]">
           <span className="text-muted">Claude scoring for the {fmt(q.data.estimate.events, 0)} stories not yet scored by Claude:
             about <b>${fmt(q.data.estimate.cost_usd, 2)}</b> (≈ ${fmt(q.data.estimate.cost_usd_batch, 2)} via the Batch API), {q.data.estimate.basis}.</span>
-          <button className="btn" disabled={!!busy} onClick={() => runClaude(50)}>{busy ? <Spinner /> : <i className="bi bi-stars" />} Score the newest 50 with Claude</button>
+          {me.data?.role !== "user" && <button className="btn" disabled={!!busy} onClick={() => runClaude(50)}>{busy ? <Spinner /> : <i className="bi bi-stars" />} Score the newest 50 with Claude</button>}
           {busy && <span className="text-muted">{job.data?.message}</span>}
           {job.data?.status === "done" && <span className="text-up">Scored {job.data.result?.scored}, failed {job.data.result?.failed}.</span>}
           {(err || job.data?.status === "error") && <span className="text-down">{err || job.data?.error}</span>}

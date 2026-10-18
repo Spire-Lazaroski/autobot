@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -49,17 +49,33 @@ def _meta(p) -> Dict:
             "created": int(p.stat().st_mtime), "size": p.stat().st_size}
 
 
+def _dir(request: Request):
+    """The signed-in account's report folder: the lab's reports/, or an invited user's own."""
+    from .viewer import of
+    v = of(request)
+    return (v.reports if v.is_user else rpt.REPORTS), v
+
+
 @router.get("/api/reports")
-def list_reports():
-    rpt.REPORTS.mkdir(exist_ok=True)
-    items = sorted((_meta(p) for p in rpt.REPORTS.glob("*.html")), key=lambda m: m["created"], reverse=True)
+def list_reports(request: Request):
+    d, v = _dir(request)
+    d.mkdir(parents=True, exist_ok=True)
+    items = sorted((_meta(p) for p in d.glob("*.html")), key=lambda m: m["created"], reverse=True)
+    if v.is_user:   # their own report's state, not the lab's
+        try:
+            err = (d / ".last_error.txt").read_text(encoding="utf-8")
+        except OSError:
+            err = None
+        return {"reports": items, "auto": {"enabled": True, "next_run": _auto.get("next_run"),
+                                           "last_run": items[0]["created"] if items else None, "last_error": err}}
     return {"reports": items, "auto": _auto}
 
 
 @router.get("/reports/{fname}")
-def serve(fname: str):
-    p = (rpt.REPORTS / fname).resolve()
-    if p.parent != rpt.REPORTS.resolve() or p.suffix not in (".html", ".pdf") or not p.exists():
+def serve(fname: str, request: Request):
+    d, _ = _dir(request)
+    p = (d / fname).resolve()
+    if p.parent != d.resolve() or p.suffix not in (".html", ".pdf") or not p.exists():
         raise HTTPException(404, "No such report")
     return FileResponse(p, media_type="application/pdf" if p.suffix == ".pdf" else "text/html")
 
@@ -82,16 +98,26 @@ def _live_name(d0: date, d1: date) -> str:
 
 
 @router.post("/api/reports/live")
-def generate_live(req: LiveReportReq):
+def generate_live(req: LiveReportReq, request: Request):
     d0, d1 = req.date_from, req.date_to or req.date_from
     if d1 < d0:
         raise HTTPException(422, "The end date is before the start date")
+    d, v = _dir(request)
+    extra = {}
+    if v.is_user:
+        import yaml
+
+        from .viewer import trading_client
+        try:
+            extra = {"tc": trading_client(v), "config": yaml.safe_load(v.cfg_path.read_text(encoding="utf-8")), "logs": v.logs}
+        except (RuntimeError, OSError) as e:
+            raise HTTPException(400, "Connect your account and choose your setup first.") from e
 
     def work(progress):
         progress(0.1, "reading the account and decision log")
-        ri = rpt.from_live(d0, d1)
+        ri = rpt.from_live(d0, d1, **extra)
         progress(0.6, "writing HTML and PDF")
-        return {**rpt.write(ri, _live_name(d0, d1)), "name": _live_name(d0, d1)}
+        return {**rpt.write(ri, _live_name(d0, d1), out_dir=d), "name": _live_name(d0, d1)}
 
     return jobs.submit("report", work).public()
 
@@ -153,10 +179,31 @@ def auto_tick(tc, now: Optional[datetime] = None) -> Optional[str]:
         return None
     ri = rpt.from_live(day, day, tc=tc)
     rpt.write(ri, day.isoformat())
+    _user_reports(day)
     rpt.REPORTS.mkdir(exist_ok=True)
     AUTO_STATE.write_text(json.dumps({"last_date": day.isoformat(), "at": now.isoformat()}))
     _auto.update(last_run=now.isoformat(), last_error=None)
     return day.isoformat()
+
+
+def _user_reports(day) -> None:
+    """Each invited user's own daily report (their account, their bot's records, their folder), right after the
+    lab's. One user's problem never stops the others or the lab's report."""
+    import yaml
+
+    from . import userbots
+    from .viewer import for_user, trading_client
+    for name, st in userbots.all_settings().items():
+        v = for_user(name)
+        if not v.cfg_path.exists():
+            continue
+        try:
+            ri = rpt.from_live(day, day, tc=trading_client(v), config=yaml.safe_load(v.cfg_path.read_text(encoding="utf-8")),
+                               logs=v.logs)
+            rpt.write(ri, day.isoformat(), out_dir=v.reports)
+        except Exception as e:  # noqa: BLE001
+            v.reports.mkdir(parents=True, exist_ok=True)
+            (v.reports / ".last_error.txt").write_text(f"{day}: {type(e).__name__}: {e}", encoding="utf-8")
 
 
 # ----------------------------------------------------------------- nightly recalibration
