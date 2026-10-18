@@ -78,6 +78,7 @@ def test_container_files():
     assert "\r" not in ep
     assert "touch /app/STOP" in ep                      # a stop closes the jobs and keeps the long-term holdings
     assert "rm -rf" not in ep                           # never deletes saved state
+    assert "rm -f /app/logs/run_news.pid /app/logs/run_bot.pid" in ep   # stale supervisor locks from an older container
     assert "rm -f /app/STOP" in ep and "bot.pid" not in ep.split("rm -f")[1].splitlines()[0]   # the lock survives an update overlap
     assert ep.index("docker/serve.py") < ep.index("run_news.py") < ep.index("run_bot.py")       # /health answers first
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
