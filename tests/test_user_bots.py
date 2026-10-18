@@ -107,7 +107,7 @@ def test_each_user_sees_only_their_own_bot(lab):
     a, b = lab.ana.get("/api/my/bot").json(), lab.bob.get("/api/my/bot").json()
     assert a["user"] == "ana" and a["settings"]["setup"] == "growth"
     assert b["user"] == "bob" and b["settings"]["setup"] == "careful" and b["settings"]["jobs_on"] is True
-    assert lab.ana.get("/api/live/snapshot").status_code == 403
+    assert lab.ana.get("/api/config").status_code == 403                        # the lab's own settings stay closed
     assert lab.admin.get("/api/my/bot").status_code == 400                       # the lab's bot is on the Live page
     rows = {u["name"]: u for u in lab.admin.get("/api/admin/users").json()["users"]}
     assert rows["ana"]["setup"] == "growth" and rows["bob"]["connected"] is True

@@ -17,6 +17,8 @@ def lab(monkeypatch, tmp_path):
     monkeypatch.setattr(credentials, "LOGS", tmp_path)
     monkeypatch.setattr(credentials, "_fernet", None)
     monkeypatch.setattr(users, "DB_PATH", tmp_path / "users.db")
+    from api import userbots
+    monkeypatch.setattr(userbots, "USERS_HOME", tmp_path / "users")      # users' homes: never the real data/users
     monkeypatch.setattr(auth, "_key", None)
     for k, v in {"AUTH_REQUIRED": "1", "LAB_USER": "spire", "LAB_PASSWORD_HASH": auth.make_hash(PW),
                  "ALPACA_OAUTH_CLIENT_ID": "cid", "ALPACA_OAUTH_CLIENT_SECRET": "csecret", "APP_URL": "https://spire.example"}.items():
@@ -94,7 +96,7 @@ def test_paper_keys_fallback_and_disconnect(lab):
 
 def test_connecting_still_shows_nothing_of_the_admins_account(lab):
     lab.guest.post("/api/alpaca/keys", json={"key_id": "PKGOOD", "secret_key": "sss"})
-    assert lab.guest.get("/api/live/snapshot").status_code == 403
+    assert lab.guest.get("/api/config").status_code == 403                      # the lab's own settings stay closed
     assert lab.admin.get("/api/alpaca/status").json()["method"] == "server"
     assert lab.admin.get("/api/alpaca/connect", follow_redirects=False).status_code == 400
 

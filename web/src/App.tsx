@@ -39,12 +39,13 @@ const PAGES: Record<string, { title: string; Component: ComponentType }> = {
   help: { title: "Help & operating procedure", Component: Help },
   users: { title: "Users & invites", Component: Users },
 };
+const USER_PAGES = new Set(["live", "news", "reports", "help", "account"]);
 
 function useHashPage() {
   const read = () => {
     const h = window.location.hash.replace(/^#\/?/, "");
     if (h === "walkforward") return "search"; // old link
-    return PAGES[h] ? h : "live";
+    return PAGES[h] || h === "account" ? h : "live";
   };
   const [page, setPage] = useState(read);
   useEffect(() => {
@@ -59,8 +60,10 @@ export default function App() {
   const page = useHashPage();
   const health = useHealth();
   const me = useMe();
-  const invited = me.data?.role === "user";               // an invited user: the welcome page, nothing of the lab's account
-  const { title, Component } = invited ? { title: "Welcome", Component: () => <Welcome name={me.data?.user ?? ""} /> } : PAGES[page];
+  const invited = me.data?.role === "user";               // an invited user: their own Live and Reports, News, Help, Account
+  const shown = invited && !USER_PAGES.has(page) ? "live" : !invited && page === "account" ? "live" : page;
+  const { title, Component } = shown === "account"
+    ? { title: "Your account", Component: () => <Welcome name={me.data?.user ?? ""} /> } : PAGES[shown];
   useEffect(() => {
     document.body.classList.add("has-tabs");
     document.title = `${title} · Spire Analytics`;
@@ -68,7 +71,7 @@ export default function App() {
   return (
     <div className="min-h-full flex flex-col">
       <div className="sticky top-0 z-40">
-        <SpireHeader active={page} title={title} status={
+        <SpireHeader active={shown} title={title} status={
           <span className="flex items-center gap-2 text-[11.5px] text-muted whitespace-nowrap">
             <span className="flex items-center gap-1.5" title={health.isError ? "The lab API is not answering" : "Lab API connected"}>
               <span className={`h-2 w-2 rounded-full ${health.isError ? "bg-down" : health.data ? "bg-up" : "bg-dim"}`} />

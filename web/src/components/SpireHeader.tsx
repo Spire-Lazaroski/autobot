@@ -10,24 +10,28 @@ export interface NavItem {
   label: string;
   icon: string; // Bootstrap Icons class
   admin?: boolean; // shown to the admin only
+  user?: boolean;  // shown to invited users (their own Live, Reports, the shared News and Help, their Account)
+  userOnly?: boolean;
 }
 
 export const NAV: NavItem[] = [
-  { id: "live", label: "Live", icon: "bi-broadcast" },
+  { id: "live", label: "Live", icon: "bi-broadcast", user: true },
   { id: "lab", label: "Lab", icon: "bi-bar-chart-line" },
   { id: "search", label: "Search", icon: "bi-search" },
   { id: "shifting", label: "Shifting", icon: "bi-shuffle" },
-  { id: "news", label: "News", icon: "bi-newspaper" },
+  { id: "news", label: "News", icon: "bi-newspaper", user: true },
   { id: "recal", label: "Recalibrate", icon: "bi-sliders" },
-  { id: "reports", label: "Reports", icon: "bi-file-earmark-text" },
-  { id: "help", label: "Help", icon: "bi-question-circle" },
+  { id: "reports", label: "Reports", icon: "bi-file-earmark-text", user: true },
+  { id: "help", label: "Help", icon: "bi-question-circle", user: true },
+  { id: "account", label: "Account", icon: "bi-person-circle", user: true, userOnly: true },
   { id: "users", label: "Users", icon: "bi-people", admin: true },
 ];
 
 export function SpireHeader({ active, title, status }: { active: string; title?: string; status?: React.ReactNode }) {
   const me = useMe();
   const role = me.data?.role;
-  const nav = role === "user" ? [] : NAV.filter((n) => !n.admin || role === "admin");   // invited users: their own pages only
+  const nav = role === "user" ? NAV.filter((n) => n.user)                          // invited users: their own pages only
+    : NAV.filter((n) => !n.userOnly && (!n.admin || role === "admin"));
   return (
     <>
       <header className="spire-hdr">

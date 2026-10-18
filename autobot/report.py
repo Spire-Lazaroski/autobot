@@ -145,7 +145,7 @@ def _ny_day_bounds(d0: date, d1: date):
     return pd.Timestamp(a), pd.Timestamp(b)
 
 
-def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> ReportInput:
+def from_live(d0: date, d1: date, tc=None, config: Dict | None = None, logs: Path | None = None) -> ReportInput:
     """The paper account between two New York dates (inclusive)."""
     import yaml
     from alpaca.trading.enums import QueryOrderStatus
@@ -157,7 +157,7 @@ def from_live(d0: date, d1: date, tc=None, config: Dict | None = None) -> Report
         tc = with_timeout(TradingClient(*_keys(), paper=True))
     cfg = config or yaml.safe_load((ROOT / "config.yaml").read_text())
     a, b = _ny_day_bounds(d0, d1)
-    recs = [r for r in read_jsonl(LOGS / "decisions.jsonl")
+    recs = [r for r in read_jsonl((logs or LOGS) / "decisions.jsonl")
             if r.get("source", "live") == "live" and a <= pd.Timestamp(r.get("bar_time") or r["time"]) < b]
     notes = []
     if not recs:
@@ -905,9 +905,10 @@ Generated {generated} (Skopje) by the Spire Analytics trading lab.</footer>
 
 
 # ----------------------------------------------------------------- output
-def write(ri: ReportInput, name: str, pdf: bool = True) -> Dict[str, str]:
-    REPORTS.mkdir(exist_ok=True)
-    html_path = REPORTS / f"{name}.html"
+def write(ri: ReportInput, name: str, pdf: bool = True, out_dir: Path | None = None) -> Dict[str, str]:
+    out_dir = out_dir or REPORTS          # an invited user's reports: their own folder (api/viewer.py)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    html_path = out_dir / f"{name}.html"
     html_path.write_text(render(ri), encoding="utf-8")
     out = {"html": str(html_path)}
     if pdf:

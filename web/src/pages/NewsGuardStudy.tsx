@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ErrorBox, Panel, Spinner } from "../components/ui";
-import { api, useJob, type Job } from "../lib/api";
+import { api, useJob, type Job, useMe } from "../lib/api";
 import { fmt } from "../lib/format";
 
 interface Diff { days: number; mean_bps: number; ci95_bps: [number, number]; days_different?: number; significant: boolean }
@@ -58,6 +58,7 @@ function CompareTable({ c }: { c: Compare }) {
 }
 
 export function NewsGuardStudy() {
+  const me = useMe();   // invited users read the news; running studies stays the lab's
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["news-guard-study"], queryFn: () => api<Study>("/news/guard-study"), retry: false });
   const [jobId, setJobId] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export function NewsGuardStudy() {
 
   return (
     <Panel title="Does the news guard help? (backtest)" right={
-      <button className="btn" onClick={recompute} disabled={!!busy}>{busy ? <Spinner /> : <i className="bi bi-arrow-repeat" />} Recompute</button>}>
+      me.data?.role !== "user" ? <button className="btn" onClick={recompute} disabled={!!busy}>{busy ? <Spinner /> : <i className="bi bi-arrow-repeat" />} Recompute</button> : null}>
       {busy && <p className="text-[12px] text-muted mb-2">{job.data?.message}…</p>}
       {job.data?.status === "error" && <p className="text-[12px] text-down mb-2">{job.data.error}</p>}
       {q.isLoading && <Spinner />}

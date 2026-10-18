@@ -371,22 +371,39 @@ class SetupReq(BaseModel):
 
 
 @app.get("/api/setups")
-def setups():
-    """The three setups (autobot.presets), which one config.yaml matches, and their backtest."""
+def setups(request: Request):
+    """The three setups (autobot.presets), which one the signed-in account uses, and their backtest."""
     from autobot import presets
+
+    from . import userbots
+    from .viewer import of
+    v = of(request)
+    if v.is_user:
+        st = userbots.settings(v.user)
+        return {"presets": presets.PRESETS, "current": st["setup"] if st else None, "study": presets.saved()}
     cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     return {"presets": presets.PRESETS, "current": presets.current(cfg["live"]), "study": presets.saved()}
 
 
 @app.post("/api/setups")
-def choose_setup(req: SetupReq):
+def choose_setup(req: SetupReq, request: Request):
     """Switch the long-term holdings to a setup (core and rotation sizes only). The bot reads it at its next bar
-    and rebalances at the next open tick."""
+    and rebalances at the next open tick. An invited user changes their own (their jobs choice stays)."""
     from autobot import presets
+
+    from . import userbots
+    from .viewer import of
     if req.name not in presets.PRESETS:
         raise HTTPException(404, f"unknown setup {req.name}")
     if not req.confirm:
         raise HTTPException(400, "Changing the setup resizes the long-term holdings. Send {\"confirm\": true}.")
+    v = of(request)
+    if v.is_user:
+        st = userbots.settings(v.user) or {"jobs_on": False}
+        userbots.save_settings(v.user, req.name, st["jobs_on"])
+        p = presets.PRESETS[req.name]
+        return {"ok": True, "current": req.name,
+                "message": f"Setup changed to {p['label']}. Your bot resizes at its next tick while the market is open (otherwise at the next open)."}
     cfg = presets.apply(yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")), req.name)
     _validate_config(cfg)
     target = os.path.realpath(CONFIG_PATH)

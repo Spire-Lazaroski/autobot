@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Plot } from "../components/Plot";
 import { ErrorBox, Kpi, Panel, Spinner } from "../components/ui";
-import { api, useJob, type Job } from "../lib/api";
+import { api, useJob, type Job, useMe } from "../lib/api";
 import { C } from "../lib/chart";
 import { fmt } from "../lib/format";
 
@@ -31,6 +31,7 @@ const GROUPINGS: { key: string; label: string; src: (d: Impact) => Group[]; sign
 const sig = (c?: Cell, zero = 0) => !!c && c.lo !== null && c.hi !== null && (c.lo > zero || c.hi < zero);
 
 export function NewsImpact() {
+  const me = useMe();   // invited users read the news; running studies stays the lab's
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["news-impact"], queryFn: () => api<Impact>("/news/impact"), retry: false });
   const [grouping, setGrouping] = useState(GROUPINGS[0].key);
@@ -51,7 +52,7 @@ export function NewsImpact() {
 
   return (
     <Panel title="Market impact of news (event study)" right={
-      <button className="btn" onClick={recompute} disabled={!!busy}>{busy ? <Spinner /> : <i className="bi bi-arrow-repeat" />} Recompute</button>}>
+      me.data?.role !== "user" ? <button className="btn" onClick={recompute} disabled={!!busy}>{busy ? <Spinner /> : <i className="bi bi-arrow-repeat" />} Recompute</button> : null}>
       {busy && <p className="text-[12px] text-muted mb-2">{job.data?.message}…</p>}
       {q.isLoading && <Spinner />}
       {q.error && <ErrorBox error={q.error} />}
