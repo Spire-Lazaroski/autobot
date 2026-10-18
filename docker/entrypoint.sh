@@ -26,6 +26,10 @@ ln -sf "$STATE/config.yaml" /app/config.yaml
 # an old STOP file must not stop a new bot. The lock (logs/bot.pid) is kept: during an update the old version
 # runs on for about 30 s with the same /state, and its lock is what keeps a second bot from being started
 rm -f /app/STOP
+# the supervisors' locks hold process numbers from an earlier container; numbers restart in a new one, so an old
+# lock can point at an unrelated live process and make the new supervisor think one is already running (the news
+# collector stayed off for days that way). They have no heartbeat, unlike the bot's own lock, which is kept.
+rm -f /app/logs/run_news.pid /app/logs/run_bot.pid
 
 if [ -z "${ALPACA_API_KEY:-}" ] || [ -z "${ALPACA_SECRET_KEY:-}" ]; then
   echo "ALPACA_API_KEY / ALPACA_SECRET_KEY are not set: the lab starts, the bot and the news collector do not."
