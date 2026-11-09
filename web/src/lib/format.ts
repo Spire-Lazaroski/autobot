@@ -35,3 +35,10 @@ export const FAMILY_ICON: Record<string, string> = {
   benchmark: "bi-flag", trend: "bi-graph-up-arrow", mean_reversion: "bi-arrow-left-right",
   breakout: "bi-rocket-takeoff", intraday: "bi-clock", meta: "bi-diagram-3",
 };
+
+/** A share quantity: whole shares as they are, fractional shares (the bot buys by amount) with up to 4 decimals. */
+export function qty(v: number | string | null | undefined): string {
+  const n = Number(v);
+  if (v === null || v === undefined || !Number.isFinite(n)) return "–";
+  return Number.isInteger(n) ? fmt(n, 0) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}

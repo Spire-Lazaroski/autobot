@@ -151,7 +151,7 @@ def vol_target(closes: pd.Series, cfg: Optional[Dict]) -> Optional[Dict]:
 
 
 def rebalance(qty: float, price: float, equity: float, cfg: Dict, first_today: bool,
-              target_pct: Optional[float] = None, why_target: str = "") -> Optional[Dict]:
+              target_pct: Optional[float] = None, why_target: str = "", fractional: bool = False) -> Optional[Dict]:
     """The core order for this tick, or None. Acts only on the first open tick of a trading day:
     to the target when nothing is held yet, or when the weight is more than the band away.
     target_pct (volatility targeting) replaces allocation_pct when given."""
@@ -159,13 +159,14 @@ def rebalance(qty: float, price: float, equity: float, cfg: Dict, first_today: b
     if not c["enabled"] or not first_today or price <= 0 or equity <= 0:
         return None
     pct = float(target_pct if target_pct is not None else c["allocation_pct"])
-    target = float(np.floor(equity * pct / 100 / price))
+    from .sizing import FRACTION_DP, shares, tradable
+    target = shares(equity * pct / 100, price, fractional)
     weight = qty * price / equity * 100
     drift = weight - pct
     if qty > 0 and abs(drift) <= float(c["rebalance_band_pct"]):
         return None
-    delta = target - qty
-    if delta == 0:
+    delta = round(target - qty, FRACTION_DP)
+    if delta == 0 or not tradable(delta, price, fractional):
         return None
     why = (f"Core: buying {c['symbol']} up to {pct:g}% of the account" if qty == 0 else
            f"Core: {c['symbol']} is {weight:.1f}% of the account, more than {c['rebalance_band_pct']:g} points "

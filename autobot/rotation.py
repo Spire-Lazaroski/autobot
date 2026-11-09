@@ -127,8 +127,11 @@ def targets(daily: Dict[str, pd.Series], cfg: Optional[Dict], today: str) -> Dic
             "invested_%": round(sum(weights.values()), 2)}
 
 
-def orders(held: Dict[str, float], prices: Dict[str, float], equity: float, tgt: Dict, cfg: Optional[Dict]) -> List[Dict]:
-    """Whole-share orders that bring the sleeve to this month's targets (beyond the band only)."""
+def orders(held: Dict[str, float], prices: Dict[str, float], equity: float, tgt: Dict, cfg: Optional[Dict],
+           fractional=False) -> List[Dict]:
+    """Orders that bring the sleeve to this month's targets (beyond the band only): whole shares, or fractional
+    where `fractional` allows it (True for all, or a function symbol -> bool)."""
+    from .sizing import FRACTION_DP, shares, tradable
     c = settings(cfg)
     band = float(c["rebalance_band_pct"])
     out = []
@@ -141,11 +144,12 @@ def orders(held: Dict[str, float], prices: Dict[str, float], equity: float, tgt:
         qty = float(held.get(sym, 0.0))
         w_now = qty * px / equity * 100
         w_tgt = float(tgt["weights"].get(sym, 0.0))
-        target_qty = float(np.floor(equity * w_tgt / 100 / px))
+        frac = fractional(sym) if callable(fractional) else bool(fractional)
+        target_qty = shares(equity * w_tgt / 100, px, frac)
         if w_tgt > 0 and qty > 0 and abs(w_now - w_tgt) <= band:
             continue
-        delta = target_qty - qty
-        if delta == 0:
+        delta = round(target_qty - qty, FRACTION_DP)
+        if delta == 0 or (target_qty > 0 and not tradable(delta, px, frac)):
             continue
         why = tgt["reasons"].get(sym) or f"no longer in the top {c['top_n']}: sold"
         out.append({"symbol": sym, "qty": delta, "target_qty": target_qty, "weight_%": round(w_now, 2), "target_%": w_tgt,

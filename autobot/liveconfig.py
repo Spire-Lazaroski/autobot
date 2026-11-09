@@ -44,6 +44,8 @@ def validate_live(live: Dict) -> List[str]:
         return ["live section missing"]
     if live.get("timeframe") not in TIMEFRAMES:
         errs.append(f"timeframe must be one of {list(TIMEFRAMES)}")
+    if "fractional" in live and not isinstance(live["fractional"], bool):
+        errs.append("fractional must be true or false")
     paused = live.get("paused")
     if paused is not None and (not isinstance(paused, list) or not all(isinstance(s, str) and s for s in paused)):
         errs.append("paused must be a list of symbols")
