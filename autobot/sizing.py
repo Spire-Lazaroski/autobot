@@ -138,12 +138,29 @@ def _gross_cap(usd: Dict[str, float], equity: float, s: Dict, reserved_pct: floa
     return usd
 
 
-def to_qty(usd: float, price: float, direction: float, crypto: bool) -> float:
-    """Whole shares for stocks (rounded down), fractional crypto (4 decimals, rounded down)."""
+FRACTION_DP = 4          # fractional quantities: 4 decimals, rounded down
+MIN_NOTIONAL_USD = 1.0   # Alpaca's smallest fractional order
+
+
+def shares(usd: float, price: float, fractional: bool) -> float:
+    """How many shares `usd` buys at `price`: whole shares, or fractional (4 decimals), always rounded down."""
+    if price <= 0 or usd <= 0:
+        return 0.0
+    raw = usd / price
+    return float(np.floor(raw * 10 ** FRACTION_DP) / 10 ** FRACTION_DP) if fractional else float(np.floor(raw))
+
+
+def tradable(delta: float, price: float, fractional: bool) -> bool:
+    """An order worth sending: at least one whole share, or with fractions at least Alpaca's $1 minimum."""
+    return abs(delta) * price >= MIN_NOTIONAL_USD if fractional else abs(delta) >= 1
+
+
+def to_qty(usd: float, price: float, direction: float, crypto: bool, fractional: bool = False) -> float:
+    """Whole shares for stocks (rounded down) unless `fractional` (live.fractional and the stock allows it);
+    fractional crypto (4 decimals, rounded down)."""
     if price <= 0 or direction == 0:
         return 0.0
-    raw = usd / price * abs(direction)
-    q = np.floor(raw * 1e4) / 1e4 if crypto else float(np.floor(raw))
+    q = shares(usd * abs(direction), price, crypto or fractional)
     return float(q) * (1 if direction > 0 else -1)
 
 

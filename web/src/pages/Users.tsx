@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Confirm } from "../components/Confirm";
 import { ErrorBox, Panel } from "../components/ui";
 import { api } from "../lib/api";
-import { fmt, signed } from "../lib/format";
+import { fmt, signed, qty } from "../lib/format";
 
 interface User { name: string; created: number; invited_by: string | null; note: string | null; disabled: number; last_login: number | null;
   setup?: string | null; jobs_on?: boolean | null; connected?: boolean; bot_running?: boolean }
@@ -300,7 +300,7 @@ function MyAccount({ data }: { data: MyBot }) {
               <th className="text-right">Value</th><th className="text-right">P&amp;L</th></tr></thead>
             <tbody>{a.positions.map((p) => (
               <tr key={p.symbol} className="border-t border-line/60"><td className="num font-semibold py-1">{p.symbol}</td>
-                <td className="num text-right">{fmt(p.qty, 0)}</td><td className="num text-right">${fmt(p.market_value, 0)}</td>
+                <td className="num text-right">{qty(p.qty)}</td><td className="num text-right">${fmt(p.market_value, 0)}</td>
                 <td className={`num text-right ${p.unrealized_pl < 0 ? "text-down" : "text-up"}`}>{signed(p.unrealized_plpc, 2)}%</td></tr>))}</tbody>
           </table>) : <p className="text-[12.5px] text-muted">No holdings yet: the bot buys at the next market open after you start it.</p>}
       </>)}

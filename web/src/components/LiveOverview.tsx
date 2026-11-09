@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { C } from "../lib/chart";
 import { brand, chart } from "../theme";
-import { fmt, nyTime, pnl, signed } from "../lib/format";
+import { fmt, nyTime, pnl, signed, qty } from "../lib/format";
 import type { Row } from "../lib/api";
 import { Plot } from "./Plot";
 import { SortTable } from "./SortTable";
@@ -146,7 +146,7 @@ export function CoreCard({ core }: { core?: CoreLike }) {
       <div className="flex items-baseline justify-between gap-2">
         <span><span className="num text-[17px] font-semibold">{core["weight_%"] !== undefined && core["weight_%"] !== null ? `${fmt(core["weight_%"], 1)}%` : "–"}</span>
           <span className="text-muted"> of {fmt(tgt, 1)}% target</span></span>
-        <span className="num text-muted">{fmt(core.qty, 0)} sh · {core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</span>
+        <span className="num text-muted">{qty(core.qty)} sh · {core.value !== undefined ? `$${fmt(core.value, 0)}` : "–"}</span>
       </div>
       {core["weight_%"] !== undefined && core["weight_%"] !== null && <ShareBar now={core["weight_%"]} target={tgt} max={50} />}
       <span className="text-muted">{v ? `Volatility ${fmt(v.vol_pct, 1)}% vs normal ${fmt(v.normal_pct, 1)}% · ` : ""}band {fmt(tgt - core.rebalance_band_pct, 1)}–{fmt(tgt + core.rebalance_band_pct, 1)}%</span>
@@ -179,7 +179,7 @@ export function RotationCard({ rot }: { rot?: RotationLike }) {
               <tr key={r.symbol} className={t.weights[r.symbol] ? "font-semibold" : "text-muted"}>
                 <td>{r.rank}</td><td>{r.symbol}</td><td className="num text-right">{fmt(r["momentum_%"], 1)}%</td>
                 <td className="text-center">{r.above_trend ? "above" : "below"}</td><td className="num text-right">{fmt(r["volatility_%"], 0)}%</td>
-                <td className="num text-right">{rot.held[r.symbol] ? fmt(rot.held[r.symbol], 0) : "–"}</td></tr>))}</tbody>
+                <td className="num text-right">{rot.held[r.symbol] ? qty(rot.held[r.symbol]) : "–"}</td></tr>))}</tbody>
           </table>)}
       </>)}
     </Card>
@@ -229,7 +229,7 @@ export function EquityChart({ rows, fills }: { rows: EquityRow[]; fills: { t: nu
 
 const POS_COLS = [
   { key: "symbol", label: "Symbol", render: (r: Row) => <span className="num font-semibold">{r.symbol}</span> },
-  { key: "qty", label: "Qty", digits: 0 },
+  { key: "qty", label: "Qty", render: (r: Row) => <span className="num">{qty(r.qty)}</span> },
   { key: "market_value", label: "Value", digits: 0 },
   { key: "unrealized_intraday_pl", label: "Today $", tone: true },
   { key: "unrealized_plpc", label: "P&L %", tone: true },

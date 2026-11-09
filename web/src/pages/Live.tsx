@@ -10,7 +10,7 @@ import { ErrorBox, Panel, Spinner } from "../components/ui";
 import { Chip, CoreCard, EquityChart, JobsCard, LogPanel, PositionsSplit, RotationCard, Section, ShareBar, SplitBar, Tile, toneOf,
   type EquityRow, type JobsVsHold, type LogEntry, type Split } from "../components/LiveOverview";
 import { api, type Candles, type Fill, type Row } from "../lib/api";
-import { colorFor, fmt, nyTime, pnl, signed } from "../lib/format";
+import { colorFor, fmt, nyTime, pnl, signed, qty } from "../lib/format";
 import { useLiveSocket } from "../lib/useLiveSocket";
 import { brand, chart } from "../theme";
 
@@ -179,7 +179,7 @@ export function Live() {
 
   const bot = d?.bot;
   const st = d?.status;
-  const longTerm = [st?.core?.enabled ? `${st.core.symbol} (core, ${fmt(st.core.qty, 0)} shares)` : "",
+  const longTerm = [st?.core?.enabled ? `${st.core.symbol} (core, ${qty(st.core.qty)} shares)` : "",
     ...Object.entries(st?.rotation?.enabled ? st.rotation.held : {}).map(([k, v]) => `${k} ${fmt(v, 0)}`)].filter(Boolean).join(", ");
   const longTermSet = useMemo(() => new Set<string>([...(st?.core?.enabled ? [st.core.symbol] : []),
     ...(st?.rotation?.enabled ? st.rotation.symbols : [])]), [st?.core, st?.rotation]);
@@ -420,7 +420,7 @@ function LiveCharts({ symbols, positions, timeframe, views }: {
           {held.map(({ sym: s, pos }) => (
             <Panel key={s} title={<span>
               <span className="num font-semibold">{s}</span>
-              <span className="text-muted font-normal"> · held {fmt(pos.qty, Number(pos.qty) % 1 ? 4 : 0)} @ {fmt(pos.avg_entry_price, 2)} · </span>
+              <span className="text-muted font-normal"> · held {qty(pos.qty)} @ {fmt(pos.avg_entry_price, 2)} · </span>
               <span className={`num font-normal ${pnl(pos.unrealized_pl)}`}>{signed(pos.unrealized_pl)} ({signed(pos.unrealized_plpc, 2)}%)</span>
             </span>}>
               <SymbolChart symbol={s} timeframe={timeframe} view={viewOf(views, s)} entry={entryOf(positions, s)} height={held.length > 1 ? 300 : 360} />

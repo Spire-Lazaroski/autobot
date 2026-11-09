@@ -142,6 +142,8 @@ def config_diff(old: dict, new: dict) -> list[str]:
         a, b = old.get("risk", {}).get(k), new.get("risk", {}).get(k)
         if a != b:
             out.append(f"risk.{k}: {a} -> {b}")
+    if bool(old.get("fractional", True)) != bool(new.get("fractional", True)):
+        out.append(f"fractional: {bool(old.get('fractional', True))} -> {bool(new.get('fractional', True))}")
     if sorted(old.get("paused") or []) != sorted(new.get("paused") or []):
         out.append(f"paused: {sorted(old.get('paused') or [])} -> {sorted(new.get('paused') or [])}")
     if (old.get("trade_rules") or {}) != (new.get("trade_rules") or {}):
@@ -223,6 +225,7 @@ class Bot:
         self.rotation = rotation.settings(live.get("rotation"))
         self.rules = live.get("trade_rules") or {}
         self.paused = set(live.get("paused") or [])   # closed by hand: the bot leaves these symbols alone
+        self.fractional = bool(live.get("fractional", True))   # stocks by exact amount where Alpaca allows it
 
     # ------------------------------------------------------------ hot reload
     def reload_config(self):
@@ -301,7 +304,7 @@ class Bot:
             return None
         side = OrderSide.BUY if qty > 0 else OrderSide.SELL
         tif = TimeInForce.GTC if is_crypto(sym) else TimeInForce.DAY
-        order = self.tc.submit_order(MarketOrderRequest(symbol=sym, qty=abs(qty), side=side, time_in_force=tif))
+        order = self.tc.submit_order(MarketOrderRequest(symbol=sym, qty=round(abs(qty), 6), side=side, time_in_force=tif))
         log.info("ORDER %s %s %s @~%.2f (%s) id=%s", side.value, abs(qty), sym, price, reason, order.id)
         self._log_trade(sym, qty, reason, price, job, order.id, side.value)
         return order
@@ -324,6 +327,23 @@ class Bot:
             return fn(*args, **kw)
         except Exception as e:  # noqa: BLE001
             log.error("decision log failed: %s", e)
+
+    def frac_ok(self, sym: str) -> bool:
+        """Fractional shares for this symbol: live.fractional is on and Alpaca allows fractions of it (asked once a
+        day per symbol; whole shares when it can't be told)."""
+        if not getattr(self, "fractional", False) or is_crypto(sym):
+            return False
+        today = datetime.now(timezone.utc).date().isoformat()
+        cache = self.__dict__.setdefault("_frac_cache", {})
+        hit = cache.get(sym)
+        if hit and hit[0] == today:
+            return hit[1]
+        try:
+            ok = bool(getattr(self.tc.get_asset(sym), "fractionable", False))
+        except Exception:  # noqa: BLE001  unknown: whole shares, as before
+            ok = False
+        cache[sym] = (today, ok)
+        return ok
 
     def core_symbol(self) -> str | None:
         return self.core["symbol"] if self.core.get("enabled") else None
@@ -531,7 +551,8 @@ class Bot:
                         target_dir = 0.0  # no crypto shorting on Alpaca
                     # dollars from autobot.sizing (fixed: min(allocation, max_position_usd)); fractional
                     # targets (ensemble average) size down; whole shares for stocks, 4-decimal crypto
-                    target_qty = sizing.to_qty(budget.get(sym, 0.0), price, target_dir, crypto)
+                    frac = self.frac_ok(sym)
+                    target_qty = sizing.to_qty(budget.get(sym, 0.0), price, target_dir, crypto, frac)
                     delta = round(target_qty - cur, 4)
                     orders = []
                     # crossing zero (long->short) must be two orders on Alpaca
@@ -540,7 +561,7 @@ class Bot:
                         delta = target_qty
                     if trade_rules.small_change(cur, target_qty, float(self.rules.get("min_change_pct", 0) or 0)):
                         delta = 0.0   # only a small nudge to a held position: not worth the trading cost
-                    if abs(delta) > 0 and (crypto or abs(delta) >= 1):
+                    if abs(delta) > 0 and (crypto or sizing.tradable(delta, price, frac)):
                         orders.append(self.submit(sym, delta, reason, price, job["name"]))
                     orders = [o for o in orders if o is not None]
                     traded = round(target_qty - cur, 4) if orders else 0.0
@@ -641,7 +662,7 @@ class Bot:
             b = _download(s, self.tf, datetime.now(timezone.utc) - timedelta(days=5), None, "iex")
             prices[s] = float(b.close.iloc[-1])
         acts = []
-        for o in rotation.orders({s: held.get(s, 0.0) for s in c["symbols"]}, prices, equity, tgt, c):
+        for o in rotation.orders({s: held.get(s, 0.0) for s in c["symbols"]}, prices, equity, tgt, c, self.frac_ok):
             if o["symbol"] in self.paused:
                 log.info("ROTATION %s is paused (closed by hand): no order this month", o["symbol"])
                 continue
@@ -687,7 +708,7 @@ class Bot:
         price = float(bars.close.iloc[-1])
         view.update({"price": price, "value": round(qty * price, 2), "weight_%": round(qty * price / equity * 100, 2) if equity else None})
         cv = self.core_vol or {}
-        order = core.rebalance(qty, price, equity, c, first, cv.get("target_pct"), cv.get("reason", ""))
+        order = core.rebalance(qty, price, equity, c, first, cv.get("target_pct"), cv.get("reason", ""), self.frac_ok(sym))
         self.core_day = today
         if order:
             o = self.submit(sym, order["qty"], order["reason"], price, "core")
